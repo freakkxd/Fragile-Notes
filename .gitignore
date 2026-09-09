@@ -13,3 +13,42 @@ dist/
 .env
 .idea/
 .vscode/
+
+# === VAULT PROTECTION - never commit personal notes ===
+# Если случайно скопируешь волт внутрь репо - всё это игнорируется
+/Desktop/
+vault/
+Vault/
+desktop/
+01\ Home/
+02\ Daily/
+03\ Projects/
+04\ FreakyWiki/
+05\ Sort/
+06\ Media/
+_System/
+Vault/
+*.vault
+Secret/
+Secret
+Private/
+private/
+# Блокируем любые личные .md кроме разрешённых доков репо
+*.md
+!README.md
+!*/README.md
+!CONTRIBUTING.md
+!CHANGELOG.md
+!docs/**/*.md
+# Крипто и E2E
+*.enc
+*.e2e_salt
+.e2e_salt
+# Настройки с путём к волту (содержат /home/fragilich/desktop)
+settings.json
+settings.json.bak
+settings.json.bak.*
+# Базы FTS/embeddings - могут содержать текст заметок
+fragilenotes/data/*.db
+fragilenotes/data/*.sqlite
+enrichment.jsonl
