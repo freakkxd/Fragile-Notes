@@ -1,0 +1,63 @@
+[project]
+name = "fragile-notes"
+version = "0.1.0"
+description = "Fragile Notes — нативный аналог Obsidian: ядро = AO Runner + Fragilich Suite"
+requires-python = ">=3.11"
+dependencies = [
+    "PyGObject>=3.46",
+    "PyYAML>=6.0",
+    "cryptography>=41.0",
+]
+
+[project.scripts]
+fragile-notes = "main:main"
+fragile = "fragilenotes.core.publish:main"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.9",
+    "mypy>=1.13",
+    "types-PyYAML>=6.0",
+    "pytest>=8.0",
+    "pre-commit>=4.0",
+]
+
+[tool.setuptools]
+packages = ["fragilenotes", "fragilenotes.core", "fragilenotes.services", "fragilenotes.ui"]
+py-modules = ["main"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "S", "N"]
+ignore = ["E501", "E402", "F841", "W292", "E702", "S101", "S108", "S110", "S112", "S310", "S311", "S506", "S603", "S607", "N806"]
+exclude = ["__pycache__", ".venv", "venv", "build", "dist", ".git"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = false
+disallow_untyped_defs = false
+check_untyped_defs = false
+show_error_codes = true
+exclude = ["__pycache__", ".venv", "venv", "build", "dist", "tests", "tools"]
+[[tool.mypy.overrides]]
+module = "gi.*"
+ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = "fragilenotes.ui.*"
+ignore_errors = true
+[[tool.mypy.overrides]]
+module = "fragilenotes.services.*"
+disallow_untyped_defs = true
