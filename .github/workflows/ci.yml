@@ -49,11 +49,11 @@ jobs:
           pkg-config --modversion girepository-2.0 || echo "girepository still not found"
       - name: Install dependencies
         run: |
-          pip install -e . || pip install -e . --no-deps
+          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+          pip install -e . --no-deps || pip install -e .
           pip install pytest PyYAML
-        env:
-          PKG_CONFIG_PATH: /usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
       - name: Run tests
-        run: PYTHONPATH=. pytest -q || python tests/run.py
+        run: PYTHONPATH=.:/usr/lib/python3/dist-packages:/usr/lib/python3.11/dist-packages pytest -q || python tests/run.py
         env:
           PKG_CONFIG_PATH: /usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+          PYTHONPATH: .:/usr/lib/python3/dist-packages:/usr/lib/python3.11/dist-packages
