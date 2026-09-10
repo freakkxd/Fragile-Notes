@@ -50,10 +50,6 @@ jobs:
       - name: Install dependencies
         run: |
           export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
-          pip install -e . --no-deps || pip install -e .
-          pip install pytest PyYAML
+          pip install -e . && pip install pytest
       - name: Run tests
-        run: PYTHONPATH=.:/usr/lib/python3/dist-packages:/usr/lib/python3.11/dist-packages pytest -q || python tests/run.py
-        env:
-          PKG_CONFIG_PATH: /usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
-          PYTHONPATH: .:/usr/lib/python3/dist-packages:/usr/lib/python3.11/dist-packages
+        run: pytest -q
