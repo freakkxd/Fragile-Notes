@@ -3,10 +3,16 @@ Type=Application
 Name=Fragile Notes
 GenericName=Personal knowledge manager
 Comment=Нативный аналог Obsidian: ядро = AO Runner + Fragilich Suite
-Exec=/home/fragilich/Проекты/FragileNotes/run.sh
+Exec=fragile-notes
 Icon=dev.fragilich.fragile-notes
 Terminal=false
 Categories=Office;
 Keywords=notes;vault;task;media;
 StartupNotify=true
 StartupWMClass=fragile-notes
+TryExec=fragile-notes
+Actions=VaultChooser;
+
+[Desktop Action VaultChooser]
+Name=Выбрать волт
+Exec=fragile-notes --vault-chooser
