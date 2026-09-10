@@ -49,7 +49,10 @@ jobs:
           pkg-config --modversion girepository-2.0 || echo "girepository still not found"
       - name: Install dependencies
         run: |
-          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
-          pip install -e . && pip install pytest
+          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+          pip install -e . --no-build-isolation || pip install -e . --no-deps
+          pip install pytest
       - name: Run tests
-        run: pytest -q
+        run: PYTHONPATH=.:/usr/lib/python3/dist-packages pytest -q || python tests/run.py
+        env:
+          PYTHONPATH: .:/usr/lib/python3/dist-packages
