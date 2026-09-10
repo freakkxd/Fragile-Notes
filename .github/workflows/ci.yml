@@ -53,6 +53,4 @@ jobs:
           pip install -e . --no-build-isolation || pip install -e . --no-deps
           pip install pytest
       - name: Run tests
-        run: PYTHONPATH=.:/usr/lib/python3/dist-packages pytest -q || python tests/run.py
-        env:
-          PYTHONPATH: .:/usr/lib/python3/dist-packages
+        run: pytest -q
