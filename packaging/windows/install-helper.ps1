@@ -35,16 +35,33 @@ if ($Install) {
   $ver = & $py -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
   if ([version]$ver -lt [version]"3.11") { Fail "Требуется Python >=3.11 (найден $ver)"; exit 1 }
 
-  # 2. GTK check (MSYS2)
+  # 2. GTK check (MSYS2) — теперь ставит автоматом
   $gtkOk = $false
   try { & $py -c "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1'); from gi.repository import Adw; print('ok')" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0){$gtkOk=$true} } catch {}
   if ($gtkOk) { Ok "GTK4 + libadwaita OK" }
   else {
-    Warn "GTK4/libadwaita не найден — нужен MSYS2"
-    Write-Host "  Установи MSYS2 https://www.msys2.org/ → UCRT64: pacman -S mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-python-gobject"
-    Write-Host "  Или: pip install gvsbuild && gvsbuild build gtk4 libadwaita"
-    Write-Host "  Продолжаю — без GTK приложение не запустится, но pip deps поставятся"
+    Warn "GTK4/libadwaita не найден — ставлю автоматом (MSYS2)..."
+    $msys = "C:\msys64\ucrt64\bin\pacman.exe"
+    if (-not (Test-Path $msys)) {
+      Write-Host "  Скачиваю MSYS2..."
+      $msysUrl = "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20240702.tar.xz"
+      $msysSfx = "https://github.com/msys2/msys2-installer/releases/latest/download/msys2-base-x86_64-latest.sfx.exe"
+      $tmp = "$env:TEMP\msys2.exe"
+      try { Invoke-WebRequest -Uri $msysSfx -OutFile $tmp -UseBasicParsing; Start-Process -FilePath $tmp -ArgumentList "x -oC:\ -y" -Wait; Ok "MSYS2 установлен в C:\msys64" } catch { Warn "Не удалось скачать MSYS2: $_ — попробуй вручную https://www.msys2.org/" }
+    }
+    if (Test-Path $msys) {
+      Write-Host "  Ставлю GTK4 + libadwaita (минуту)..."
+      & $msys -S --noconfirm 2>&1 | Out-Null
+      & "C:\msys64\usr\bin\bash.exe" -lc "pacman -S --noconfirm mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cairo mingw-w64-ucrt-x86_64-python-pip" 2>&1 | Tee-Object "$AppDir\msys.log" | Out-Null
+      $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+      $env:GI_TYPELIB_PATH = "C:\msys64\ucrt64\lib\girepository-1.0"
+      # Проверка снова
+      try { & $py -c "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1'); from gi.repository import Adw; print('ok')" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0){$gtkOk=$true; Ok "GTK4 установлен и работает"} else { Warn "GTK всё еще не найден — нужен перезапуск" } } catch { Warn "GTK check после установки failed: $_" }
+    }
+    if (-not $gtkOk) { Warn "Без GTK приложение покажет 'Namespace Gtk not available' — перезапусти установщик после MSYS2" }
   }
+  # Добавляем MSYS2 в PATH для запуска fragile-notes
+  if (Test-Path "C:\msys64\ucrt64\bin") { $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH" }
 
   # 3. pip install -e . (создаст fragile-notes.exe в Scripts)
   Write-Host "`n→ pip install" -ForegroundColor Cyan
