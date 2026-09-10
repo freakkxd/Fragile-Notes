@@ -29,7 +29,7 @@ import json
 import os
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,7 +130,7 @@ class SrsCard:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SrsCard":
+    def from_dict(cls, data: dict[str, Any]) -> SrsCard:
         def _pd(v: Any) -> datetime.date | None:
             if not v:
                 return None
@@ -197,7 +197,7 @@ def update_card_sm2(card: SrsCard, quality: int, today: datetime.date | None = N
 
 def _card_id(source_rel: str, line_no: int, question: str) -> str:
     """Детерминированный id карточки (12 hex)."""
-    h = hashlib.sha256(f"{source_rel}::{line_no}::{question}".encode("utf-8")).hexdigest()
+    h = hashlib.sha256(f"{source_rel}::{line_no}::{question}".encode()).hexdigest()
     return h[:12]
 
 

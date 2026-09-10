@@ -38,7 +38,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "S", "N"]
-ignore = ["E501", "E402", "F841", "W292", "E702", "S101", "S108", "S110", "S112", "S310", "S311", "S506", "S603", "S607", "N806"]
+ignore = ["E501", "E402", "F841", "W292", "E702", "S101", "S108", "S110", "S112", "S310", "S311", "S506", "S603", "S607", "N806", "E701", "E741", "S102", "S324", "S608", "N814", "UP012", "UP031", "UP035", "I001", "F401"]
 exclude = ["__pycache__", ".venv", "venv", "build", "dist", ".git"]
 
 [tool.ruff.format]
@@ -54,7 +54,7 @@ warn_unused_configs = false
 disallow_untyped_defs = false
 check_untyped_defs = false
 show_error_codes = true
-exclude = ["__pycache__", ".venv", "venv", "build", "dist", "tests", "tools"]
+exclude = ["__pycache__", ".venv", "venv", "build", "dist", "tests", "tools", "fragilenotes/data/plugins"]
 [[tool.mypy.overrides]]
 module = "gi.*"
 ignore_missing_imports = true

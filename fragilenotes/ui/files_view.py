@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 

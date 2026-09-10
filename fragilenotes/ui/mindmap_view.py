@@ -31,9 +31,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from .widgets import empty_state, view_header  # noqa: E402
+from .widgets import view_header  # noqa: E402
 
 # ── парсинг заголовков (H1..H3) ───────────────────────────────────
 

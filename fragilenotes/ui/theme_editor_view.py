@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gtk, Pango  # noqa: E402
 
 from .widgets import view_header  # noqa: E402
 

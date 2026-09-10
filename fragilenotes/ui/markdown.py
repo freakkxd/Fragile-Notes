@@ -730,8 +730,8 @@ class MarkdownView(Gtk.TextView):
         self._put(raw.strip() + "\n", "codeblock")
         # выполнить запрос
         try:
+
             from fragilenotes.core.dataview import execute_query as _dv_exec  # noqa: E402
-            from pathlib import Path as _P  # noqa: E402
 
             vault_root = getattr(self, "_vault_root", None)
             settings = getattr(self, "_vault_settings", None)

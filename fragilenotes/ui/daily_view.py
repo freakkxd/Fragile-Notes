@@ -328,7 +328,7 @@ class DailyView(Gtk.Box):
                     msg = res.error or "LLM недоступен"
                     GLib.idle_add(lambda: self._on_ai_summary_done(False, msg) or False)
             except Exception as exc:  # noqa: BLE001
-                GLib.idle_add(lambda: self._on_ai_summary_done(False, str(exc)) or False)
+                GLib.idle_add(lambda exc=exc: self._on_ai_summary_done(False, str(exc)) or False)
 
         threading.Thread(target=work, daemon=True).start()
 

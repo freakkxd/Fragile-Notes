@@ -57,7 +57,6 @@ API:
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import logging
 import uuid
@@ -420,7 +419,6 @@ _POPPLER_IMPORT_OK = has_poppler()
 _WEBKIT_IMPORT_OK = has_webkit()
 
 if _GTK_AVAILABLE:
-    from gi.repository import Gdk as _Gdk  # for type check
 
     # ── View ───────────────────────────────────────────────────────
     class PdfAnnotateView(Gtk.Box):  # type: ignore[misc]
@@ -686,7 +684,6 @@ if _GTK_AVAILABLE:
                 self._pages_box.remove(child)
             # создать WebView с file://
             try:
-                import gi  # type: ignore
 
                 # ensure version
                 has_webkit()
@@ -815,7 +812,6 @@ if _GTK_AVAILABLE:
                 import gi  # type: ignore
 
                 gi.require_version("Poppler", "0.18")
-                from gi.repository import Poppler  # type: ignore
 
                 page = self._doc.get_page(page_idx)
                 if page is None:

@@ -567,7 +567,7 @@ if _GTK_AVAILABLE:
             try:
                 dlg = Gtk.FileDialog()
                 dlg.set_title("Сохранить mermaid")
-                dlg.set_initial_name((self._current_file.name if self._current_file else "diagram.mmd"))
+                dlg.set_initial_name(self._current_file.name if self._current_file else "diagram.mmd")
 
                 def _on_save(d, res) -> None:
                     try:

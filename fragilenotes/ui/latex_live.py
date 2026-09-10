@@ -489,7 +489,7 @@ if _GTK_AVAILABLE:
                 chars = len(text)
                 # подсчёт формул
                 try:
-                    from .latex import has_latex, extract_all_latex  # type: ignore
+                    from .latex import extract_all_latex, has_latex  # type: ignore
 
                     if has_latex(text):
                         cnt = len(extract_all_latex(text))
@@ -684,7 +684,10 @@ if _GTK_AVAILABLE:
                         display = "$$" in code
                         # если много формул — берём первую, иначе весь текст
                         try:
-                            from .latex import export_latex_to_png, extract_all_latex  # type: ignore
+                            from .latex import (  # type: ignore
+                                export_latex_to_png,
+                                extract_all_latex,
+                            )
 
                             blocks = extract_all_latex(code)
                             target = blocks[0][1] if blocks else code
@@ -772,7 +775,7 @@ if _GTK_AVAILABLE:
             try:
                 dlg = Gtk.FileDialog()
                 dlg.set_title("Сохранить LaTeX")
-                dlg.set_initial_name((self._current_file.name if self._current_file else "formula.tex"))
+                dlg.set_initial_name(self._current_file.name if self._current_file else "formula.tex")
 
                 def _on_save(d, res) -> None:
                     try:

@@ -895,7 +895,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         try:
             # пробуем делегировать в gestures модуль (единая логика направлений)
             try:
-                from .gestures import get_swipe_direction, SWIPE_VELOCITY_THRESHOLD
+                from .gestures import SWIPE_VELOCITY_THRESHOLD, get_swipe_direction
 
                 direction = get_swipe_direction(float(vx), float(vy), threshold=SWIPE_VELOCITY_THRESHOLD)
                 if direction == "up":

@@ -65,7 +65,7 @@ class FileTreeNodeFast:
 
     name: str
     path: str
-    dirs: list["FileTreeNodeFast"]
+    dirs: list[FileTreeNodeFast]
     files: list[tuple[str, str]]
 
 

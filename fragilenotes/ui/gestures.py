@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from gi.repository import Gtk, Gdk, GLib  # type: ignore  # noqa: E402
+from gi.repository import Gtk  # type: ignore  # noqa: E402
 
 # ── Константы ────────────────────────────────────────────────────────────────
 #: Кол-во пальцев для жеста (требование ТЗ — 3).

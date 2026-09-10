@@ -16,7 +16,6 @@ UI — AnalyticsView как вкладка: hero, KPI-strip, списки, кн�
 
 from __future__ import annotations
 
-import os
 import re
 import threading
 from collections import defaultdict
@@ -575,7 +574,7 @@ class AnalyticsView(Gtk.Box):
                 a = collect_analytics(settings_copy)
                 GLib.idle_add(lambda: self._apply_analytics(a) or False)
             except Exception as exc:  # noqa: BLE001
-                GLib.idle_add(lambda: self._apply_error(str(exc)) or False)
+                GLib.idle_add(lambda exc=exc: self._apply_error(str(exc)) or False)
 
         threading.Thread(target=work, daemon=True).start()
         return False
