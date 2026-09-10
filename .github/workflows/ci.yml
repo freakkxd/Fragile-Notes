@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ruff:
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
       - name: Install system deps (GTK for PyGObject)
         run: |
@@ -55,11 +55,13 @@ jobs:
           pkg-config --modversion girepository-2.0 | head -n 1
       - name: Install dependencies
         run: |
-          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/hostedtoolcache/Python/3.12.8/x64/lib/pkgconfig
           pip install meson-python meson
           pip install PyYAML
           pip install PyGObject || echo "PyGObject pip failed, using system gi"
           pip install -e . --no-deps
           pip install pytest
       - name: Run tests
-        run: xvfb-run -a pytest -q || xvfb-run -a python tests/run.py
+        run: xvfb-run -a pytest -q
+        env:
+          PYTHONPATH: .:/usr/lib/python3/dist-packages
