@@ -58,11 +58,6 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/installer.iss
           dir dist\*.exe
 
-      - name: Build All-in-One (source)
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/installer-allinone.iss
-          dir dist\*.exe
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
