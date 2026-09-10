@@ -21,6 +21,9 @@ dev = [
     "pytest>=8.0",
     "pre-commit>=4.0",
 ]
+windows = [
+    "pyinstaller>=6.0",
+]
 
 [tool.setuptools]
 packages = ["fragilenotes", "fragilenotes.core", "fragilenotes.services", "fragilenotes.ui"]

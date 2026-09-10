@@ -13,6 +13,7 @@
 
 ## Быстрый старт (из коробки)
 
+**Linux / macOS:**
 ```bash
 git clone https://github.com/freakkxd/Fragile-Notes.git
 cd Fragile-Notes
@@ -20,6 +21,19 @@ cd Fragile-Notes
 pip install -e .         # или pip install -e ".[dev]" для разработки
 fragile-notes            # или ./run.sh / python main.py
 # Первый запуск создаст ~/desktop с 01 Home, 02 Daily и т.д. автоматически
+```
+
+**Windows (из коробки):**
+```powershell
+git clone https://github.com/freakkxd/Fragile-Notes.git
+cd Fragile-Notes
+.\scripts\bootstrap.ps1          # проверка
+pip install -e .
+fragile-notes
+# Или portable без установки Python:
+# Скачай FragileNotes-Portable-v0.1.1.zip из Releases → распаковал → FragileNotes.exe
+# Или инсталлер: FragileNotes-Setup-v0.1.1.exe
+# Сборка инсталлера: packaging/windows/build.ps1 (требует MSYS2 GTK4 + Inno Setup 6) — см. packaging/windows/README.md
 ```
 
 Открой `http://localhost:5173`? Нет, это отдельный проект - FragileNotes это GTK4 приложение, не веб.
