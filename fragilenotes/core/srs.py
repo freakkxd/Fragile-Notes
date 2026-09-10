@@ -61,12 +61,26 @@ _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 # для определения строк внутри ``` блоков при сохранении номеров строк —
 # простой state-машина по строкам, а не regex на весь текст
 HEAVY_DIRS = {
-    "node_modules", ".git", "dist", "build", "target", ".venv", "venv",
-    "__pycache__", "bin", "obj", ".cache", ".trash",
-    ".obsidian", "Trash", "images", "ao-engine",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "bin",
+    "obj",
+    ".cache",
+    ".trash",
+    ".obsidian",
+    "Trash",
+    "images",
+    "ao-engine",
 }
 
 # ── пути ─────────────────────────────────────────────────────────────
+
 
 def get_srs_dir(settings: dict) -> Path:
     """Папка SRS: vault/_System/SRS/."""
@@ -87,7 +101,9 @@ def ensure_srs_dir(settings: dict) -> Path:
 def _vault_root(settings: dict) -> Path:
     return Path(str(settings.get("vault_root") or Path.home() / "desktop"))
 
+
 # ── модель ───────────────────────────────────────────────────────────
+
 
 @dataclass
 class SrsCard:
@@ -138,6 +154,7 @@ class SrsCard:
                 return datetime.date.fromisoformat(str(v).split("T")[0])
             except Exception:
                 return None
+
         return cls(
             id=str(data.get("id") or ""),
             question=str(data.get("question") or ""),
@@ -154,6 +171,7 @@ class SrsCard:
 
 
 # ── SM-2 ─────────────────────────────────────────────────────────────
+
 
 def _calc_ef(ef: float, quality: int) -> float:
     q = max(0, min(5, int(quality)))
@@ -194,6 +212,7 @@ def update_card_sm2(card: SrsCard, quality: int, today: datetime.date | None = N
 
 
 # ── парсинг Q::A ─────────────────────────────────────────────────────
+
 
 def _card_id(source_rel: str, line_no: int, question: str) -> str:
     """Детерминированный id карточки (12 hex)."""
@@ -278,6 +297,7 @@ def extract_cards(text: str) -> list[tuple[str, str]]:
 
 # ── сканирование vault ───────────────────────────────────────────────
 
+
 def _iter_notes(root: Path) -> list[tuple[str, float]]:
     """Обход vault для карточек: все .md кроме HEAVY_DIRS и _System."""
     out: list[tuple[str, float]] = []
@@ -315,6 +335,7 @@ def _iter_notes(root: Path) -> list[tuple[str, float]]:
 # ── БД ───────────────────────────────────────────────────────────────
 
 _lock = threading.RLock()
+
 
 def _load_raw_db(settings: dict) -> dict[str, Any]:
     p = get_srs_db_path(settings)
@@ -359,7 +380,9 @@ def save_db(settings: dict, cards_map: dict[str, dict[str, Any]]) -> None:
 def _today_or(d: datetime.date | None) -> datetime.date:
     return d or datetime.date.today()
 
+
 # ── высокоуровневое API ─────────────────────────────────────────────
+
 
 def scan_cards(settings: dict, today: datetime.date | None = None) -> list[SrsCard]:
     """Сканировать vault на Q::A и смержить с расписанием из srs.json."""
@@ -391,18 +414,49 @@ def scan_cards(settings: dict, today: datetime.date | None = None) -> list[SrsCa
                     ef = float(sched.get("ef", DEFAULT_EF))
                     interval = int(sched.get("interval", 0))
                     reps = int(sched.get("reps", 0))
-                    due = datetime.date.fromisoformat(str(sched["due"])) if sched.get("due") else today
-                    last = datetime.date.fromisoformat(str(sched["last_reviewed"])) if sched.get("last_reviewed") else None
+                    due = (
+                        datetime.date.fromisoformat(str(sched["due"]))
+                        if sched.get("due")
+                        else today
+                    )
+                    last = (
+                        datetime.date.fromisoformat(str(sched["last_reviewed"]))
+                        if sched.get("last_reviewed")
+                        else None
+                    )
                     lapses = int(sched.get("lapses", 0))
                 except Exception:
                     ef, interval, reps, due, last, lapses = DEFAULT_EF, 0, 0, today, None, 0
                 # вопрос/ответ могут обновиться в файле — берём из текста, но ef/interval сохраняем
-                card = SrsCard(id=cid, question=q, answer=a, source=p, line_no=ln,
-                               ef=ef, interval=interval, reps=reps, due=due, last_reviewed=last, lapses=lapses)
+                card = SrsCard(
+                    id=cid,
+                    question=q,
+                    answer=a,
+                    source=p,
+                    line_no=ln,
+                    ef=ef,
+                    interval=interval,
+                    reps=reps,
+                    due=due,
+                    last_reviewed=last,
+                    lapses=lapses,
+                )
             else:
-                card = SrsCard(id=cid, question=q, answer=a, source=p, line_no=ln,
-                               ef=DEFAULT_EF, interval=0, reps=0, due=today, last_reviewed=None, lapses=0)
+                card = SrsCard(
+                    id=cid,
+                    question=q,
+                    answer=a,
+                    source=p,
+                    line_no=ln,
+                    ef=DEFAULT_EF,
+                    interval=0,
+                    reps=0,
+                    due=today,
+                    last_reviewed=None,
+                    lapses=0,
+                )
             cards.append(card)
+
     # также карточки удалённые из заметок но есть в БД — не показываем (они висят в БД, но без source)
     # сортировка: сначала просроченные/сегодня, затем новые, затем будущие
     def _sort_key(c: SrsCard):
@@ -411,6 +465,7 @@ def scan_cards(settings: dict, today: datetime.date | None = None) -> list[SrsCa
         # новые после due, но перед будущими
         # due раньше -> меньше
         return (due_d, is_new, c.question.lower())
+
     cards.sort(key=_sort_key)
     return cards
 
@@ -451,7 +506,9 @@ def get_stats(settings: dict, today: datetime.date | None = None) -> dict[str, i
     }
 
 
-def review_card(settings: dict, card_id: str, quality: int, today: datetime.date | None = None) -> SrsCard | None:
+def review_card(
+    settings: dict, card_id: str, quality: int, today: datetime.date | None = None
+) -> SrsCard | None:
     """Оценить карточку (SM-2) и сохранить расписание. Возвращает обновлённую карточку или None."""
     today = _today_or(today)
     cards = scan_cards(settings, today)
@@ -476,12 +533,27 @@ def review_card(settings: dict, card_id: str, quality: int, today: datetime.date
             interval = int(sched.get("interval", 0))
             reps = int(sched.get("reps", 0))
             due = datetime.date.fromisoformat(str(sched["due"])) if sched.get("due") else today
-            last = datetime.date.fromisoformat(str(sched["last_reviewed"])) if sched.get("last_reviewed") else None
+            last = (
+                datetime.date.fromisoformat(str(sched["last_reviewed"]))
+                if sched.get("last_reviewed")
+                else None
+            )
             lapses = int(sched.get("lapses", 0))
         except Exception:
             return None
-        target = SrsCard(id=card_id, question=q, answer=a, source=src, line_no=ln,
-                         ef=ef, interval=interval, reps=reps, due=due, last_reviewed=last, lapses=lapses)
+        target = SrsCard(
+            id=card_id,
+            question=q,
+            answer=a,
+            source=src,
+            line_no=ln,
+            ef=ef,
+            interval=interval,
+            reps=reps,
+            due=due,
+            last_reviewed=last,
+            lapses=lapses,
+        )
     sm2_update(target, quality, today)
     # сохранить
     with _lock:
@@ -502,6 +574,7 @@ def review_card(settings: dict, card_id: str, quality: int, today: datetime.date
     # инвалидация кэшей vault (карточки могут быть использованы в других вьюхах)
     try:
         from ..services import vault as _vault
+
         _vault.invalidate_vault_cache()
     except Exception:
         pass

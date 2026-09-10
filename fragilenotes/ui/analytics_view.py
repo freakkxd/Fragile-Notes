@@ -44,6 +44,7 @@ _WORD_RE = re.compile(r"\S+")
 
 # ── чистые функции ───────────────────────────────────────────────────────
 
+
 def count_words(text: str) -> int:
     r"""Подсчёт слов: кол-во \S+ блоков. Пустая / frontmatter учитывается как текст."""
     if not text:
@@ -65,7 +66,7 @@ def _strip_frontmatter(text: str) -> str:
 
         m = FRONTMATTER_RE.match(text)
         if m:
-            return text[m.end():]
+            return text[m.end() :]
     except Exception:
         pass
     return text
@@ -133,7 +134,19 @@ def collect_analytics(
             if p.is_file():
                 # пропуск heavy dirs вручную (node_modules etc.)
                 try:
-                    if any(part in {".git", "node_modules", "__pycache__", ".obsidian", "dist", "build", ".venv"} for part in p.parts):
+                    if any(
+                        part
+                        in {
+                            ".git",
+                            "node_modules",
+                            "__pycache__",
+                            ".obsidian",
+                            "dist",
+                            "build",
+                            ".venv",
+                        }
+                        for part in p.parts
+                    ):
                         continue
                     mt = p.stat().st_mtime
                 except OSError:
@@ -161,6 +174,7 @@ def collect_analytics(
     try:
         from ..services.vault import note_title as _nt
     except Exception:
+
         def _nt(p: Path) -> str:  # type: ignore[no-redef]
             return p.stem
 
@@ -344,23 +358,67 @@ def collect_analytics(
     # ── issues для health-check карточки
     issues: list[dict[str, Any]] = []
     if orphans:
-        issues.append({"kind": "orphan", "severity": "warn", "count": len(orphans), "label": f"orphan notes: {len(orphans)}"})
+        issues.append(
+            {
+                "kind": "orphan",
+                "severity": "warn",
+                "count": len(orphans),
+                "label": f"orphan notes: {len(orphans)}",
+            }
+        )
     if uniq_broken:
-        issues.append({"kind": "broken", "severity": "error", "count": len(uniq_broken), "label": f"broken links: {len(uniq_broken)}"})
+        issues.append(
+            {
+                "kind": "broken",
+                "severity": "error",
+                "count": len(uniq_broken),
+                "label": f"broken links: {len(uniq_broken)}",
+            }
+        )
     if dups:
         dup_files = sum(len(v) for v in dups.values())
-        issues.append({"kind": "duplicate", "severity": "warn", "count": len(dups), "label": f"duplicate titles: {len(dups)} групп ({dup_files} файлов)"})
+        issues.append(
+            {
+                "kind": "duplicate",
+                "severity": "warn",
+                "count": len(dups),
+                "label": f"duplicate titles: {len(dups)} групп ({dup_files} файлов)",
+            }
+        )
     if large:
-        issues.append({"kind": "large", "severity": "warn", "count": len(large), "label": f"large files: {len(large)} > {large_threshold_bytes//1024} КБ"})
+        issues.append(
+            {
+                "kind": "large",
+                "severity": "warn",
+                "count": len(large),
+                "label": f"large files: {len(large)} > {large_threshold_bytes // 1024} КБ",
+            }
+        )
     if res.links_density_per_note < 0.1 and total_notes >= 5:
-        issues.append({"kind": "links", "severity": "info", "count": 1, "label": f"низкая плотность связей: {res.links_density_per_note:.2f} на заметку"})
+        issues.append(
+            {
+                "kind": "links",
+                "severity": "info",
+                "count": 1,
+                "label": f"низкая плотность связей: {res.links_density_per_note:.2f} на заметку",
+            }
+        )
     if empty_cnt:
-        issues.append({"kind": "empty", "severity": "info", "count": empty_cnt, "label": f"пустых заметок: {empty_cnt}"})
+        issues.append(
+            {
+                "kind": "empty",
+                "severity": "info",
+                "count": empty_cnt,
+                "label": f"пустых заметок: {empty_cnt}",
+            }
+        )
     res.issues = issues
     return res
 
 
-def health_check(settings: dict, large_threshold_bytes: int = DEFAULT_LARGE_THRESHOLD_BYTES) -> dict:
+def health_check(
+    settings: dict, large_threshold_bytes: int = DEFAULT_LARGE_THRESHOLD_BYTES
+) -> dict:
     """Health-check: собрать метрики и вернуть отчёт для UI/теста.
 
     Возвращает dict с ключами: analytics (VaultAnalytics), status (ok/warn/error),
@@ -379,11 +437,18 @@ def health_check(settings: dict, large_threshold_bytes: int = DEFAULT_LARGE_THRE
     if a.issues:
         summary += " · " + ", ".join(i["label"] for i in a.issues[:3])
         if len(a.issues) > 3:
-            summary += f" +{len(a.issues)-3}"
-    return {"analytics": a, "status": status, "summary": summary, "issues": a.issues, "score": a.health_score}
+            summary += f" +{len(a.issues) - 3}"
+    return {
+        "analytics": a,
+        "status": status,
+        "summary": summary,
+        "issues": a.issues,
+        "score": a.health_score,
+    }
 
 
 # ── UI ───────────────────────────────────────────────────────────────────
+
 
 class AnalyticsView(Gtk.Box):
     """Вкладка Аналитика: метрики vault + кнопка health-check."""
@@ -396,7 +461,13 @@ class AnalyticsView(Gtk.Box):
         self._analytics: VaultAnalytics | None = None
         self._busy = False
 
-        self.append(view_header("📊", "Аналитика", "Здоровье vault · word count, плотность связей, orphan, битые ссылки, дубликаты, крупные файлы"))
+        self.append(
+            view_header(
+                "📊",
+                "Аналитика",
+                "Здоровье vault · word count, плотность связей, orphan, битые ссылки, дубликаты, крупные файлы",
+            )
+        )
 
         self._build_toolbar()
         self._build_hero()
@@ -416,7 +487,13 @@ class AnalyticsView(Gtk.Box):
 
         # карточки деталей
         self._health_card, self._health_box = self._glass_card("🩺 Health-check", count="—")
-        self._health_info = Gtk.Label(label="Нажми «Health-check» чтобы просканировать vault", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"])
+        self._health_info = Gtk.Label(
+            label="Нажми «Health-check» чтобы просканировать vault",
+            halign=Gtk.Align.START,
+            xalign=0,
+            wrap=True,
+            css_classes=["dim-hint"],
+        )
         self._health_box.append(self._health_info)
         body.append(self._health_card)
 
@@ -439,27 +516,59 @@ class AnalyticsView(Gtk.Box):
 
     # ── toolbar ────────────────────────────────────────────────────────
     def _build_toolbar(self) -> None:
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["toolbar", "analytics-toolbar"])
+        bar = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            css_classes=["toolbar", "analytics-toolbar"],
+        )
         bar.set_margin_start(14)
         bar.set_margin_end(14)
-        self._health_btn = Gtk.Button(label="🩺 Health-check", css_classes=["suggested-action", "mod-cta"], tooltip_text="Просканировать vault заново")
+        self._health_btn = Gtk.Button(
+            label="🩺 Health-check",
+            css_classes=["suggested-action", "mod-cta"],
+            tooltip_text="Просканировать vault заново",
+        )
         self._health_btn.connect("clicked", lambda *_: self._on_health_check())
         bar.append(self._health_btn)
-        self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить метрики")
+        self._refresh_btn = Gtk.Button(
+            icon_name="view-refresh-symbolic", tooltip_text="Обновить метрики"
+        )
         self._refresh_btn.connect("clicked", lambda *_: self._scan_async(force=True))
         bar.append(self._refresh_btn)
         self._spinner = Gtk.Spinner(spinning=False, visible=False)
         bar.append(self._spinner)
-        self._status_lbl = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self._status_lbl = Gtk.Label(
+            label="",
+            css_classes=["dim-hint"],
+            hexpand=True,
+            halign=Gtk.Align.START,
+            xalign=0,
+            ellipsize=Pango.EllipsizeMode.END,
+        )
         bar.append(self._status_lbl)
         self.append(bar)
 
     def _build_hero(self) -> None:
-        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, css_classes=["tm-hero-v2", "tm-hero-v2--dash"])
-        hero.append(Gtk.Label(label="Здоровье vault", css_classes=["tm-hero-v2__eyebrow"], halign=Gtk.Align.START, xalign=0))
-        self._hero_title = Gtk.Label(label="…", css_classes=["tm-hero-v2__title"], halign=Gtk.Align.START, xalign=0)
+        hero = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=3,
+            css_classes=["tm-hero-v2", "tm-hero-v2--dash"],
+        )
+        hero.append(
+            Gtk.Label(
+                label="Здоровье vault",
+                css_classes=["tm-hero-v2__eyebrow"],
+                halign=Gtk.Align.START,
+                xalign=0,
+            )
+        )
+        self._hero_title = Gtk.Label(
+            label="…", css_classes=["tm-hero-v2__title"], halign=Gtk.Align.START, xalign=0
+        )
         hero.append(self._hero_title)
-        self._hero_sub = Gtk.Label(label="", css_classes=["tm-hero-v2__date"], halign=Gtk.Align.START, xalign=0)
+        self._hero_sub = Gtk.Label(
+            label="", css_classes=["tm-hero-v2__date"], halign=Gtk.Align.START, xalign=0
+        )
         hero.append(self._hero_sub)
         try:
             root = Path(str(self.settings.get("vault_root") or ""))
@@ -469,7 +578,9 @@ class AnalyticsView(Gtk.Box):
         self.append(hero)
 
     def _build_kpi(self) -> None:
-        strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["kpi-strip"])
+        strip = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["kpi-strip"]
+        )
         strip.set_vexpand(False)
         self._kpi: dict[str, tuple[Gtk.Label, Gtk.Box]] = {}
         for key, label in [
@@ -481,21 +592,31 @@ class AnalyticsView(Gtk.Box):
             ("dup", "📑 дублей"),
             ("large", "📦 крупных"),
         ]:
-            chip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, css_classes=["kpi-chip"])
-            val = Gtk.Label(label="…", css_classes=["kpi-chip__value"], halign=Gtk.Align.START, xalign=0)
-            cap = Gtk.Label(label=label, css_classes=["kpi-chip__label"], halign=Gtk.Align.START, xalign=0)
+            chip = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1, css_classes=["kpi-chip"]
+            )
+            val = Gtk.Label(
+                label="…", css_classes=["kpi-chip__value"], halign=Gtk.Align.START, xalign=0
+            )
+            cap = Gtk.Label(
+                label=label, css_classes=["kpi-chip__label"], halign=Gtk.Align.START, xalign=0
+            )
             chip.append(val)
             chip.append(cap)
             strip.append(chip)
             self._kpi[key] = (val, chip)
-        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vscrollbar_policy=Gtk.PolicyType.NEVER
+        )
         scroller.set_child(strip)
         scroller.set_vexpand(False)
         self.append(scroller)
 
     def _glass_card(self, title: str, count: str | None = None) -> tuple[Gtk.Box, Gtk.Box]:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["glass-card"])
-        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["glass-card__head"])
+        head = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["glass-card__head"]
+        )
         head.set_vexpand(False)
         head.append(Gtk.Label(label=title, css_classes=["glass-card__title"]))
         count_lbl = Gtk.Label(label=count or "", css_classes=["glass-card__count"])
@@ -604,7 +725,11 @@ class AnalyticsView(Gtk.Box):
         # hero
         score = a.health_score
         status = status_hint or ("ok" if score >= 85 else "warn" if score >= 60 else "error")
-        tone = {"ok": "здоров", "warn": "требует внимания", "error": "проблемы"}[status] if status in ("ok", "warn", "error") else status
+        tone = (
+            {"ok": "здоров", "warn": "требует внимания", "error": "проблемы"}[status]
+            if status in ("ok", "warn", "error")
+            else status
+        )
         self._hero_title.set_text(f"Health {score}/100 · {tone}")
         self._hero_sub.set_text(
             f"{a.total_notes} заметок · {a.total_words} слов · avg {a.avg_words:.0f} / median {a.median_words:.0f} · "
@@ -624,7 +749,15 @@ class AnalyticsView(Gtk.Box):
         # KPI
         self._set_kpi("notes", str(a.total_notes), "idle")
         self._set_kpi("words", str(a.total_words), "idle")
-        self._set_kpi("links", f"{a.links_density_per_note:.2f}", "ok" if a.links_density_per_note >= 0.5 else "warn" if a.links_density_per_note >= 0.1 else "error")
+        self._set_kpi(
+            "links",
+            f"{a.links_density_per_note:.2f}",
+            "ok"
+            if a.links_density_per_note >= 0.5
+            else "warn"
+            if a.links_density_per_note >= 0.1
+            else "error",
+        )
         self._set_kpi("orphan", str(len(a.orphan_notes)), "error" if a.orphan_notes else "ok")
         self._set_kpi("broken", str(len(a.broken_links)), "error" if a.broken_links else "ok")
         self._set_kpi("dup", str(len(a.duplicate_titles)), "error" if a.duplicate_titles else "ok")
@@ -647,7 +780,13 @@ class AnalyticsView(Gtk.Box):
     def _set_kpi(self, key: str, value: str, tone: str) -> None:
         val, chip = self._kpi[key]
         val.set_text(value)
-        for cls in ("kpi-chip--ok", "kpi-chip--error", "kpi-chip--warn", "kpi-chip--run", "kpi-chip--idle"):
+        for cls in (
+            "kpi-chip--ok",
+            "kpi-chip--error",
+            "kpi-chip--warn",
+            "kpi-chip--run",
+            "kpi-chip--idle",
+        ):
             chip.remove_css_class(cls)
         chip.add_css_class(f"kpi-chip--{tone}")
 
@@ -659,17 +798,23 @@ class AnalyticsView(Gtk.Box):
     def _render_health(self, a: VaultAnalytics, status: str) -> None:
         self._clear(self._health_box)
         # заново добавляем info label (был удалён clear)
-        self._health_info = Gtk.Label(label="", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"])
+        self._health_info = Gtk.Label(
+            label="", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"]
+        )
         self._health_box.append(self._health_info)
         self._health_card._count.set_text(f"{a.health_score}/100 · {status}")  # type: ignore[attr-defined]
         if not a.issues:
             self._health_info.set_text("✓ Vault здоров — проблем не обнаружено")
             self._health_box.append(status_pill("ok", "ok"))
         else:
-            pills = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["health-pills"])
+            pills = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["health-pills"]
+            )
             pills.set_margin_top(4)
             for iss in a.issues:
-                tone = {"error": "error", "warn": "warn", "info": "idle"}.get(iss.get("severity", "idle"), "idle")
+                tone = {"error": "error", "warn": "warn", "info": "idle"}.get(
+                    iss.get("severity", "idle"), "idle"
+                )
                 pills.append(status_pill(iss.get("label", ""), tone))
             self._health_box.append(pills)
             self._health_info.set_text(" · ".join(i["label"] for i in a.issues))
@@ -682,10 +827,14 @@ class AnalyticsView(Gtk.Box):
         self._clear(self._words_box)
         self._words_card._count.set_text(f"{a.total_notes} файлов")  # type: ignore[attr-defined]
         if a.total_notes == 0:
-            self._words_box.append(empty_state("📭", "Vault пуст", hint="Создай заметку — метрики появятся здесь"))
+            self._words_box.append(
+                empty_state("📭", "Vault пуст", hint="Создай заметку — метрики появятся здесь")
+            )
             return
         # краткая сводка
-        summary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, css_classes=["analytics-summary"])
+        summary = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=12, css_classes=["analytics-summary"]
+        )
         for label, value in [
             ("всего слов", str(a.total_words)),
             ("avg/заметку", f"{a.avg_words:.0f}"),
@@ -693,22 +842,50 @@ class AnalyticsView(Gtk.Box):
             ("крупнейший", str(max((fs.words for fs in a.per_file), default=0))),
         ]:
             col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            col.append(Gtk.Label(label=value, css_classes=["kpi-chip__value"], halign=Gtk.Align.START, xalign=0))
-            col.append(Gtk.Label(label=label, css_classes=["kpi-chip__label"], halign=Gtk.Align.START, xalign=0))
+            col.append(
+                Gtk.Label(
+                    label=value, css_classes=["kpi-chip__value"], halign=Gtk.Align.START, xalign=0
+                )
+            )
+            col.append(
+                Gtk.Label(
+                    label=label, css_classes=["kpi-chip__label"], halign=Gtk.Align.START, xalign=0
+                )
+            )
             summary.append(col)
         self._words_box.append(summary)
         # топ крупнейших по словам (5)
         top = sorted(a.per_file, key=lambda fs: fs.words, reverse=True)[:5]
         if top:
-            self._words_box.append(Gtk.Label(label="Крупнейшие по словам:", css_classes=["section-title"], halign=Gtk.Align.START, xalign=0))
+            self._words_box.append(
+                Gtk.Label(
+                    label="Крупнейшие по словам:",
+                    css_classes=["section-title"],
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                )
+            )
             for fs in top:
-                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"])
+                row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"]
+                )
                 row.set_hexpand(True)
                 row.append(Gtk.Label(label="📄"))
                 title = self._display_title(fs.path)
-                lbl = Gtk.Label(label=title, hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["task-title"])
+                lbl = Gtk.Label(
+                    label=title,
+                    hexpand=True,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    ellipsize=Pango.EllipsizeMode.END,
+                    css_classes=["task-title"],
+                )
                 row.append(lbl)
-                row.append(Gtk.Label(label=f"{fs.words} слов · {fs.size//1024} КБ", css_classes=["dim-hint"]))
+                row.append(
+                    Gtk.Label(
+                        label=f"{fs.words} слов · {fs.size // 1024} КБ", css_classes=["dim-hint"]
+                    )
+                )
                 row.append(self._open_btn(fs.path))
                 self._words_box.append(row)
 
@@ -720,12 +897,21 @@ class AnalyticsView(Gtk.Box):
             return
         info = Gtk.Label(
             label=f"плотность: {a.links_density_per_note:.2f} на заметку · {a.links_density_per_1k_words:.1f} на 1000 слов  ·  изолированных (orphan) {len(a.orphan_notes)} · битых {len(a.broken_links)}",
-            halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"],
+            halign=Gtk.Align.START,
+            xalign=0,
+            wrap=True,
+            css_classes=["dim-hint"],
         )
         info.set_margin_top(2)
         self._links_box.append(info)
         # шкала: простая прогресс-бар имитация через pill
-        tone = "ok" if a.links_density_per_note >= 0.5 else "warn" if a.links_density_per_note >= 0.1 else "error"
+        tone = (
+            "ok"
+            if a.links_density_per_note >= 0.5
+            else "warn"
+            if a.links_density_per_note >= 0.1
+            else "error"
+        )
         self._links_box.append(status_pill(f"плотность {a.links_density_per_note:.2f}", tone))
 
     def _render_orphan(self, a: VaultAnalytics) -> None:
@@ -733,21 +919,49 @@ class AnalyticsView(Gtk.Box):
         n = len(a.orphan_notes)
         self._orphan_card._count.set_text(str(n))  # type: ignore[attr-defined]
         if n == 0:
-            self._orphan_box.append(empty_state("✨", "Orphan нет — все заметки связаны", hint="Orphan = 0 входящих и 0 исходящих [[wikilink]]"))
+            self._orphan_box.append(
+                empty_state(
+                    "✨",
+                    "Orphan нет — все заметки связаны",
+                    hint="Orphan = 0 входящих и 0 исходящих [[wikilink]]",
+                )
+            )
             return
-        self._orphan_box.append(Gtk.Label(label="Без связей (0 входящих и 0 исходящих):", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+        self._orphan_box.append(
+            Gtk.Label(
+                label="Без связей (0 входящих и 0 исходящих):",
+                css_classes=["dim-hint"],
+                halign=Gtk.Align.START,
+                xalign=0,
+            )
+        )
         for p in a.orphan_notes[:20]:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"])
+            row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"]
+            )
             row.set_hexpand(True)
             row.append(Gtk.Label(label="🕳"))
             title = self._display_title(p)
-            lbl = Gtk.Label(label=title, hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+            lbl = Gtk.Label(
+                label=title,
+                hexpand=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
             row.append(lbl)
             row.append(Gtk.Label(label=p.parent.name, css_classes=["dim-hint"]))
             row.append(self._open_btn(p))
             self._orphan_box.append(row)
         if n > 20:
-            self._orphan_box.append(Gtk.Label(label=f"и ещё {n-20}…", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+            self._orphan_box.append(
+                Gtk.Label(
+                    label=f"и ещё {n - 20}…",
+                    css_classes=["dim-hint"],
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                )
+            )
 
     def _render_broken(self, a: VaultAnalytics) -> None:
         self._clear(self._broken_box)
@@ -757,17 +971,32 @@ class AnalyticsView(Gtk.Box):
             self._broken_box.append(empty_state("✓", "Битых ссылок нет"))
             return
         for src, tgt in a.broken_links[:20]:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"])
+            row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"]
+            )
             row.set_hexpand(True)
             row.append(Gtk.Label(label="⛓"))
-            src_lbl = Gtk.Label(label=self._display_title(src), hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+            src_lbl = Gtk.Label(
+                label=self._display_title(src),
+                hexpand=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
             row.append(src_lbl)
             row.append(Gtk.Label(label="→", css_classes=["dim-hint"]))
             row.append(status_pill(f"[[{tgt}]]", "error"))
             row.append(self._open_btn(src))
             self._broken_box.append(row)
         if n > 20:
-            self._broken_box.append(Gtk.Label(label=f"и ещё {n-20}…", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+            self._broken_box.append(
+                Gtk.Label(
+                    label=f"и ещё {n - 20}…",
+                    css_classes=["dim-hint"],
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                )
+            )
 
     def _render_dup(self, a: VaultAnalytics) -> None:
         self._clear(self._dup_box)
@@ -777,45 +1006,102 @@ class AnalyticsView(Gtk.Box):
             self._dup_box.append(empty_state("✓", "Дубликатов заголовков нет"))
             return
         for title, plist in list(a.duplicate_titles.items())[:12]:
-            grp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["glass-row"])
+            grp = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["glass-row"]
+            )
             grp.set_hexpand(True)
             head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             head.append(Gtk.Label(label="📑"))
-            head.append(Gtk.Label(label=title, hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["task-title"]))
+            head.append(
+                Gtk.Label(
+                    label=title,
+                    hexpand=True,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    ellipsize=Pango.EllipsizeMode.END,
+                    css_classes=["task-title"],
+                )
+            )
             head.append(status_pill(f"{len(plist)} файла", "warn"))
             grp.append(head)
             for p in plist:
                 r = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
                 r.set_margin_start(18)
                 r.append(Gtk.Label(label="—", css_classes=["dim-hint"]))
-                lbl = Gtk.Label(label=str(p.relative_to(Path(str(self.settings.get('vault_root')))) if _is_relative_to(p, Path(str(self.settings.get('vault_root')))) else p.name), hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, css_classes=["dim-hint"])
+                lbl = Gtk.Label(
+                    label=str(
+                        p.relative_to(Path(str(self.settings.get("vault_root"))))
+                        if _is_relative_to(p, Path(str(self.settings.get("vault_root"))))
+                        else p.name
+                    ),
+                    hexpand=True,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    ellipsize=Pango.EllipsizeMode.MIDDLE,
+                    css_classes=["dim-hint"],
+                )
                 r.append(lbl)
                 r.append(self._open_btn(p))
                 grp.append(r)
             self._dup_box.append(grp)
         if n > 12:
-            self._dup_box.append(Gtk.Label(label=f"и ещё {n-12} групп…", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+            self._dup_box.append(
+                Gtk.Label(
+                    label=f"и ещё {n - 12} групп…",
+                    css_classes=["dim-hint"],
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                )
+            )
 
     def _render_large(self, a: VaultAnalytics) -> None:
         self._clear(self._large_box)
         n = len(a.large_files)
         self._large_card._count.set_text(str(n))  # type: ignore[attr-defined]
         if n == 0:
-            self._large_box.append(empty_state("✓", "Крупных файлов нет", hint=f"порог {DEFAULT_LARGE_THRESHOLD_BYTES//1024} КБ"))
+            self._large_box.append(
+                empty_state(
+                    "✓",
+                    "Крупных файлов нет",
+                    hint=f"порог {DEFAULT_LARGE_THRESHOLD_BYTES // 1024} КБ",
+                )
+            )
             return
-        self._large_box.append(Gtk.Label(label=f"Порог {DEFAULT_LARGE_THRESHOLD_BYTES//1024} КБ — крупнейшие сверху:", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+        self._large_box.append(
+            Gtk.Label(
+                label=f"Порог {DEFAULT_LARGE_THRESHOLD_BYTES // 1024} КБ — крупнейшие сверху:",
+                css_classes=["dim-hint"],
+                halign=Gtk.Align.START,
+                xalign=0,
+            )
+        )
         for p, sz in a.large_files[:20]:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"])
+            row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["glass-row"]
+            )
             row.set_hexpand(True)
             row.append(Gtk.Label(label="📦"))
             title = self._display_title(p)
-            lbl = Gtk.Label(label=title, hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+            lbl = Gtk.Label(
+                label=title,
+                hexpand=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
             row.append(lbl)
-            row.append(Gtk.Label(label=f"{sz/1024:.0f} КБ", css_classes=["dim-hint"]))
+            row.append(Gtk.Label(label=f"{sz / 1024:.0f} КБ", css_classes=["dim-hint"]))
             row.append(self._open_btn(p))
             self._large_box.append(row)
         if n > 20:
-            self._large_box.append(Gtk.Label(label=f"и ещё {n-20}…", css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0))
+            self._large_box.append(
+                Gtk.Label(
+                    label=f"и ещё {n - 20}…",
+                    css_classes=["dim-hint"],
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                )
+            )
 
     # ── helpers ────────────────────────────────────────────────────────
     def _display_title(self, path: Path) -> str:

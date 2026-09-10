@@ -88,6 +88,7 @@ _WEBKIT_VERSION: str | None = None
 
 # ── Утилиты (без GTK, безопасны для py_compile/headless) ─────────────
 
+
 def ann_path_for(pdf_path: Path | str) -> Path:
     """Путь к ``.pdf.ann.json`` рядом с PDF.
 
@@ -216,7 +217,7 @@ def create_highlight(
     pg = max(0, pg)
     # rects: list of [x1,y1,x2,y2] in PDF points, bottom-left origin
     clean_rects: list[list[float]] = []
-    for r in (rects or []):
+    for r in rects or []:
         try:
             if not isinstance(r, (list, tuple)) or len(r) != 4:
                 continue
@@ -348,7 +349,9 @@ def save_annotations(pdf_path: Path | str, data: dict[str, Any]) -> bool:
         out: dict[str, Any] = {
             "version": ANNOTATION_VERSION,
             "pdf": p.name,
-            "created": str(data.get("created", _now_iso())) if isinstance(data, dict) else _now_iso(),
+            "created": str(data.get("created", _now_iso()))
+            if isinstance(data, dict)
+            else _now_iso(),
             "highlights": clean,
         }
         # если есть поле pdf в data — сохраним, но приоритет у реального имени
@@ -391,7 +394,9 @@ def remove_highlight_from_file(pdf_path: Path | str, highlight_id: str) -> bool:
     try:
         data = load_annotations(pdf_path)
         before = len(data.get("highlights", []))
-        data["highlights"] = [h for h in data.get("highlights", []) if str(h.get("id")) != str(highlight_id)]
+        data["highlights"] = [
+            h for h in data.get("highlights", []) if str(h.get("id")) != str(highlight_id)
+        ]
         if len(data["highlights"]) == before:
             return False
         return bool(save_annotations(pdf_path, data))
@@ -419,7 +424,6 @@ _POPPLER_IMPORT_OK = has_poppler()
 _WEBKIT_IMPORT_OK = has_webkit()
 
 if _GTK_AVAILABLE:
-
     # ── View ───────────────────────────────────────────────────────
     class PdfAnnotateView(Gtk.Box):  # type: ignore[misc]
         """Просмотр PDF с highlight-аннотациями (Poppler/Cairo, fallback WebView).
@@ -428,8 +432,12 @@ if _GTK_AVAILABLE:
         * ``pdf_path`` — начальный PDF (опционально).
         """
 
-        def __init__(self, settings: dict | None = None, pdf_path: Path | str | None = None) -> None:
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True)
+        def __init__(
+            self, settings: dict | None = None, pdf_path: Path | str | None = None
+        ) -> None:
+            super().__init__(
+                orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True
+            )
             self.settings = dict(settings or {})
             self._pdf_path: Path | None = Path(pdf_path) if pdf_path else None
             self._doc: Any | None = None
@@ -457,13 +465,23 @@ if _GTK_AVAILABLE:
         def _build_ui(self) -> None:
             from .widgets import view_header  # local import to avoid cycle
 
-            self.append(view_header("📄", "PDF Аннотации", "Просмотр PDF + highlight выделения → .pdf.ann.json рядом"))
+            self.append(
+                view_header(
+                    "📄",
+                    "PDF Аннотации",
+                    "Просмотр PDF + highlight выделения → .pdf.ann.json рядом",
+                )
+            )
 
-            toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"])
+            toolbar = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"]
+            )
             toolbar.set_margin_start(14)
             toolbar.set_margin_end(14)
 
-            open_btn = Gtk.Button(icon_name="document-open-symbolic", tooltip_text="Открыть PDF", css_classes=["flat"])
+            open_btn = Gtk.Button(
+                icon_name="document-open-symbolic", tooltip_text="Открыть PDF", css_classes=["flat"]
+            )
             open_btn.connect("clicked", self._on_open_clicked)
             toolbar.append(open_btn)
 
@@ -472,7 +490,9 @@ if _GTK_AVAILABLE:
             minus = Gtk.Button(icon_name="zoom-out-symbolic", css_classes=["flat"])
             minus.connect("clicked", lambda *_: self._set_zoom(self._zoom - 0.15))
             toolbar.append(minus)
-            self._zoom_label = Gtk.Label(label=f"{int(self._zoom*100)}%", css_classes=["dim-hint"])
+            self._zoom_label = Gtk.Label(
+                label=f"{int(self._zoom * 100)}%", css_classes=["dim-hint"]
+            )
             toolbar.append(self._zoom_label)
             plus = Gtk.Button(icon_name="zoom-in-symbolic", css_classes=["flat"])
             plus.connect("clicked", lambda *_: self._set_zoom(self._zoom + 0.15))
@@ -492,27 +512,51 @@ if _GTK_AVAILABLE:
             toolbar.append(self._color_drop)
 
             # действия
-            self._hl_btn = Gtk.Button(label="✏️ Выделить", css_classes=["suggested-action"], tooltip_text="Создать highlight из текущего выделения (drag по странице)")
+            self._hl_btn = Gtk.Button(
+                label="✏️ Выделить",
+                css_classes=["suggested-action"],
+                tooltip_text="Создать highlight из текущего выделения (drag по странице)",
+            )
             self._hl_btn.connect("clicked", self._on_highlight_clicked)
             self._hl_btn.set_sensitive(False)
             toolbar.append(self._hl_btn)
 
-            self._del_btn = Gtk.Button(icon_name="user-trash-symbolic", css_classes=["flat", "destructive-action"], tooltip_text="Удалить выбранный highlight")
+            self._del_btn = Gtk.Button(
+                icon_name="user-trash-symbolic",
+                css_classes=["flat", "destructive-action"],
+                tooltip_text="Удалить выбранный highlight",
+            )
             self._del_btn.connect("clicked", self._on_delete_clicked)
             self._del_btn.set_sensitive(False)
             toolbar.append(self._del_btn)
 
-            save_btn = Gtk.Button(icon_name="document-save-symbolic", tooltip_text="Сохранить .ann.json", css_classes=["flat"])
+            save_btn = Gtk.Button(
+                icon_name="document-save-symbolic",
+                tooltip_text="Сохранить .ann.json",
+                css_classes=["flat"],
+            )
             save_btn.connect("clicked", lambda *_: self._save())
             toolbar.append(save_btn)
 
-            self._status = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.END, xalign=1, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            self._status = Gtk.Label(
+                label="",
+                css_classes=["dim-hint"],
+                hexpand=True,
+                halign=Gtk.Align.END,
+                xalign=1,
+                ellipsize=Pango.EllipsizeMode.MIDDLE,
+            )
             toolbar.append(self._status)
 
             self.append(toolbar)
 
             # Основная зона: Paned (слева PDF, справа список)
-            paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True, vexpand=True, css_classes=["pdf-paned"])
+            paned = Gtk.Paned(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["pdf-paned"],
+            )
             paned.set_margin_start(14)
             paned.set_margin_end(14)
             paned.set_margin_bottom(14)
@@ -524,9 +568,17 @@ if _GTK_AVAILABLE:
                 pass
 
             # Левая: скролл со страницами
-            self._scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame", "pdf-scroll"])
+            self._scroll = Gtk.ScrolledWindow(
+                hexpand=True, vexpand=True, css_classes=["editor-frame", "pdf-scroll"]
+            )
             self._scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-            self._pages_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, hexpand=True, vexpand=True, css_classes=["pdf-pages"])
+            self._pages_box = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL,
+                spacing=16,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["pdf-pages"],
+            )
             self._pages_box.set_margin_top(12)
             self._pages_box.set_margin_bottom(12)
             self._pages_box.set_margin_start(12)
@@ -534,12 +586,23 @@ if _GTK_AVAILABLE:
             self._scroll.set_child(self._pages_box)
 
             # Placeholder для отсутствия PDF
-            self._placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["empty"])
+            self._placeholder = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["empty"]
+            )
             self._placeholder.set_halign(Gtk.Align.CENTER)
             self._placeholder.set_valign(Gtk.Align.CENTER)
             self._placeholder.append(Gtk.Label(label="📄", css_classes=["empty-icon"]))
-            self._placeholder.append(Gtk.Label(label="Нет открытого PDF", css_classes=["empty-text"]))
-            self._placeholder.append(Gtk.Label(label="Открой PDF через «Открыть» или выбери .pdf в Заметках — сохранит highlight в .pdf.ann.json рядом", css_classes=["dim-hint", "empty-hint"], wrap=True, justify=Gtk.Justification.CENTER))
+            self._placeholder.append(
+                Gtk.Label(label="Нет открытого PDF", css_classes=["empty-text"])
+            )
+            self._placeholder.append(
+                Gtk.Label(
+                    label="Открой PDF через «Открыть» или выбери .pdf в Заметках — сохранит highlight в .pdf.ann.json рядом",
+                    css_classes=["dim-hint", "empty-hint"],
+                    wrap=True,
+                    justify=Gtk.Justification.CENTER,
+                )
+            )
             open_ph = Gtk.Button(label="Открыть PDF", css_classes=["suggested-action"])
             open_ph.connect("clicked", self._on_open_clicked)
             open_ph.set_halign(Gtk.Align.CENTER)
@@ -547,29 +610,45 @@ if _GTK_AVAILABLE:
             self._pages_box.append(self._placeholder)
 
             # WebView контейнер (если Poppler нет)
-            self._web_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
+            self._web_container = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True
+            )
 
             left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
             left_box.append(self._scroll)
-            self._left_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
+            self._left_stack = Gtk.Stack(
+                transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True
+            )
             self._left_stack.add_named(left_box, "poppler")
             self._left_stack.add_named(self._web_container, "webview")
             # placeholder отдельно через visible
             paned.set_start_child(self._left_stack)
 
             # Правая: список аннотаций
-            right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["pdf-sidebar"])
+            right = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["pdf-sidebar"]
+            )
             right.set_size_request(320, -1)
             hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            hdr.append(Gtk.Label(label="Выделения", css_classes=["dim-hint", "pdf-header"], halign=Gtk.Align.START))
+            hdr.append(
+                Gtk.Label(
+                    label="Выделения",
+                    css_classes=["dim-hint", "pdf-header"],
+                    halign=Gtk.Align.START,
+                )
+            )
             self._count_label = Gtk.Label(label="", css_classes=["dim-hint"])
             hdr.append(self._count_label)
-            clear_btn = Gtk.Button(icon_name="edit-clear-symbolic", tooltip_text="Удалить всё", css_classes=["flat"])
+            clear_btn = Gtk.Button(
+                icon_name="edit-clear-symbolic", tooltip_text="Удалить всё", css_classes=["flat"]
+            )
             clear_btn.connect("clicked", self._on_clear_all)
             hdr.append(clear_btn)
             right.append(hdr)
 
-            self._list_scroller = Gtk.ScrolledWindow(vexpand=True, css_classes=["pdf-list-scroller"])
+            self._list_scroller = Gtk.ScrolledWindow(
+                vexpand=True, css_classes=["pdf-list-scroller"]
+            )
             self._list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             self._list_box = Gtk.ListBox(css_classes=["pdf-list"])
             self._list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
@@ -578,11 +657,19 @@ if _GTK_AVAILABLE:
             self._list_scroller.set_child(self._list_box)
             right.append(self._list_scroller)
 
-            self._list_empty = Gtk.Label(label="— нет выделений —\nПеретащи мышью по тексту страницы → «Выделить»", css_classes=["dim-hint"], wrap=True, halign=Gtk.Align.START, xalign=0)
+            self._list_empty = Gtk.Label(
+                label="— нет выделений —\nПеретащи мышью по тексту страницы → «Выделить»",
+                css_classes=["dim-hint"],
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+            )
             right.append(self._list_empty)
 
             # Информация
-            self._info_label = Gtk.Label(label="", css_classes=["dim-hint"], wrap=True, halign=Gtk.Align.START, xalign=0)
+            self._info_label = Gtk.Label(
+                label="", css_classes=["dim-hint"], wrap=True, halign=Gtk.Align.START, xalign=0
+            )
             right.append(self._info_label)
 
             paned.set_end_child(right)
@@ -623,10 +710,14 @@ if _GTK_AVAILABLE:
                     self._load_annotations_for_current()
                     self._rebuild_pages()
                     self._update_list()
-                    self._set_status(f"открыт: {p.name} · {self._n_pages} стр. · {len(self._highlights)} highlights")
+                    self._set_status(
+                        f"открыт: {p.name} · {self._n_pages} стр. · {len(self._highlights)} highlights"
+                    )
                     # info
                     try:
-                        self._info_label.set_text(f"{p}\n→ {ann_path_for(p).name} ({len(self._highlights)} аннотаций)")
+                        self._info_label.set_text(
+                            f"{p}\n→ {ann_path_for(p).name} ({len(self._highlights)} аннотаций)"
+                        )
                     except Exception:
                         pass
                     return True
@@ -640,7 +731,9 @@ if _GTK_AVAILABLE:
                 return True
             # полный fallback
             self._pages_box.append(self._build_fallback(p))
-            self._set_status("Poppler/WebKit недоступны — открой внешним просмотрщиком", is_error=True)
+            self._set_status(
+                "Poppler/WebKit недоступны — открой внешним просмотрщиком", is_error=True
+            )
             return False
 
         def _load_poppler(self, p: Path) -> bool:
@@ -684,7 +777,6 @@ if _GTK_AVAILABLE:
                 self._pages_box.remove(child)
             # создать WebView с file://
             try:
-
                 # ensure version
                 has_webkit()
                 from gi.repository import WebKit  # type: ignore
@@ -699,7 +791,12 @@ if _GTK_AVAILABLE:
                 uri = p.resolve().as_uri()
                 view.load_uri(uri)
                 # toolbar hint
-                hint = Gtk.Label(label="WebView (PDF.js / нативный просмотрщик) — выделение пока только через Poppler", css_classes=["dim-hint"], wrap=True, halign=Gtk.Align.START)
+                hint = Gtk.Label(
+                    label="WebView (PDF.js / нативный просмотрщик) — выделение пока только через Poppler",
+                    css_classes=["dim-hint"],
+                    wrap=True,
+                    halign=Gtk.Align.START,
+                )
                 self._web_container.append(hint)
                 sc = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["pdf-web-scroll"])
                 sc.set_child(view)
@@ -709,7 +806,9 @@ if _GTK_AVAILABLE:
                 self._set_status(f"открыт (WebView): {p.name} — для highlight нужен Poppler")
             except Exception as e:
                 log.debug("webview load failed: %s", e)
-                self._web_container.append(Gtk.Label(label=f"WebView ошибка: {e}", css_classes=["dim-hint"]))
+                self._web_container.append(
+                    Gtk.Label(label=f"WebView ошибка: {e}", css_classes=["dim-hint"])
+                )
 
         def _build_fallback(self, p: Path) -> Gtk.Widget:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["empty"])
@@ -717,8 +816,16 @@ if _GTK_AVAILABLE:
             box.set_valign(Gtk.Align.CENTER)
             box.append(Gtk.Label(label="📄", css_classes=["empty-icon"]))
             box.append(Gtk.Label(label=f"{p.name}", css_classes=["empty-text"]))
-            box.append(Gtk.Label(label="Poppler и WebKit недоступны.\nУстанови:  apt install gir1.2-poppler-0.18  или  gir1.2-webkit2-4.1", css_classes=["dim-hint"], wrap=True))
-            btn = Gtk.Button(label="Открыть внешним просмотрщиком", css_classes=["suggested-action"])
+            box.append(
+                Gtk.Label(
+                    label="Poppler и WebKit недоступны.\nУстанови:  apt install gir1.2-poppler-0.18  или  gir1.2-webkit2-4.1",
+                    css_classes=["dim-hint"],
+                    wrap=True,
+                )
+            )
+            btn = Gtk.Button(
+                label="Открыть внешним просмотрщиком", css_classes=["suggested-action"]
+            )
             btn.connect("clicked", lambda *_: self._open_external(p))
             box.append(btn)
             return box
@@ -747,12 +854,22 @@ if _GTK_AVAILABLE:
                 self._pages_box.append(w)
 
         def _build_page_widget(self, page_idx: int) -> Gtk.Widget:
-            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, css_classes=["pdf-page-outer"])
-            label = Gtk.Label(label=f"Стр. {page_idx+1} / {self._n_pages}", css_classes=["dim-hint", "pdf-page-label"], halign=Gtk.Align.START)
+            outer = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=4, css_classes=["pdf-page-outer"]
+            )
+            label = Gtk.Label(
+                label=f"Стр. {page_idx + 1} / {self._n_pages}",
+                css_classes=["dim-hint", "pdf-page-label"],
+                halign=Gtk.Align.START,
+            )
             outer.append(label)
             frame = Gtk.Frame(css_classes=["pdf-page-frame"])
             try:
-                w_pt, h_pt = self._page_sizes[page_idx] if page_idx < len(self._page_sizes) else (595.0, 842.0)
+                w_pt, h_pt = (
+                    self._page_sizes[page_idx]
+                    if page_idx < len(self._page_sizes)
+                    else (595.0, 842.0)
+                )
             except Exception:
                 w_pt, h_pt = 595.0, 842.0
             draw = Gtk.DrawingArea(css_classes=["pdf-page"])
@@ -790,7 +907,9 @@ if _GTK_AVAILABLE:
             return outer
 
         # ── draw ─────────────────────────────────────────────────
-        def _on_draw_page(self, area: Gtk.DrawingArea, cr: Any, w: int, h: int, page_idx: int) -> None:
+        def _on_draw_page(
+            self, area: Gtk.DrawingArea, cr: Any, w: int, h: int, page_idx: int
+        ) -> None:
             # фон
             try:
                 cr.set_source_rgb(0.99, 0.99, 0.985)
@@ -816,7 +935,11 @@ if _GTK_AVAILABLE:
                 page = self._doc.get_page(page_idx)
                 if page is None:
                     return
-                w_pt, h_pt = self._page_sizes[page_idx] if page_idx < len(self._page_sizes) else (595.0, 842.0)
+                w_pt, h_pt = (
+                    self._page_sizes[page_idx]
+                    if page_idx < len(self._page_sizes)
+                    else (595.0, 842.0)
+                )
                 scale_x = w / w_pt if w_pt else 1.0
                 scale_y = h / h_pt if h_pt else 1.0
                 scale = min(scale_x, scale_y) if scale_x and scale_y else self._zoom
@@ -842,7 +965,12 @@ if _GTK_AVAILABLE:
                             a = 0.52
                         for rect in rects:
                             try:
-                                x1, y1, x2, y2 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+                                x1, y1, x2, y2 = (
+                                    float(rect[0]),
+                                    float(rect[1]),
+                                    float(rect[2]),
+                                    float(rect[3]),
+                                )
                                 # PDF origin bottom-left → widget top-left
                                 wx = x1 * scale
                                 wy_top = (h_pt - y2) * scale
@@ -898,14 +1026,21 @@ if _GTK_AVAILABLE:
                 # x,y — offset от начала drag
                 start_x, start_y = gesture.get_start_point()
                 # для drag-begin start == current
-                sx, sy = float(start_x[0] if isinstance(start_x, tuple) else start_x), float(start_y[0] if isinstance(start_y, tuple) else start_y)  # type: ignore
+                sx, sy = (
+                    float(start_x[0] if isinstance(start_x, tuple) else start_x),
+                    float(start_y[0] if isinstance(start_y, tuple) else start_y),
+                )  # type: ignore
                 # fallback: используем x,y как есть (Gtk4 drag begin x,y уже start)
                 if sx == 0 and sy == 0:
                     sx, sy = float(x), float(y)
                 # запомним в widget coords
                 gesture._start_widget = (sx, sy)  # type: ignore[attr-defined]
                 # конвертируем в pdf coords
-                w_pt, h_pt = self._page_sizes[page_idx] if page_idx < len(self._page_sizes) else (595.0, 842.0)
+                w_pt, h_pt = (
+                    self._page_sizes[page_idx]
+                    if page_idx < len(self._page_sizes)
+                    else (595.0, 842.0)
+                )
                 area = self._draw_areas.get(page_idx)
                 if area is None:
                     return
@@ -928,11 +1063,19 @@ if _GTK_AVAILABLE:
                 sx, sy = start
                 cur_x = sx + float(dx)
                 cur_y = sy + float(dy)
-                w_pt, h_pt = self._page_sizes[page_idx] if page_idx < len(self._page_sizes) else (595.0, 842.0)
+                w_pt, h_pt = (
+                    self._page_sizes[page_idx]
+                    if page_idx < len(self._page_sizes)
+                    else (595.0, 842.0)
+                )
                 area = self._draw_areas.get(page_idx)
                 alloc_w = area.get_content_width() if area else int(w_pt * self._zoom)
                 scale = (alloc_w / w_pt) if w_pt else self._zoom
-                pdf_sx, pdf_sy = getattr(gesture, "_start_pdf", (sx / scale if scale else sx, h_pt - sy / scale if scale else h_pt))
+                pdf_sx, pdf_sy = getattr(
+                    gesture,
+                    "_start_pdf",
+                    (sx / scale if scale else sx, h_pt - sy / scale if scale else h_pt),
+                )
                 pdf_cx = cur_x / scale if scale else cur_x
                 pdf_cy = h_pt - (cur_y / scale if scale else cur_y)
                 self._selection[page_idx] = (pdf_sx, pdf_sy, pdf_cx, pdf_cy)
@@ -962,11 +1105,15 @@ if _GTK_AVAILABLE:
                 self._queue_draw_page(page_idx)
                 # автоматически не создаём — ждём кнопку «Выделить»
                 # но если пользователь хочет — можно сразу выделить найденный текст
-                self._set_status(f"выделена область на стр. {page_idx+1} — нажми «Выделить» ({self._color})")
+                self._set_status(
+                    f"выделена область на стр. {page_idx + 1} — нажми «Выделить» ({self._color})"
+                )
             except Exception as e:
                 log.debug("drag end failed: %s", e)
 
-        def _on_page_click(self, gesture: Any, n_press: int, x: float, y: float, page_idx: int) -> None:
+        def _on_page_click(
+            self, gesture: Any, n_press: int, x: float, y: float, page_idx: int
+        ) -> None:
             # клик без drag — выбрать highlight под курсором
             if n_press != 1:
                 return
@@ -978,7 +1125,11 @@ if _GTK_AVAILABLE:
                 if abs(x2 - x1) > 3 or abs(y2 - y1) > 3:
                     return
             try:
-                w_pt, h_pt = self._page_sizes[page_idx] if page_idx < len(self._page_sizes) else (595.0, 842.0)
+                w_pt, h_pt = (
+                    self._page_sizes[page_idx]
+                    if page_idx < len(self._page_sizes)
+                    else (595.0, 842.0)
+                )
                 area = self._draw_areas.get(page_idx)
                 alloc_w = area.get_content_width() if area else int(w_pt * self._zoom)
                 scale = (alloc_w / w_pt) if w_pt else self._zoom
@@ -1004,7 +1155,9 @@ if _GTK_AVAILABLE:
                     self._del_btn.set_sensitive(True)
                     self._queue_draw_all()
                     self._select_list_row(found["id"])
-                    self._set_status(f"выбран highlight на стр. {page_idx+1}: «{found.get('text','')[:60]}»")
+                    self._set_status(
+                        f"выбран highlight на стр. {page_idx + 1}: «{found.get('text', '')[:60]}»"
+                    )
                 else:
                     # клик в пустое — снять выбор
                     if self._selected_id is not None:
@@ -1069,10 +1222,14 @@ if _GTK_AVAILABLE:
                                 text = ""
                             # selection region — точные quads
                             try:
-                                regs = page.get_selection_region(1.0, Poppler.SelectionStyle.GLYPH, pr)
+                                regs = page.get_selection_region(
+                                    1.0, Poppler.SelectionStyle.GLYPH, pr
+                                )
                                 if regs:
                                     for r in regs:
-                                        rects.append([float(r.x1), float(r.y1), float(r.x2), float(r.y2)])
+                                        rects.append(
+                                            [float(r.x1), float(r.y1), float(r.x2), float(r.y2)]
+                                        )
                             except Exception as e:
                                 log.debug("selection_region failed: %s", e)
                 except Exception as e:
@@ -1137,7 +1294,10 @@ if _GTK_AVAILABLE:
                 return
             # подтверждение
             try:
-                dlg = Adw.AlertDialog(heading="Удалить всё?", body=f"Будет удалено {len(self._highlights)} выделений. Отменить нельзя.")
+                dlg = Adw.AlertDialog(
+                    heading="Удалить всё?",
+                    body=f"Будет удалено {len(self._highlights)} выделений. Отменить нельзя.",
+                )
                 dlg.add_response("cancel", "Отмена")
                 dlg.add_response("ok", "Удалить")
                 dlg.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -1186,12 +1346,16 @@ if _GTK_AVAILABLE:
             self._list_empty.set_visible(False)
             self._list_scroller.set_visible(True)
             # сортировка по странице
-            sorted_hls = sorted(self._highlights, key=lambda h: (int(h.get("page", 0)), str(h.get("created", ""))))
+            sorted_hls = sorted(
+                self._highlights, key=lambda h: (int(h.get("page", 0)), str(h.get("created", "")))
+            )
             for hl in sorted_hls:
                 row = Gtk.ListBoxRow(css_classes=["pdf-row"], activatable=True, selectable=True)
                 if str(hl.get("id")) == self._selected_id:
                     row.add_css_class("pdf-row-selected")
-                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["pdf-row-box"])
+                box = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["pdf-row-box"]
+                )
                 box.set_margin_top(6)
                 box.set_margin_bottom(6)
                 box.set_margin_start(8)
@@ -1205,31 +1369,60 @@ if _GTK_AVAILABLE:
                     # inline style via css? используем ColorButton-подобный
                     r, g, b, a = _hex_to_rgba(color, 1.0)
                     # Gtk4 не позволяет set_style прямо, используем DrawingArea
-                    da = Gtk.DrawingArea(width_request=14, height_request=14, css_classes=["pdf-color-dot"])
+                    da = Gtk.DrawingArea(
+                        width_request=14, height_request=14, css_classes=["pdf-color-dot"]
+                    )
+
                     def _draw_dot(_da, cr, w, h, _data):
                         cr.set_source_rgba(r, g, b, 0.95)
-                        cr.arc(w/2, h/2, min(w,h)/2-1, 0, 6.28318)
+                        cr.arc(w / 2, h / 2, min(w, h) / 2 - 1, 0, 6.28318)
                         cr.fill()
+
                     da.set_draw_func(_draw_dot, None)
                     hdr.append(da)
                 except Exception:
                     hdr.append(Gtk.Label(label="●", css_classes=["pdf-color-label"]))
                 pg = int(hl.get("page", 0)) + 1
-                hdr.append(Gtk.Label(label=f"Стр. {pg}", css_classes=["dim-hint"], halign=Gtk.Align.START))
-                hdr.append(Gtk.Label(label=color, css_classes=["dim-hint", "pdf-color-hex"], halign=Gtk.Align.START))
+                hdr.append(
+                    Gtk.Label(label=f"Стр. {pg}", css_classes=["dim-hint"], halign=Gtk.Align.START)
+                )
+                hdr.append(
+                    Gtk.Label(
+                        label=color,
+                        css_classes=["dim-hint", "pdf-color-hex"],
+                        halign=Gtk.Align.START,
+                    )
+                )
                 hdr.set_hexpand(True)
                 box.append(hdr)
                 txt = str(hl.get("text", "")).strip()
                 if txt:
-                    lbl = Gtk.Label(label=txt[:120] + ("…" if len(txt) > 120 else ""), halign=Gtk.Align.START, xalign=0, wrap=True, ellipsize=Pango.EllipsizeMode.END, css_classes=["pdf-text"])
+                    lbl = Gtk.Label(
+                        label=txt[:120] + ("…" if len(txt) > 120 else ""),
+                        halign=Gtk.Align.START,
+                        xalign=0,
+                        wrap=True,
+                        ellipsize=Pango.EllipsizeMode.END,
+                        css_classes=["pdf-text"],
+                    )
                     box.append(lbl)
                 else:
                     # показать rects если нет текста
                     rects = hl.get("rects") or []
-                    lbl = Gtk.Label(label=f"{len(rects)} rect(s)", css_classes=["dim-hint"], halign=Gtk.Align.START)
+                    lbl = Gtk.Label(
+                        label=f"{len(rects)} rect(s)",
+                        css_classes=["dim-hint"],
+                        halign=Gtk.Align.START,
+                    )
                     box.append(lbl)
                 if hl.get("comment"):
-                    cmt = Gtk.Label(label=str(hl.get("comment"))[:120], halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint", "pdf-comment"])
+                    cmt = Gtk.Label(
+                        label=str(hl.get("comment"))[:120],
+                        halign=Gtk.Align.START,
+                        xalign=0,
+                        wrap=True,
+                        css_classes=["dim-hint", "pdf-comment"],
+                    )
                     box.append(cmt)
                 row.set_child(box)
                 row._hl_id = str(hl.get("id"))  # type: ignore[attr-defined]
@@ -1285,22 +1478,39 @@ if _GTK_AVAILABLE:
             try:
                 dlg = Adw.Dialog(title="Комментарий к highlight")
                 dlg.set_content_width(420)
-                body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["dialog-body"])
+                body = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["dialog-body"]
+                )
                 body.set_margin_top(12)
                 body.set_margin_bottom(12)
                 body.set_margin_start(16)
                 body.set_margin_end(16)
-                body.append(Gtk.Label(label=f"Стр. {int(hl.get('page',0))+1} · {hl.get('color')} · «{str(hl.get('text',''))[:80]}»", wrap=True, halign=Gtk.Align.START, css_classes=["dim-hint"]))
-                entry = Gtk.Entry(text=str(hl.get("comment", "")), placeholder_text="Комментарий (опционально)")
+                body.append(
+                    Gtk.Label(
+                        label=f"Стр. {int(hl.get('page', 0)) + 1} · {hl.get('color')} · «{str(hl.get('text', ''))[:80]}»",
+                        wrap=True,
+                        halign=Gtk.Align.START,
+                        css_classes=["dim-hint"],
+                    )
+                )
+                entry = Gtk.Entry(
+                    text=str(hl.get("comment", "")), placeholder_text="Комментарий (опционально)"
+                )
                 body.append(entry)
                 color_drop = Gtk.DropDown.new_from_strings(HIGHLIGHT_COLORS)
                 try:
-                    color_drop.set_selected(HIGHLIGHT_COLORS.index(_sanitize_color(hl.get("color"))))
+                    color_drop.set_selected(
+                        HIGHLIGHT_COLORS.index(_sanitize_color(hl.get("color")))
+                    )
                 except ValueError:
                     color_drop.set_selected(0)
-                body.append(Gtk.Label(label="Цвет", halign=Gtk.Align.START, css_classes=["dim-hint"]))
+                body.append(
+                    Gtk.Label(label="Цвет", halign=Gtk.Align.START, css_classes=["dim-hint"])
+                )
                 body.append(color_drop)
-                btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END)
+                btn_row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END
+                )
                 cancel = Gtk.Button(label="Отмена", css_classes=["mod-neutral"])
                 save = Gtk.Button(label="Сохранить", css_classes=["suggested-action"])
                 btn_row.append(cancel)
@@ -1354,11 +1564,13 @@ if _GTK_AVAILABLE:
             if abs(z - self._zoom) < 0.02:
                 return
             self._zoom = z
-            self._zoom_label.set_text(f"{int(z*100)}%")
+            self._zoom_label.set_text(f"{int(z * 100)}%")
             # пересоздать размеры
             for idx, area in self._draw_areas.items():
                 try:
-                    w_pt, h_pt = self._page_sizes[idx] if idx < len(self._page_sizes) else (595.0, 842.0)
+                    w_pt, h_pt = (
+                        self._page_sizes[idx] if idx < len(self._page_sizes) else (595.0, 842.0)
+                    )
                     area.set_content_width(int(w_pt * z))
                     area.set_content_height(int(h_pt * z))
                     area.queue_draw()
@@ -1405,12 +1617,16 @@ if _GTK_AVAILABLE:
                 data = {
                     "version": ANNOTATION_VERSION,
                     "pdf": self._pdf_path.name,
-                    "created": self._ann_data.get("created", _now_iso()) if isinstance(self._ann_data, dict) else _now_iso(),
+                    "created": self._ann_data.get("created", _now_iso())
+                    if isinstance(self._ann_data, dict)
+                    else _now_iso(),
                     "highlights": self._highlights,
                 }
                 ok = save_annotations(self._pdf_path, data)
                 if ok:
-                    self._set_status(f"сохранено: {ann_path_for(self._pdf_path).name} · {len(self._highlights)} highlights")
+                    self._set_status(
+                        f"сохранено: {ann_path_for(self._pdf_path).name} · {len(self._highlights)} highlights"
+                    )
                     # toast если есть overlay
                     try:
                         root = self.get_root()
@@ -1473,7 +1689,12 @@ if _GTK_AVAILABLE:
                     self._status.remove_css_class("error")
                 # auto-clear через 4 сек если не ошибка
                 if not is_error and text:
-                    GLib.timeout_add(4000, lambda: self._status.set_text("") or False if self._status.get_text() == text else False)
+                    GLib.timeout_add(
+                        4000,
+                        lambda: self._status.set_text("") or False
+                        if self._status.get_text() == text
+                        else False,
+                    )
             except Exception:
                 pass
 
@@ -1528,7 +1749,10 @@ else:  # headless stub — сохраняет API для py_compile/тестов
 
 # ── Dialog helpers (для files_view / app.py) ─────────────────────────
 
-def create_dialog(parent: Any | None, settings: dict | None, pdf_path: Path | str | None = None) -> Any | None:
+
+def create_dialog(
+    parent: Any | None, settings: dict | None, pdf_path: Path | str | None = None
+) -> Any | None:
     """Создать ``Adw.Dialog`` с ``PdfAnnotateView``. Возвращает диалог или None без GTK."""
     if not _GTK_AVAILABLE:
         return None
@@ -1561,7 +1785,9 @@ def create_dialog(parent: Any | None, settings: dict | None, pdf_path: Path | st
         return None
 
 
-def open_pdf_annotate(parent: Any | None, settings: dict | None, pdf_path: Path | str) -> Any | None:
+def open_pdf_annotate(
+    parent: Any | None, settings: dict | None, pdf_path: Path | str
+) -> Any | None:
     """Удобный хелпер для ``files_view``: открыть PDF в диалоге аннотаций."""
     p = Path(pdf_path)
     if not p.is_file():

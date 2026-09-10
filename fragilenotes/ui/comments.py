@@ -67,6 +67,7 @@ class Comment:
 
 # ── Низкоуровневые helpers (без GTK) ───────────────────────────────────────
 
+
 def get_comments_path(note_path: Path | str) -> Path:
     """Путь к sidecar ``file.md.comments.json``.
 
@@ -139,13 +140,15 @@ def save_comments(note_path: Path | str, comments: list[dict[str, Any]]) -> bool
             text = str(item.get("text", "")).strip()
             if not text or line < 1:
                 continue
-            cleaned.append({
-                "id": str(item.get("id") or uuid.uuid4().hex[:8]),
-                "line": line,
-                "text": text[:_MAX_TEXT_LEN],
-                "author": str(item.get("author", "user"))[:120],
-                "created": str(item.get("created", ""))[:40] or _now_iso(),
-            })
+            cleaned.append(
+                {
+                    "id": str(item.get("id") or uuid.uuid4().hex[:8]),
+                    "line": line,
+                    "text": text[:_MAX_TEXT_LEN],
+                    "author": str(item.get("author", "user"))[:120],
+                    "created": str(item.get("created", ""))[:40] or _now_iso(),
+                }
+            )
         except Exception:
             continue
         if len(cleaned) >= _MAX_COMMENTS_PER_FILE:
@@ -291,8 +294,12 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
          - кнопка «Добавить на текущей строке»
         """
 
-        def __init__(self, settings: dict[str, Any] | None = None, parent_view: Any | None = None) -> None:
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["comments-gutter"])
+        def __init__(
+            self, settings: dict[str, Any] | None = None, parent_view: Any | None = None
+        ) -> None:
+            super().__init__(
+                orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["comments-gutter"]
+            )
             self._settings = dict(settings) if settings is not None else {}
             self._parent = parent_view
             self._current: Path | None = None
@@ -313,36 +320,59 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
         def _build(self) -> None:
             # Заголовок
             header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            header.append(Gtk.Label(label="Комментарии", halign=Gtk.Align.START, css_classes=["comments-title"]))
+            header.append(
+                Gtk.Label(
+                    label="Комментарии", halign=Gtk.Align.START, css_classes=["comments-title"]
+                )
+            )
             self._count_label = Gtk.Label(label="", css_classes=["dim-hint"])
             header.append(self._count_label)
             header.set_hexpand(True)
-            self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить комментарии", css_classes=["flat", "comments-refresh"])
+            self._refresh_btn = Gtk.Button(
+                icon_name="view-refresh-symbolic",
+                tooltip_text="Обновить комментарии",
+                css_classes=["flat", "comments-refresh"],
+            )
             self._refresh_btn.connect("clicked", lambda *_: self.refresh())
             header.append(self._refresh_btn)
             self.append(header)
 
             # Кнопка добавить на текущей строке
             add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            self._add_btn = Gtk.Button(label="＋ Комментарий", css_classes=["flat", "comments-add"], tooltip_text="Добавить комментарий к текущей строке (клик по номеру строки)")
+            self._add_btn = Gtk.Button(
+                label="＋ Комментарий",
+                css_classes=["flat", "comments-add"],
+                tooltip_text="Добавить комментарий к текущей строке (клик по номеру строки)",
+            )
             self._add_btn.connect("clicked", self._on_add_current_line)
             self._add_btn.set_sensitive(False)
             add_row.append(self._add_btn)
             self.append(add_row)
 
             # Подсказка если файл не открыт
-            self._hint = Gtk.Label(label="Открой заметку — комментарии хранятся в file.md.comments.json", css_classes=["dim-hint", "comments-hint"], halign=Gtk.Align.START, xalign=0, wrap=True)
+            self._hint = Gtk.Label(
+                label="Открой заметку — комментарии хранятся в file.md.comments.json",
+                css_classes=["dim-hint", "comments-hint"],
+                halign=Gtk.Align.START,
+                xalign=0,
+                wrap=True,
+            )
             self._hint.set_visible(True)
             self.append(self._hint)
 
             # ── Номера строк (клик → добавить) ──
             # Заголовок секции
-            gutter_title = Gtk.Label(label="Строки — клик для комментария", halign=Gtk.Align.START, css_classes=["comments-subtitle"])
+            gutter_title = Gtk.Label(
+                label="Строки — клик для комментария",
+                halign=Gtk.Align.START,
+                css_classes=["comments-subtitle"],
+            )
             self.append(gutter_title)
             # FlowBox с кнопками номеров строк (компактный gutter)
             self._line_flow = Gtk.FlowBox(
                 selection_mode=Gtk.SelectionMode.NONE,
-                column_spacing=4, row_spacing=4,
+                column_spacing=4,
+                row_spacing=4,
                 max_children_per_line=8,
                 homogeneous=True,
                 css_classes=["comments-line-flow"],
@@ -362,8 +392,12 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
             self.append(self._line_scroller)
 
             # ── Список комментариев ──
-            self._list = Gtk.ListBox(css_classes=["comments-list"], selection_mode=Gtk.SelectionMode.NONE)
-            scroller = Gtk.ScrolledWindow(hexpand=False, vexpand=True, css_classes=["comments-scroller"])
+            self._list = Gtk.ListBox(
+                css_classes=["comments-list"], selection_mode=Gtk.SelectionMode.NONE
+            )
+            scroller = Gtk.ScrolledWindow(
+                hexpand=False, vexpand=True, css_classes=["comments-scroller"]
+            )
             scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             scroller.set_child(self._list)
             scroller.set_min_content_height(160)
@@ -376,7 +410,13 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
             self.append(self._comments_scroller)
 
             # пустое состояние списка
-            self._empty = Gtk.Label(label="— нет комментариев —\nкликни по номеру строки чтобы добавить", css_classes=["dim-hint", "comments-empty"], halign=Gtk.Align.CENTER, justify=Gtk.Justification.CENTER, wrap=True)
+            self._empty = Gtk.Label(
+                label="— нет комментариев —\nкликни по номеру строки чтобы добавить",
+                css_classes=["dim-hint", "comments-empty"],
+                halign=Gtk.Align.CENTER,
+                justify=Gtk.Justification.CENTER,
+                wrap=True,
+            )
             self._empty.set_visible(False)
             self.append(self._empty)
 
@@ -387,7 +427,11 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
         def _try_attach_buffer(self) -> None:
             # подключение к TextBuffer если parent_view уже имеет buffer
             try:
-                if self._parent is not None and hasattr(self._parent, "buffer") and self._parent.buffer is not None:
+                if (
+                    self._parent is not None
+                    and hasattr(self._parent, "buffer")
+                    and self._parent.buffer is not None
+                ):
                     buf = self._parent.buffer
                     # избежать двойного подключения
                     if getattr(self, "_buffer_handler", None) is None:
@@ -476,7 +520,12 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                 cnt = has_map.get(n, 0)
                 label = f"{n}·{cnt}" if cnt else str(n)
                 css = ["comments-line-btn", "comments-line-has"] if cnt else ["comments-line-btn"]
-                btn = Gtk.Button(label=label, css_classes=css, tooltip_text=f"Строка {n} — клик для комментария" + (f" · {cnt} комментарий" if cnt else ""))
+                btn = Gtk.Button(
+                    label=label,
+                    css_classes=css,
+                    tooltip_text=f"Строка {n} — клик для комментария"
+                    + (f" · {cnt} комментарий" if cnt else ""),
+                )
                 # capture n
                 _n = n
                 btn.connect("clicked", lambda _b, ln=_n: self._on_line_clicked(ln))
@@ -513,32 +562,59 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                     created = str(c.get("created", ""))[:19].replace("T", " ")
                 except Exception:
                     continue
-                row = Gtk.ListBoxRow(css_classes=["comments-row"], activatable=False, selectable=False)
+                row = Gtk.ListBoxRow(
+                    css_classes=["comments-row"], activatable=False, selectable=False
+                )
                 box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
                 box.set_margin_top(6)
                 box.set_margin_bottom(6)
                 box.set_margin_start(6)
                 box.set_margin_end(6)
                 # badge строки
-                badge = Gtk.Button(label=str(line), css_classes=["comments-badge"], tooltip_text=f"Клик — перейти к строке {line}")
+                badge = Gtk.Button(
+                    label=str(line),
+                    css_classes=["comments-badge"],
+                    tooltip_text=f"Клик — перейти к строке {line}",
+                )
                 _ln = line
                 badge.connect("clicked", lambda _b, ln=_ln: self._scroll_to_line(ln))
                 box.append(badge)
                 # текст
                 vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
-                txt_lbl = Gtk.Label(label=text, halign=Gtk.Align.START, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, css_classes=["comments-text"])
+                txt_lbl = Gtk.Label(
+                    label=text,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    wrap=True,
+                    wrap_mode=Pango.WrapMode.WORD_CHAR,
+                    css_classes=["comments-text"],
+                )
                 txt_lbl.set_tooltip_text(text)
                 vbox.append(txt_lbl)
-                meta = Gtk.Label(label=f"{author} · {created}" if created else author, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint", "comments-meta"], ellipsize=Pango.EllipsizeMode.END)
+                meta = Gtk.Label(
+                    label=f"{author} · {created}" if created else author,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    css_classes=["dim-hint", "comments-meta"],
+                    ellipsize=Pango.EllipsizeMode.END,
+                )
                 vbox.append(meta)
                 box.append(vbox)
                 # кнопки редактировать/удалить
-                edit_btn = Gtk.Button(icon_name="document-edit-symbolic", css_classes=["flat", "comments-edit"], tooltip_text="Редактировать")
+                edit_btn = Gtk.Button(
+                    icon_name="document-edit-symbolic",
+                    css_classes=["flat", "comments-edit"],
+                    tooltip_text="Редактировать",
+                )
                 _cid = cid
                 _txt = text
                 edit_btn.connect("clicked", lambda _b, cid=_cid, txt=_txt: self._on_edit(cid, txt))
                 box.append(edit_btn)
-                del_btn = Gtk.Button(icon_name="user-trash-symbolic", css_classes=["flat", "destructive-action", "comments-del"], tooltip_text="Удалить комментарий")
+                del_btn = Gtk.Button(
+                    icon_name="user-trash-symbolic",
+                    css_classes=["flat", "destructive-action", "comments-del"],
+                    tooltip_text="Удалить комментарий",
+                )
                 del_btn.connect("clicked", lambda _b, cid=_cid: self._on_delete(cid))
                 box.append(del_btn)
                 row.set_child(box)
@@ -578,17 +654,24 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                 return
             # диалог ввода текста комментария
             try:
-                dlg = Adw.AlertDialog(heading=f"Комментарий к строке {line}", body=f"Заметка: {self._current.name} · строка {line}\nХранение: {self._current.name}.comments.json")
+                dlg = Adw.AlertDialog(
+                    heading=f"Комментарий к строке {line}",
+                    body=f"Заметка: {self._current.name} · строка {line}\nХранение: {self._current.name}.comments.json",
+                )
             except Exception:
                 dlg = Gtk.Dialog(title=f"Комментарий — строка {line}")
             # Для Adw.AlertDialog — extra_child с Entry
             entry_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             entry_box.set_margin_top(8)
-            text_view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD, css_classes=["comments-entry"], height_request=80)
+            text_view = Gtk.TextView(
+                wrap_mode=Gtk.WrapMode.WORD, css_classes=["comments-entry"], height_request=80
+            )
             text_view.set_left_margin(6)
             text_view.set_right_margin(6)
             buf = text_view.get_buffer()
-            sc = Gtk.ScrolledWindow(hexpand=True, vexpand=False, css_classes=["comments-entry-scroller"])
+            sc = Gtk.ScrolledWindow(
+                hexpand=True, vexpand=False, css_classes=["comments-entry-scroller"]
+            )
             sc.set_child(text_view)
             sc.set_min_content_height(80)
             entry_box.append(sc)
@@ -602,6 +685,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                     dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
                     dlg.set_default_response("add")
                     dlg.set_close_response("cancel")
+
                     def _resp(_d: Any, resp: str) -> None:
                         if resp != "add":
                             return
@@ -610,6 +694,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                         if not txt:
                             return
                         self._do_add(line, txt)
+
                     dlg.connect("response", _resp)
                     dlg.present(self)
                     text_view.grab_focus()
@@ -633,14 +718,23 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                 content.set_margin_bottom(12)
                 content.set_margin_start(12)
                 content.set_margin_end(12)
-                content.append(Gtk.Label(label=f"Строка {line} · {self._current.name}", halign=Gtk.Align.START, css_classes=["dim-hint"]))
+                content.append(
+                    Gtk.Label(
+                        label=f"Строка {line} · {self._current.name}",
+                        halign=Gtk.Align.START,
+                        css_classes=["dim-hint"],
+                    )
+                )
                 content.append(sc)
-                btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END)
+                btn_row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END
+                )
                 cancel = Gtk.Button(label="Отмена")
                 ok = Gtk.Button(label="Добавить", css_classes=["suggested-action"])
                 btn_row.append(cancel)
                 btn_row.append(ok)
                 content.append(btn_row)
+
                 def _do(*_a: Any) -> None:
                     s, e = buf.get_bounds()
                     txt = buf.get_text(s, e, True).strip()
@@ -648,6 +742,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                         return
                     dlg.close()
                     self._do_add(line, txt)
+
                 ok.connect("clicked", _do)
                 cancel.connect("clicked", lambda *_: dlg.close())
                 text_view.connect("key-pressed", lambda *_: None)
@@ -694,13 +789,17 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                 return
             # подтверждение
             try:
-                dlg = Adw.AlertDialog(heading="Удалить комментарий?", body="Комментарий будет удалён из file.md.comments.json")
+                dlg = Adw.AlertDialog(
+                    heading="Удалить комментарий?",
+                    body="Комментарий будет удалён из file.md.comments.json",
+                )
                 dlg.add_response("cancel", "Отмена")
                 dlg.add_response("delete", "Удалить")
                 dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
                 dlg.set_default_response("cancel")
                 dlg.set_close_response("cancel")
                 _cid = comment_id
+
                 def _resp(_d: Any, resp: str) -> None:
                     if resp != "delete":
                         return
@@ -710,6 +809,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                             self.refresh()
                     except Exception:
                         pass
+
                 dlg.connect("response", _resp)
                 dlg.present(self)
                 return
@@ -747,6 +847,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                     dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
                     dlg.set_default_response("save")
                     dlg.set_close_response("cancel")
+
                     def _resp(_d: Any, resp: str) -> None:
                         if resp != "save":
                             return
@@ -759,6 +860,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                                 self.refresh()
                         except Exception:
                             pass
+
                     dlg.connect("response", _resp)
                     dlg.present(self)
                     return
@@ -780,12 +882,15 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                 content.set_margin_start(12)
                 content.set_margin_end(12)
                 content.append(sc)
-                btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END)
+                btn_row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END
+                )
                 cancel = Gtk.Button(label="Отмена")
                 ok = Gtk.Button(label="Сохранить", css_classes=["suggested-action"])
                 btn_row.append(cancel)
                 btn_row.append(ok)
                 content.append(btn_row)
+
                 def _do(*_a: Any) -> None:
                     s, e = buf.get_bounds()
                     txt = buf.get_text(s, e, True).strip()
@@ -797,6 +902,7 @@ if Gtk is not None:  # pragma: no cover — GTK присутствует в ра
                             self.refresh()
                     except Exception:
                         pass
+
                 ok.connect("clicked", _do)
                 cancel.connect("clicked", lambda *_: dlg.close())
                 dlg.present()

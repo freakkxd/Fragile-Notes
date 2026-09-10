@@ -254,7 +254,9 @@ if _GTK_AVAILABLE:
         """Split view: слева TextView-редактор, справа WebView preview с 300 мс debounce + incremental."""
 
         def __init__(self, settings: dict | None = None, initial_code: str | None = None) -> None:
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True)
+            super().__init__(
+                orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True
+            )
             self.settings = dict(settings or {})
             self._preview_timer: int | None = None
             self._webview: object | None = None
@@ -280,9 +282,17 @@ if _GTK_AVAILABLE:
         def _build(self, initial_code: str) -> None:
             from .widgets import view_header  # local import to avoid cycle
 
-            self.append(view_header("∑", "LaTeX Live", "Split view: слева редактор, справа live preview (KaTeX incremental, 300 мс debounce)"))
+            self.append(
+                view_header(
+                    "∑",
+                    "LaTeX Live",
+                    "Split view: слева редактор, справа live preview (KaTeX incremental, 300 мс debounce)",
+                )
+            )
 
-            toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"])
+            toolbar = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"]
+            )
             toolbar.set_margin_start(14)
             toolbar.set_margin_end(14)
 
@@ -308,11 +318,20 @@ if _GTK_AVAILABLE:
             toolbar.append(ex_btn)
 
             # actions
-            copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Копировать LaTeX", css_classes=["flat"])
+            copy_btn = Gtk.Button(
+                icon_name="edit-copy-symbolic",
+                tooltip_text="Копировать LaTeX",
+                css_classes=["flat"],
+            )
             copy_btn.connect("clicked", self._on_copy)
             toolbar.append(copy_btn)
 
-            export_btn = Gtk.Button(label="Экспорт PNG", icon_name="document-save-symbolic", css_classes=["flat"], tooltip_text="Экспорт в PNG (matplotlib/pdflatex)")
+            export_btn = Gtk.Button(
+                label="Экспорт PNG",
+                icon_name="document-save-symbolic",
+                css_classes=["flat"],
+                tooltip_text="Экспорт в PNG (matplotlib/pdflatex)",
+            )
             export_btn.connect("clicked", self._on_export)
             toolbar.append(export_btn)
 
@@ -326,13 +345,25 @@ if _GTK_AVAILABLE:
             self._save_btn = save_btn
 
             # status
-            self._status = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.END, xalign=1, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            self._status = Gtk.Label(
+                label="",
+                css_classes=["dim-hint"],
+                hexpand=True,
+                halign=Gtk.Align.END,
+                xalign=1,
+                ellipsize=Pango.EllipsizeMode.MIDDLE,
+            )
             toolbar.append(self._status)
 
             self.append(toolbar)
 
             # Paned split
-            paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True, vexpand=True, css_classes=["latex-live-paned"])
+            paned = Gtk.Paned(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["latex-live-paned"],
+            )
             paned.set_margin_start(14)
             paned.set_margin_end(14)
             paned.set_margin_bottom(14)
@@ -346,11 +377,21 @@ if _GTK_AVAILABLE:
                 pass
 
             # ── left: editor ──────────────────────────────────────
-            left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True)
+            left = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True
+            )
             left.set_size_request(380, -1)
             left_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            left_hdr.append(Gtk.Label(label="Редактор", css_classes=["dim-hint", "latex-header"], halign=Gtk.Align.START))
-            self._line_label = Gtk.Label(label="—", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1)
+            left_hdr.append(
+                Gtk.Label(
+                    label="Редактор",
+                    css_classes=["dim-hint", "latex-header"],
+                    halign=Gtk.Align.START,
+                )
+            )
+            self._line_label = Gtk.Label(
+                label="—", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1
+            )
             left_hdr.append(self._line_label)
             clear_btn = Gtk.Button(label="Очистить", css_classes=["flat", "pill"])
             clear_btn.connect("clicked", self._on_clear)
@@ -390,29 +431,55 @@ if _GTK_AVAILABLE:
             left.append(hint)
 
             # ── right: preview ────────────────────────────────────
-            right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True)
+            right = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True
+            )
             right.set_size_request(380, -1)
             right_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            right_hdr.append(Gtk.Label(label="Preview (KaTeX incremental, 300 мс)", css_classes=["dim-hint", "latex-header"], halign=Gtk.Align.START))
-            self._preview_status = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1)
+            right_hdr.append(
+                Gtk.Label(
+                    label="Preview (KaTeX incremental, 300 мс)",
+                    css_classes=["dim-hint", "latex-header"],
+                    halign=Gtk.Align.START,
+                )
+            )
+            self._preview_status = Gtk.Label(
+                label="", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1
+            )
             right_hdr.append(self._preview_status)
-            refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить сейчас", css_classes=["flat"])
+            refresh_btn = Gtk.Button(
+                icon_name="view-refresh-symbolic",
+                tooltip_text="Обновить сейчас",
+                css_classes=["flat"],
+            )
             refresh_btn.connect("clicked", lambda *_: self._schedule_preview(force=True))
             right_hdr.append(refresh_btn)
             right.append(right_hdr)
 
             # preview stack: webview | fallback
-            self._preview_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
+            self._preview_stack = Gtk.Stack(
+                transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True
+            )
 
             # webview container
-            self._web_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
-            self._web_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame", "latex-frame"])
+            self._web_container = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True
+            )
+            self._web_scroll = Gtk.ScrolledWindow(
+                hexpand=True, vexpand=True, css_classes=["editor-frame", "latex-frame"]
+            )
             self._web_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             self._web_container.append(self._web_scroll)
             self._preview_stack.add_named(self._web_container, "webview")
 
             # fallback container
-            fb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True, css_classes=["latex-fallback"])
+            fb_box = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL,
+                spacing=8,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["latex-fallback"],
+            )
             fb_box.set_margin_top(12)
             fb_box.set_margin_start(12)
             fb_box.set_margin_end(12)
@@ -424,7 +491,12 @@ if _GTK_AVAILABLE:
                 xalign=0,
             )
             fb_box.append(self._fallback_label)
-            self._fallback_view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD, css_classes=["latex-code"])
+            self._fallback_view = Gtk.TextView(
+                editable=False,
+                cursor_visible=False,
+                wrap_mode=Gtk.WrapMode.WORD,
+                css_classes=["latex-code"],
+            )
             self._fallback_view.set_size_request(-1, 160)
             fb_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame"])
             fb_scroll.set_child(self._fallback_view)
@@ -571,7 +643,11 @@ if _GTK_AVAILABLE:
                 # no webkit — показать PNG или текст
                 self._show_fallback_png(code)
                 self._preview_stack.set_visible_child_name("fallback")
-                self._preview_status.set_text("WebKit нет — PNG/текст (incremental кэш)" if is_incremental_hit else "WebKit нет — PNG/текст")
+                self._preview_status.set_text(
+                    "WebKit нет — PNG/текст (incremental кэш)"
+                    if is_incremental_hit
+                    else "WebKit нет — PNG/текст"
+                )
                 GLib.timeout_add(1200, self._clear_preview_status)
 
         def _show_fallback_png(self, code: str) -> None:
@@ -775,7 +851,9 @@ if _GTK_AVAILABLE:
             try:
                 dlg = Gtk.FileDialog()
                 dlg.set_title("Сохранить LaTeX")
-                dlg.set_initial_name(self._current_file.name if self._current_file else "formula.tex")
+                dlg.set_initial_name(
+                    self._current_file.name if self._current_file else "formula.tex"
+                )
 
                 def _on_save(d, res) -> None:
                     try:
@@ -855,7 +933,9 @@ else:  # headless fallback
 
 
 # ── Dialog helper (for FilesView integration) ──────────────────────────
-def create_dialog(parent: object | None, settings: dict | None, initial_code: str | None = None) -> object | None:
+def create_dialog(
+    parent: object | None, settings: dict | None, initial_code: str | None = None
+) -> object | None:
     """Создать Adw.Dialog с LatexLiveView. Возвращает диалог или None без GTK."""
     if not _GTK_AVAILABLE:
         return None
@@ -889,10 +969,20 @@ def create_dialog(parent: object | None, settings: dict | None, initial_code: st
         return None
 
 
-def open_latex_live(parent: Gtk.Widget | None, settings: dict | None, code: str | None = None) -> object | None:
+def open_latex_live(
+    parent: Gtk.Widget | None, settings: dict | None, code: str | None = None
+) -> object | None:
     """Удобный хелпер для FilesView: открыть live-диалог с кодом."""
     c = _sanitize(code or EXAMPLES["Display"])
     return create_dialog(parent, settings or {}, initial_code=c)
 
 
-__all__ = ["LatexLiveView", "create_dialog", "open_latex_live", "extract_code_from_text", "EXAMPLES", "DEBOUNCE_MS", "ENGINES"]
+__all__ = [
+    "LatexLiveView",
+    "create_dialog",
+    "open_latex_live",
+    "extract_code_from_text",
+    "EXAMPLES",
+    "DEBOUNCE_MS",
+    "ENGINES",
+]

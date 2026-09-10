@@ -103,7 +103,6 @@ def apply_theme(theme: Any) -> str:
     try:
         display = Gdk.Display.get_default()
         if display is not None:
-
             for win in Gtk.Window.list_toplevels():
                 if not hasattr(win, "get_css_classes"):
                     continue

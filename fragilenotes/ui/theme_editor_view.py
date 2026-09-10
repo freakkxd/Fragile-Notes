@@ -43,7 +43,9 @@ log = logging.getLogger(__name__)
 _VAR_RE = re.compile(r"--([\w-]+)\s*:\s*([^;]+);")
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _RGB_TRIPLE_RE = re.compile(r"^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$")
-_RGBA_RE = re.compile(r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)", re.I)
+_RGBA_RE = re.compile(
+    r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)", re.I
+)
 
 # ── Дефолтные переменные (выжимка из style.CSS window { }) ───────────────
 DEFAULT_VARS: dict[str, str] = {
@@ -87,6 +89,7 @@ DEFAULT_EDITABLE_HEX: dict[str, str] = {}
 
 
 # ── Чистые хелперы ─────────────────────────────────────────────────────────
+
 
 def normalize_hex(value: str) -> str | None:
     """Привести к #rrggbb или None если не hex."""
@@ -238,6 +241,7 @@ for _v, _l, _d, _k in EDITABLE_COLORS:
 
 # ── GUI helpers ────────────────────────────────────────────────────────────
 
+
 def _rgba_from_hex(hex_color: str, alpha: float = 1.0) -> Gdk.RGBA:
     rgba = Gdk.RGBA()
     h = normalize_hex(hex_color) or "#000000"
@@ -320,6 +324,7 @@ def _set_button_rgba(btn, rgba: Gdk.RGBA) -> None:
 
 # ── ThemeEditorView ───────────────────────────────────────────────────────
 
+
 class ThemeEditorView(Gtk.Box):
     """Вкладка редактора тем."""
 
@@ -375,9 +380,14 @@ class ThemeEditorView(Gtk.Box):
                 # найдём последний } window-блока
                 m = re.search(r"window\s*\{[^}]*\}", css_text, flags=re.S)
                 if m:
-                    tail = css_text[m.end():].strip()
+                    tail = css_text[m.end() :].strip()
                     # убрать комменты extra заголовка
-                    tail = re.sub(r"/\*.*?custom theme.*?vault/_System/custom\.css.*?\*/", "", tail, flags=re.S | re.I).strip()
+                    tail = re.sub(
+                        r"/\*.*?custom theme.*?vault/_System/custom\.css.*?\*/",
+                        "",
+                        tail,
+                        flags=re.S | re.I,
+                    ).strip()
                     tail = re.sub(r"/\*\s*─+\s*extra\s*─+\s*\*/", "", tail, flags=re.I).strip()
                     self._extra_raw = tail
                 else:
@@ -410,38 +420,73 @@ class ThemeEditorView(Gtk.Box):
 
     # ── UI ───────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        self.append(view_header("🎨", "Редактор темы", "Кастом CSS · выбор цветов · предпросмотр · сохранение в vault/_System/custom.css"))
+        self.append(
+            view_header(
+                "🎨",
+                "Редактор темы",
+                "Кастом CSS · выбор цветов · предпросмотр · сохранение в vault/_System/custom.css",
+            )
+        )
 
         # toolbar
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["toolbar", "theme-editor-toolbar"])
+        bar = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            css_classes=["toolbar", "theme-editor-toolbar"],
+        )
         bar.set_margin_start(14)
         bar.set_margin_end(14)
-        save_btn = Gtk.Button(label="💾 Сохранить", css_classes=["suggested-action", "mod-cta"], tooltip_text="Сохранить в vault/_System/custom.css")
+        save_btn = Gtk.Button(
+            label="💾 Сохранить",
+            css_classes=["suggested-action", "mod-cta"],
+            tooltip_text="Сохранить в vault/_System/custom.css",
+        )
         save_btn.connect("clicked", lambda *_: self._on_save())
         bar.append(save_btn)
         self._save_btn = save_btn
 
-        preview_btn = Gtk.Button(label="👁️ Превью", css_classes=["mod-neutral"], tooltip_text="Применить превью глобально без сохранения")
+        preview_btn = Gtk.Button(
+            label="👁️ Превью",
+            css_classes=["mod-neutral"],
+            tooltip_text="Применить превью глобально без сохранения",
+        )
         preview_btn.connect("clicked", lambda *_: self._on_preview_global())
         bar.append(preview_btn)
 
-        clear_preview_btn = Gtk.Button(label="↩︎ Сбросить превью", css_classes=["mod-neutral"], tooltip_text="Убрать превью (перезагрузить сохранённый custom.css)")
+        clear_preview_btn = Gtk.Button(
+            label="↩︎ Сбросить превью",
+            css_classes=["mod-neutral"],
+            tooltip_text="Убрать превью (перезагрузить сохранённый custom.css)",
+        )
         clear_preview_btn.connect("clicked", lambda *_: self._on_clear_preview())
         bar.append(clear_preview_btn)
 
-        reset_btn = Gtk.Button(label="↺ Сбросить", css_classes=["mod-neutral"], tooltip_text="Вернуть дефолтные цвета")
+        reset_btn = Gtk.Button(
+            label="↺ Сбросить", css_classes=["mod-neutral"], tooltip_text="Вернуть дефолтные цвета"
+        )
         reset_btn.connect("clicked", lambda *_: self._on_reset())
         bar.append(reset_btn)
 
-        open_btn = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Открыть папку _System")
+        open_btn = Gtk.Button(
+            icon_name="folder-open-symbolic", tooltip_text="Открыть папку _System"
+        )
         open_btn.connect("clicked", lambda *_: self._on_open_folder())
         bar.append(open_btn)
 
-        reload_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Перечитать custom.css с диска")
+        reload_btn = Gtk.Button(
+            icon_name="view-refresh-symbolic", tooltip_text="Перечитать custom.css с диска"
+        )
         reload_btn.connect("clicked", lambda *_: self._on_reload())
         bar.append(reload_btn)
 
-        self._status_lbl = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self._status_lbl = Gtk.Label(
+            label="",
+            css_classes=["dim-hint"],
+            hexpand=True,
+            halign=Gtk.Align.START,
+            xalign=0,
+            ellipsize=Pango.EllipsizeMode.END,
+        )
         bar.append(self._status_lbl)
 
         self.append(bar)
@@ -449,7 +494,14 @@ class ThemeEditorView(Gtk.Box):
         # info path
         try:
             cpath = custom_css_path_for(self.settings)
-            path_lbl = Gtk.Label(label=f"Файл: {cpath}", halign=Gtk.Align.START, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, css_classes=["dim-label", "dim-hint"])
+            path_lbl = Gtk.Label(
+                label=f"Файл: {cpath}",
+                halign=Gtk.Align.START,
+                xalign=0,
+                wrap=True,
+                wrap_mode=Pango.WrapMode.WORD_CHAR,
+                css_classes=["dim-label", "dim-hint"],
+            )
             path_lbl.set_margin_start(14)
             path_lbl.set_margin_end(14)
             self.append(path_lbl)
@@ -458,7 +510,9 @@ class ThemeEditorView(Gtk.Box):
             self._path_lbl = None
 
         # content: paned-like horizontal
-        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, hexpand=True, vexpand=True)
+        content = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=12, hexpand=True, vexpand=True
+        )
         content.set_margin_start(14)
         content.set_margin_end(14)
         content.set_margin_bottom(14)
@@ -488,9 +542,33 @@ class ThemeEditorView(Gtk.Box):
 
         # help card
         help_card, help_box = self._glass_card("💡 Подсказки")
-        help_box.append(Gtk.Label(label="Цвета сохраняются как CSS-переменные в window { }.\nМожно дописать любой CSS в поле Raw — он добавится после блока.\nПревью применяет стили только к правой панели; кнопка «Превью» — ко всему приложению (без записи на диск).", wrap=True, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]))
-        help_box.append(Gtk.Label(label="Файл: vault/_System/custom.css — отслеживается FileMonitor, изменения подхватываются автоматически.", wrap=True, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]))
-        help_box.append(Gtk.Label(label="Совет: для полного кастома — правь Raw CSS напрямую (например переопредели .card, .glass-card и т.д.).", wrap=True, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]))
+        help_box.append(
+            Gtk.Label(
+                label="Цвета сохраняются как CSS-переменные в window { }.\nМожно дописать любой CSS в поле Raw — он добавится после блока.\nПревью применяет стили только к правой панели; кнопка «Превью» — ко всему приложению (без записи на диск).",
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+            )
+        )
+        help_box.append(
+            Gtk.Label(
+                label="Файл: vault/_System/custom.css — отслеживается FileMonitor, изменения подхватываются автоматически.",
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+            )
+        )
+        help_box.append(
+            Gtk.Label(
+                label="Совет: для полного кастома — правь Raw CSS напрямую (например переопредели .card, .glass-card и т.д.).",
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+            )
+        )
         right.append(help_card)
 
         content.append(right)
@@ -507,7 +585,9 @@ class ThemeEditorView(Gtk.Box):
 
     def _glass_card(self, title: str, count: str | None = None) -> tuple[Gtk.Box, Gtk.Box]:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["glass-card"])
-        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["glass-card__head"])
+        head = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["glass-card__head"]
+        )
         head.append(Gtk.Label(label=title, css_classes=["glass-card__title"]))
         if count is not None:
             head.append(Gtk.Label(label=count, css_classes=["glass-card__count"]))
@@ -524,25 +604,51 @@ class ThemeEditorView(Gtk.Box):
         grid = Gtk.Grid(column_spacing=8, row_spacing=6, column_homogeneous=False)
         grid.set_margin_top(4)
         # header
-        grid.attach(Gtk.Label(label="Переменная", halign=Gtk.Align.START, css_classes=["dim-hint", "settings-label"]), 0, 0, 1, 1)
-        grid.attach(Gtk.Label(label="Цвет", halign=Gtk.Align.CENTER, css_classes=["dim-hint"]), 1, 0, 1, 1)
-        grid.attach(Gtk.Label(label="HEX", halign=Gtk.Align.START, css_classes=["dim-hint"]), 2, 0, 1, 1)
+        grid.attach(
+            Gtk.Label(
+                label="Переменная",
+                halign=Gtk.Align.START,
+                css_classes=["dim-hint", "settings-label"],
+            ),
+            0,
+            0,
+            1,
+            1,
+        )
+        grid.attach(
+            Gtk.Label(label="Цвет", halign=Gtk.Align.CENTER, css_classes=["dim-hint"]), 1, 0, 1, 1
+        )
+        grid.attach(
+            Gtk.Label(label="HEX", halign=Gtk.Align.START, css_classes=["dim-hint"]), 2, 0, 1, 1
+        )
         grid.attach(Gtk.Label(label="", halign=Gtk.Align.CENTER), 3, 0, 1, 1)
 
         for idx, (var, label, default, kind) in enumerate(EDITABLE_COLORS, start=1):
             row = idx
-            name_lbl = Gtk.Label(label=label, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["settings-label"])
+            name_lbl = Gtk.Label(
+                label=label,
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+                css_classes=["settings-label"],
+            )
             name_lbl.set_tooltip_text(f"{var} · {kind} · дефолт {default}")
-            var_lbl = Gtk.Label(label=var, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"])
+            var_lbl = Gtk.Label(
+                label=var, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]
+            )
             var_lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
             vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             vbox.append(name_lbl)
             vbox.append(var_lbl)
             grid.attach(vbox, 0, row, 1, 1)
 
-            init_hex = self._hex_map.get(var, rgb_string_to_hex(default) if kind in ("rgb", "rgba") else default)
+            init_hex = self._hex_map.get(
+                var, rgb_string_to_hex(default) if kind in ("rgb", "rgba") else default
+            )
             if kind in ("rgb", "rgba") and not init_hex.startswith("#"):
-                init_hex = rgb_string_to_hex(init_hex) if kind == "rgb" else rgba_string_to_hex(init_hex)
+                init_hex = (
+                    rgb_string_to_hex(init_hex) if kind == "rgb" else rgba_string_to_hex(init_hex)
+                )
 
             btn = _make_color_button(init_hex)
             btn.set_size_request(44, 28)
@@ -554,7 +660,9 @@ class ThemeEditorView(Gtk.Box):
                         pass
                     # try both signals
                     try:
-                        btn.connect("notify::rgba", lambda w, *_a, v=var: self._on_color_changed(v, w))
+                        btn.connect(
+                            "notify::rgba", lambda w, *_a, v=var: self._on_color_changed(v, w)
+                        )
                     except Exception:
                         pass
                     try:
@@ -569,7 +677,9 @@ class ThemeEditorView(Gtk.Box):
             grid.attach(btn, 1, row, 1, 1)
             self._color_buttons[var] = btn
 
-            entry = Gtk.Entry(text=init_hex, width_chars=9, max_width_chars=9, css_classes=["theme-hex-entry"])
+            entry = Gtk.Entry(
+                text=init_hex, width_chars=9, max_width_chars=9, css_classes=["theme-hex-entry"]
+            )
             entry.set_tooltip_text("HEX #rrggbb")
             entry.connect("changed", lambda w, v=var: self._on_entry_changed(v, w))
             entry.connect("activate", lambda *_: self._apply_entry_to_button())
@@ -584,9 +694,17 @@ class ThemeEditorView(Gtk.Box):
         # global hex sync button
         sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         sync_row.set_margin_top(8)
-        to_raw = Gtk.Button(label="→ В CSS", css_classes=["mod-neutral", "btn-sm"], tooltip_text="Обновить Raw CSS из цветов")
+        to_raw = Gtk.Button(
+            label="→ В CSS",
+            css_classes=["mod-neutral", "btn-sm"],
+            tooltip_text="Обновить Raw CSS из цветов",
+        )
         to_raw.connect("clicked", lambda *_: self._update_raw_from_map())
-        from_raw = Gtk.Button(label="← Из CSS", css_classes=["mod-neutral", "btn-sm"], tooltip_text="Распарсить Raw CSS и обновить цвета")
+        from_raw = Gtk.Button(
+            label="← Из CSS",
+            css_classes=["mod-neutral", "btn-sm"],
+            tooltip_text="Распарсить Raw CSS и обновить цвета",
+        )
         from_raw.connect("clicked", lambda *_: self._update_map_from_raw())
         sync_row.append(to_raw)
         sync_row.append(from_raw)
@@ -594,7 +712,12 @@ class ThemeEditorView(Gtk.Box):
 
     def _build_raw_editor(self, parent: Gtk.Box) -> None:
         self._raw_buffer = Gtk.TextBuffer()
-        self._raw_view = Gtk.TextView(buffer=self._raw_buffer, wrap_mode=Gtk.WrapMode.WORD, css_classes=["editor"], monospace=True)
+        self._raw_view = Gtk.TextView(
+            buffer=self._raw_buffer,
+            wrap_mode=Gtk.WrapMode.WORD,
+            css_classes=["editor"],
+            monospace=True,
+        )
         self._raw_view.set_top_margin(6)
         self._raw_view.set_bottom_margin(6)
         self._raw_view.set_left_margin(8)
@@ -604,26 +727,55 @@ class ThemeEditorView(Gtk.Box):
         except Exception:
             pass
         self._raw_buffer.connect("changed", self._on_raw_changed)
-        scroller = Gtk.ScrolledWindow(vexpand=True, min_content_height=180, max_content_height=320, css_classes=["editor-frame"])
+        scroller = Gtk.ScrolledWindow(
+            vexpand=True,
+            min_content_height=180,
+            max_content_height=320,
+            css_classes=["editor-frame"],
+        )
         scroller.set_child(self._raw_view)
         scroller.set_vexpand(True)
-        parent.append(Gtk.Label(label="Raw custom.css — можно править напрямую. Кнопка «Сохранить» запишет сюда файл.", halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"], wrap=True))
+        parent.append(
+            Gtk.Label(
+                label="Raw custom.css — можно править напрямую. Кнопка «Сохранить» запишет сюда файл.",
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+                wrap=True,
+            )
+        )
         parent.append(scroller)
 
     def _build_preview_box(self, parent: Gtk.Box) -> None:
-        self._preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["theme-preview"])
+        self._preview_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["theme-preview"]
+        )
         self._preview_box.set_margin_top(4)
 
         # title row
-        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["view-header"])
+        head = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["view-header"]
+        )
         head.append(Gtk.Label(label="🎨", css_classes=["view-emoji"]))
         head.append(Gtk.Label(label="Превью темы", css_classes=["view-title"]))
         self._preview_box.append(head)
 
         # card preview
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["card", "glass-card"])
-        card.append(Gtk.Label(label="Карточка", halign=Gtk.Align.START, css_classes=["glass-card__title"]))
-        card.append(Gtk.Label(label="Пример текста и muted текст для проверки контраста.", wrap=True, halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]))
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["card", "glass-card"]
+        )
+        card.append(
+            Gtk.Label(label="Карточка", halign=Gtk.Align.START, css_classes=["glass-card__title"])
+        )
+        card.append(
+            Gtk.Label(
+                label="Пример текста и muted текст для проверки контраста.",
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+            )
+        )
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.append(Gtk.Button(label="Кнопка", css_classes=["suggested-action"]))
         row.append(Gtk.Button(label="Вторичная", css_classes=["mod-neutral"]))
@@ -634,7 +786,11 @@ class ThemeEditorView(Gtk.Box):
         # KPI strip
         kpi = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["kpi-strip"])
         for tone in ("idle", "ok", "warn", "error"):
-            chip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, css_classes=["kpi-chip", f"kpi-chip--{tone}"])
+            chip = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL,
+                spacing=1,
+                css_classes=["kpi-chip", f"kpi-chip--{tone}"],
+            )
             chip.append(Gtk.Label(label="42", css_classes=["kpi-chip__value"]))
             chip.append(Gtk.Label(label=tone, css_classes=["kpi-chip__label"]))
             kpi.append(chip)
@@ -642,8 +798,12 @@ class ThemeEditorView(Gtk.Box):
 
         # editor preview
         buf = Gtk.TextBuffer()
-        buf.set_text("# Заголовок\n\nТекст **жирный** и `код` — проверка типографики.\n\n- пункт 1\n- пункт 2\n")
-        tv = Gtk.TextView(buffer=buf, wrap_mode=Gtk.WrapMode.WORD, css_classes=["editor", "prose"], editable=False)
+        buf.set_text(
+            "# Заголовок\n\nТекст **жирный** и `код` — проверка типографики.\n\n- пункт 1\n- пункт 2\n"
+        )
+        tv = Gtk.TextView(
+            buffer=buf, wrap_mode=Gtk.WrapMode.WORD, css_classes=["editor", "prose"], editable=False
+        )
         tv.set_size_request(-1, 90)
         sc = Gtk.ScrolledWindow(css_classes=["editor-frame"], min_content_height=90)
         sc.set_child(tv)
@@ -718,7 +878,11 @@ class ThemeEditorView(Gtk.Box):
                     _set_button_rgba(btn, _rgba_from_hex(nh))
 
     def _reset_one(self, var: str, default: str, kind: str) -> None:
-        hexv = normalize_hex(default) if kind == "hex" else (rgb_string_to_hex(default) if kind == "rgb" else rgba_string_to_hex(default))
+        hexv = (
+            normalize_hex(default)
+            if kind == "hex"
+            else (rgb_string_to_hex(default) if kind == "rgb" else rgba_string_to_hex(default))
+        )
         hexv = hexv or default
         self._updating = True
         try:
@@ -758,8 +922,10 @@ class ThemeEditorView(Gtk.Box):
         # tail extra
         m = re.search(r"window\s*\{[^}]*\}", text, flags=re.S)
         if m:
-            tail = text[m.end():].strip()
-            tail = re.sub(r"/\*.*?custom theme.*?vault/_System/custom\.css.*?\*/", "", tail, flags=re.S | re.I).strip()
+            tail = text[m.end() :].strip()
+            tail = re.sub(
+                r"/\*.*?custom theme.*?vault/_System/custom\.css.*?\*/", "", tail, flags=re.S | re.I
+            ).strip()
             tail = re.sub(r"/\*\s*─+\s*extra\s*─+\s*\*/", "", tail, flags=re.I).strip()
             self._extra_raw = tail
         else:
@@ -788,21 +954,29 @@ class ThemeEditorView(Gtk.Box):
                     ent.set_text(hexv)
                 changed += 1
             self._sync_preview()
-            self._set_status(f"импорт из CSS: {changed} цветов обновлено" if changed else "в CSS не найдены редактируемые переменные")
+            self._set_status(
+                f"импорт из CSS: {changed} цветов обновлено"
+                if changed
+                else "в CSS не найдены редактируемые переменные"
+            )
         finally:
             self._updating = False
 
     def _sync_preview(self) -> None:
         """Применить текущий CSS только к preview-контейнеру."""
         start, end = self._raw_buffer.get_bounds()
-        css_text = self._raw_buffer.get_text(start, end, True) if hasattr(self, "_raw_buffer") else ""
+        css_text = (
+            self._raw_buffer.get_text(start, end, True) if hasattr(self, "_raw_buffer") else ""
+        )
         if not css_text.strip():
             return
         # применяем к preview_box через провайдер
         try:
             if self._preview_provider is not None:
                 try:
-                    Gtk.StyleContext.remove_provider_for_display(Gdk.Display.get_default(), self._preview_provider)
+                    Gtk.StyleContext.remove_provider_for_display(
+                        Gdk.Display.get_default(), self._preview_provider
+                    )
                 except Exception:
                     pass
                 self._preview_provider = None
@@ -820,10 +994,14 @@ class ThemeEditorView(Gtk.Box):
             if display is not None:
                 # вместо display применяем к конкретному виджету если возможно (Gtk4.10+)
                 try:
-                    self._preview_box.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+                    self._preview_box.get_style_context().add_provider(
+                        provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
+                    )
                     self._preview_provider = provider
                 except Exception:
-                    Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER - 1)
+                    Gtk.StyleContext.add_provider_for_display(
+                        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER - 1
+                    )
                     self._preview_provider = provider
         except Exception as exc:
             log.debug("preview css failed: %s", exc)
@@ -872,7 +1050,11 @@ class ThemeEditorView(Gtk.Box):
         # сбросить глобальный превью провайдер если был
         self._clear_global_preview()
         self._sync_preview()
-        self._set_status(f"сохранено ✓ {path} ({len(text)} байт)" if ok else f"сохранено {path} (но не применён — проверь CSS)")
+        self._set_status(
+            f"сохранено ✓ {path} ({len(text)} байт)"
+            if ok
+            else f"сохранено {path} (но не применён — проверь CSS)"
+        )
         self._toast(f"тема сохранена → {path.name}")
 
     def _on_preview_global(self) -> None:
@@ -895,9 +1077,13 @@ class ThemeEditorView(Gtk.Box):
         try:
             provider = Gtk.CssProvider()
             provider.load_from_string(text)
-            Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
+            )
             self._global_preview_provider = provider
-            self._set_status("превью применён глобально (без сохранения) — «Сбросить превью» чтобы откатить")
+            self._set_status(
+                "превью применён глобально (без сохранения) — «Сбросить превью» чтобы откатить"
+            )
             self._toast("превью применён — не сохранён на диск")
         except Exception as exc:
             self._set_status(f"превью не удалось: {exc}")
@@ -907,7 +1093,9 @@ class ThemeEditorView(Gtk.Box):
             try:
                 display = Gdk.Display.get_default()
                 if display is not None:
-                    Gtk.StyleContext.remove_provider_for_display(display, self._global_preview_provider)
+                    Gtk.StyleContext.remove_provider_for_display(
+                        display, self._global_preview_provider
+                    )
             except Exception:
                 pass
             self._global_preview_provider = None
@@ -933,7 +1121,13 @@ class ThemeEditorView(Gtk.Box):
         self._updating = True
         try:
             for var, label, default, kind in EDITABLE_COLORS:
-                hexv = normalize_hex(default) if kind == "hex" else (rgb_string_to_hex(default) if kind == "rgb" else rgba_string_to_hex(default))
+                hexv = (
+                    normalize_hex(default)
+                    if kind == "hex"
+                    else (
+                        rgb_string_to_hex(default) if kind == "rgb" else rgba_string_to_hex(default)
+                    )
+                )
                 hexv = hexv or default
                 self._hex_map[var] = hexv
                 btn = self._color_buttons.get(var)

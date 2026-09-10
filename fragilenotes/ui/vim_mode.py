@@ -23,12 +23,14 @@ from dataclasses import dataclass
 
 try:
     import gi  # type: ignore
+
     try:
         gi.require_version("Gtk", "4.0")
         gi.require_version("Gdk", "4.0")
     except Exception:
         pass
     from gi.repository import Gdk, Gtk  # type: ignore
+
     _HAS_GTK = True
 except Exception:  # pragma: no cover - headless
     Gdk = None  # type: ignore
@@ -46,7 +48,7 @@ MODE_COMMAND = "command"
 class VimState:
     mode: str = MODE_NORMAL
     pending: str = ""  # "d" или "y" — ожидание второго символа для dd/yy; также "q", "@"
-    yank: str = ""     # буфер yank
+    yank: str = ""  # буфер yank
     command: str = ""  # буфер команды после ':'
 
 
@@ -56,7 +58,7 @@ def _is_valid_macro_register(key: str) -> bool:
         return False
     if key.isalnum():
         return True
-    if key in ('"', '*', '+', '-', '_'):
+    if key in ('"', "*", "+", "-", "_"):
         return True
     return False
 
@@ -660,7 +662,9 @@ class VimController:
                 nested = action[1:]
                 if nested in self.macros and self._replay_depth < self._max_replay_depth:
                     # рекурсивный вызов с увеличенной глубиной
-                    self._is_replaying = False  # временно снять чтобы вложенный мог зайти? нет, оставляем флаг
+                    self._is_replaying = (
+                        False  # временно снять чтобы вложенный мог зайти? нет, оставляем флаг
+                    )
                     # проще: напрямую рекурсировать
                     self._replay_depth += 1
                     nested_seq = self.macros.get(nested, [])
@@ -962,7 +966,11 @@ class VimController:
                 try:
                     # найти первый непробельный
                     line_start = buf.get_iter_at_line(target_line)
-                    line_end = buf.get_iter_at_line(target_line + 1) if target_line + 1 < buf.get_line_count() else buf.get_end_iter()
+                    line_end = (
+                        buf.get_iter_at_line(target_line + 1)
+                        if target_line + 1 < buf.get_line_count()
+                        else buf.get_end_iter()
+                    )
                     line_text = buf.get_text(line_start, line_end, True)
                     col = len(line_text) - len(line_text.lstrip(" \t"))
                     nit = buf.get_iter_at_line_offset(target_line, col)
@@ -1183,7 +1191,14 @@ class VimController:
             if key is None:
                 # неизвестная клавиша — сброс pending если нажата другая буква
                 # но не сбрасываем на модификаторах
-                if keyval not in (Gdk.KEY_Shift_L, Gdk.KEY_Shift_R, Gdk.KEY_Control_L, Gdk.KEY_Control_R, Gdk.KEY_Alt_L, Gdk.KEY_Alt_R):
+                if keyval not in (
+                    Gdk.KEY_Shift_L,
+                    Gdk.KEY_Shift_R,
+                    Gdk.KEY_Control_L,
+                    Gdk.KEY_Control_R,
+                    Gdk.KEY_Alt_L,
+                    Gdk.KEY_Alt_R,
+                ):
                     if self.pending:
                         self.pending = ""
                 return False

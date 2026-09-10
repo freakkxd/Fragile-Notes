@@ -108,6 +108,7 @@ get_mindmap_headings = parse_mindmap_headings
 @dataclass(slots=True)
 class MindNode:
     """Узел mind map."""
+
     title: str
     level: int  # 1..3
     line: int
@@ -122,7 +123,9 @@ class MindNode:
     fixed: bool = False
 
 
-def build_mindmap_tree(headings: list[tuple[int, str, int]]) -> tuple[list[MindNode], list[tuple[int, int]], list[int]]:
+def build_mindmap_tree(
+    headings: list[tuple[int, str, int]],
+) -> tuple[list[MindNode], list[tuple[int, int]], list[int]]:
     """Построить дерево из плоского списка заголовков.
 
     Правила иерархии:
@@ -294,6 +297,7 @@ def layout_mindmap(nodes: list[MindNode], roots: list[int]) -> None:
 
 # ── виджет вкладки ───────────────────────────────────────────────────
 
+
 class MindMapView(Gtk.Box):
     """Вкладка Mind Map: граф заголовков H1→H2→H3 с интерактивом."""
 
@@ -383,16 +387,35 @@ class MindMapView(Gtk.Box):
 
     # ── UI ────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        self.append(view_header("🗺", "Mind Map", "Авто-граф H1 → H2 → H3 текущей заметки · pan, zoom, drag"))
+        self.append(
+            view_header("🗺", "Mind Map", "Авто-граф H1 → H2 → H3 текущей заметки · pan, zoom, drag")
+        )
 
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["toolbar", "mindmap-toolbar"])
+        toolbar = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            css_classes=["toolbar", "mindmap-toolbar"],
+        )
         toolbar.set_margin_start(14)
         toolbar.set_margin_end(14)
 
-        self._stats = Gtk.Label(label="…", css_classes=["dim-hint", "mindmap-stats"], halign=Gtk.Align.START, xalign=0, hexpand=True)
+        self._stats = Gtk.Label(
+            label="…",
+            css_classes=["dim-hint", "mindmap-stats"],
+            halign=Gtk.Align.START,
+            xalign=0,
+            hexpand=True,
+        )
         toolbar.append(self._stats)
 
-        self._file_label = Gtk.Label(label="· нет файла", css_classes=["dim-hint", "mindmap-file"], halign=Gtk.Align.END, xalign=1, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self._file_label = Gtk.Label(
+            label="· нет файла",
+            css_classes=["dim-hint", "mindmap-file"],
+            halign=Gtk.Align.END,
+            xalign=1,
+            hexpand=True,
+            ellipsize=Pango.EllipsizeMode.MIDDLE,
+        )
         toolbar.append(self._file_label)
 
         # zoom controls
@@ -424,7 +447,9 @@ class MindMapView(Gtk.Box):
         frame.set_margin_end(14)
         frame.set_margin_bottom(14)
 
-        self._area = Gtk.DrawingArea(hexpand=True, vexpand=True, css_classes=["mindmap-area", "graph-area"])
+        self._area = Gtk.DrawingArea(
+            hexpand=True, vexpand=True, css_classes=["mindmap-area", "graph-area"]
+        )
         self._area.set_draw_func(self._on_draw, None)
         self._area.set_content_width(900)
         self._area.set_content_height(520)
@@ -472,7 +497,13 @@ class MindMapView(Gtk.Box):
         frame.append(frame_box)
         self.append(frame)
 
-        hint = Gtk.Label(label="ЛКМ — перетаскивание узла · перетаскивание фона — pan · колесо — zoom · клик на узел — переход к заголовку", css_classes=["dim-hint", "mindmap-hint"], halign=Gtk.Align.START, xalign=0, wrap=True)
+        hint = Gtk.Label(
+            label="ЛКМ — перетаскивание узла · перетаскивание фона — pan · колесо — zoom · клик на узел — переход к заголовку",
+            css_classes=["dim-hint", "mindmap-hint"],
+            halign=Gtk.Align.START,
+            xalign=0,
+            wrap=True,
+        )
         hint.set_margin_start(14)
         hint.set_margin_end(14)
         self.append(hint)
@@ -484,7 +515,9 @@ class MindMapView(Gtk.Box):
         n = len(self._nodes)
         if self._current_path is not None:
             try:
-                rel = self._current_path.relative_to(Path(str(self.settings.get("vault_root") or "")))
+                rel = self._current_path.relative_to(
+                    Path(str(self.settings.get("vault_root") or ""))
+                )
                 fname = str(rel)
             except Exception:
                 fname = self._current_path.name
@@ -508,7 +541,7 @@ class MindMapView(Gtk.Box):
             edges = len(self._edges)
             self._stats.set_text(f"{n} узлов ({h1}·{h2}·{h3}) · {edges} связей · H1→H2→H3")
         if hasattr(self, "_zoom_label") and self._zoom_label is not None:
-            self._zoom_label.set_text(f"{int(self._scale*100)}%")
+            self._zoom_label.set_text(f"{int(self._scale * 100)}%")
 
     def _zoom_step(self, factor: float) -> None:
         w = self._area.get_width() if self._area else 900
@@ -603,7 +636,9 @@ class MindMapView(Gtk.Box):
             # secondary hint
             cr.set_source_rgba(0.52, 0.56, 0.64, 0.85)
             cr.set_font_size(10)
-            msg2 = "Mind Map строит дерево из текущей заметки · открой файл в «Заметки» и вернись сюда"
+            msg2 = (
+                "Mind Map строит дерево из текущей заметки · открой файл в «Заметки» и вернись сюда"
+            )
             ext2 = cr.text_extents(msg2)
             cr.move_to((width - ext2.width) / 2, height / 2 + 22)
             cr.show_text(msg2)
@@ -644,7 +679,12 @@ class MindMapView(Gtk.Box):
             w = nd.w * self._scale
             h = nd.h * self._scale
             # cull off-screen
-            if cx + w / 2 < -30 or cx - w / 2 > width + 30 or cy + h / 2 < -30 or cy - h / 2 > height + 30:
+            if (
+                cx + w / 2 < -30
+                or cx - w / 2 > width + 30
+                or cy + h / 2 < -30
+                or cy - h / 2 > height + 30
+            ):
                 continue
             is_hover = nd.idx == self._hover_idx
             is_drag = nd.idx == self._drag_node
@@ -697,21 +737,25 @@ class MindMapView(Gtk.Box):
             ty = cy + ext.height / 2 - 1  # vertical center adjust
             # keep inside node padding visually already centered, just clamp to screen?
             # Use node inner area: ensure not overflow node clip (we already truncated)
-            cr.set_source_rgba(0.92, 0.94, 0.98, 0.97 if nd.level == 1 else (0.90 if nd.level == 2 else 0.86))
+            cr.set_source_rgba(
+                0.92, 0.94, 0.98, 0.97 if nd.level == 1 else (0.90 if nd.level == 2 else 0.86)
+            )
             cr.move_to(tx, ty)
             cr.show_text(display)
             # line badge top-right small
             if nd.level == 1 and is_hover:
                 cr.set_source_rgba(0.7, 0.76, 0.88, 0.9)
                 cr.set_font_size(7)
-                sub = f"стр {nd.line+1}"
+                sub = f"стр {nd.line + 1}"
                 se = cr.text_extents(sub)
                 cr.move_to(cx + w / 2 - se.width - 6 * self._scale, cy - h / 2 + 10 * self._scale)
                 cr.show_text(sub)
 
         cr.restore()
 
-    def _round_rect(self, cr, x: float, y: float, w: float, h: float, r: float, left_only: bool = False) -> None:
+    def _round_rect(
+        self, cr, x: float, y: float, w: float, h: float, r: float, left_only: bool = False
+    ) -> None:
         """Rounded rect path."""
         if w <= 0 or h <= 0:
             return
@@ -808,14 +852,17 @@ class MindMapView(Gtk.Box):
                     pass
             else:
                 # fallback: toast
-                self._notify(f"§ {nd.title} · строка {nd.line+1}")
+                self._notify(f"§ {nd.title} · строка {nd.line + 1}")
             # highlight hover
             self._hover_idx = idx
             if self._area:
                 self._area.queue_draw()
 
     def _on_scroll(self, ctrl: Gtk.EventControllerScroll, dx: float, dy: float) -> bool:
-        pos = self._last_motion or (self._area.get_width() / 2 if self._area else 450, self._area.get_height() / 2 if self._area else 260)
+        pos = self._last_motion or (
+            self._area.get_width() / 2 if self._area else 450,
+            self._area.get_height() / 2 if self._area else 260,
+        )
         mx, my = pos
         factor = 1.12 if dy < 0 else 0.88 if dy > 0 else 1.0
         if factor == 1.0:
@@ -901,7 +948,14 @@ class MindMapView(Gtk.Box):
 
     def _fallback_open(self) -> None:
         dialog = Adw.Dialog(title="Открыть файл")
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=12, margin_start=16, margin_end=16)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=16,
+            margin_end=16,
+        )
         box.set_size_request(420, -1)
         lbl = Gtk.Label(label="Путь к заметке (от vault или абсолютный):", halign=Gtk.Align.START)
         vault_root = Path(str(self.settings.get("vault_root") or Path.home()))
@@ -949,7 +1003,15 @@ class MindMapView(Gtk.Box):
         if self._stats is not None:
             prev = self._stats.get_text()
             self._stats.set_text(msg)
-            GLib.timeout_add(2500, lambda: (self._stats.set_text(prev), False)[1] if self._stats else False)
+            GLib.timeout_add(
+                2500, lambda: (self._stats.set_text(prev), False)[1] if self._stats else False
+            )
 
 
-__all__ = ["MindMapView", "MindNode", "parse_mindmap_headings", "build_mindmap_tree", "layout_mindmap"]
+__all__ = [
+    "MindMapView",
+    "MindNode",
+    "parse_mindmap_headings",
+    "build_mindmap_tree",
+    "layout_mindmap",
+]

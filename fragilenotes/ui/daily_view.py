@@ -34,12 +34,27 @@ def _resolve_template(template: str) -> str | None:
 
 def _apply_template(tpl: str, d: datetime.date) -> str:
     days_ru = [
-        "понедельник", "вторник", "среда", "четверг",
-        "пятница", "суббота", "воскресенье",
+        "понедельник",
+        "вторник",
+        "среда",
+        "четверг",
+        "пятница",
+        "суббота",
+        "воскресенье",
     ]
     months_ru = [
-        "января", "февраля", "марта", "апреля", "мая", "июня",
-        "июля", "августа", "сентября", "октября", "ноября", "декабря",
+        "января",
+        "февраля",
+        "марта",
+        "апреля",
+        "мая",
+        "июня",
+        "июля",
+        "августа",
+        "сентября",
+        "октября",
+        "ноября",
+        "декабря",
     ]
     out = tpl
     out = out.replace("{{date:YYYY-MM-DD}}", d.isoformat())
@@ -62,16 +77,24 @@ class DailyView(Gtk.Box):
     def __init__(self, settings: dict, on_open=None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.settings = settings
-        self.on_open = on_open   # callable(path) для открытия связанной заметки
+        self.on_open = on_open  # callable(path) для открытия связанной заметки
         self._file: str | None = None
 
         self.append(view_header("📅", "Daily"))
 
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"])
+        toolbar = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"]
+        )
         toolbar.set_margin_start(14)
         toolbar.set_margin_end(14)
-        self.status = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.START, xalign=0,
-                                ellipsize=Pango.EllipsizeMode.END)
+        self.status = Gtk.Label(
+            label="",
+            css_classes=["dim-hint"],
+            hexpand=True,
+            halign=Gtk.Align.START,
+            xalign=0,
+            ellipsize=Pango.EllipsizeMode.END,
+        )
         toolbar.append(self.status)
         self.word_chip = self._chip("0 слов")
         self.char_chip = self._chip("0 символов")
@@ -103,8 +126,13 @@ class DailyView(Gtk.Box):
 
         self._text = Gtk.TextView(
             wrap_mode=Gtk.WrapMode.WORD,
-            top_margin=8, bottom_margin=8, left_margin=10, right_margin=10,
-            hexpand=True, vexpand=True, css_classes=["editor", "prose"],
+            top_margin=8,
+            bottom_margin=8,
+            left_margin=10,
+            right_margin=10,
+            hexpand=True,
+            vexpand=True,
+            css_classes=["editor", "prose"],
         )
         self._text.get_buffer().connect("changed", self._on_changed)
         self.preview = MarkdownView()
@@ -188,6 +216,7 @@ class DailyView(Gtk.Box):
 
     def _on_wikilink(self, target: str) -> None:
         from ..services import vault
+
         p = vault.resolve_wikilink(self.settings, target)
         if p is not None and self.on_open is not None:
             self.on_open(str(p))
@@ -200,7 +229,9 @@ class DailyView(Gtk.Box):
 
     def _scroll(self, child: Gtk.Widget, cls: tuple[str, ...] = ()):
         sc = Gtk.ScrolledWindow(
-            hexpand=True, vexpand=True, css_classes=list(cls) + ["editor-frame"],
+            hexpand=True,
+            vexpand=True,
+            css_classes=list(cls) + ["editor-frame"],
         )
         sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sc.set_child(child)
@@ -224,9 +255,16 @@ class DailyView(Gtk.Box):
         try:
             from ..core import tasks as tm
             from ..paths import resolve_paths
+
             all_tasks = tm.load_tasks(resolve_paths(self.settings).tm_tasks)
             today = datetime.date.today()
-            n = len([t for t in all_tasks if t.is_active and (t.is_due_on(today) or t.is_overdue(today))])
+            n = len(
+                [
+                    t
+                    for t in all_tasks
+                    if t.is_active and (t.is_due_on(today) or t.is_overdue(today))
+                ]
+            )
             self.tasks_chip.set_text(f"{n} задач сегодня")
         except Exception:  # noqa: BLE001
             self.tasks_chip.set_text("—")
@@ -249,8 +287,7 @@ class DailyView(Gtk.Box):
             content = full.read_text(encoding="utf-8")
         else:
             tpl_path = str(
-                self.settings.get("daily_template")
-                or paths.tm_templates / "Daily note.md"
+                self.settings.get("daily_template") or paths.tm_templates / "Daily note.md"
             )
             tpl = _resolve_template(tpl_path)
             content = _apply_template(tpl or "# {{date:YYYY-MM-DD}}\n", today)
@@ -261,8 +298,7 @@ class DailyView(Gtk.Box):
 
         self.save_btn.set_sensitive(full.exists())
         self.status.set_label(
-            f"{base} · существующая" if full.exists()
-            else f"{base} · черновик (не сохранён)"
+            f"{base} · существующая" if full.exists() else f"{base} · черновик (не сохранён)"
         )
         self._refresh_counts(content)
         self._refresh_tasks_chip()
@@ -323,7 +359,9 @@ class DailyView(Gtk.Box):
                 svc = AiSummaryService(settings=settings_copy, llm=llm)
                 res = svc.generate(force=force)
                 if res.ok:
-                    GLib.idle_add(lambda: self._on_ai_summary_done(True, res.text, cached=res.cached) or False)
+                    GLib.idle_add(
+                        lambda: self._on_ai_summary_done(True, res.text, cached=res.cached) or False
+                    )
                 else:
                     msg = res.error or "LLM недоступен"
                     GLib.idle_add(lambda: self._on_ai_summary_done(False, msg) or False)
@@ -345,11 +383,26 @@ class DailyView(Gtk.Box):
     def _show_summary_dialog(self, ok: bool, text: str, cached: bool = False) -> None:
         title = "✨ AI Саммари" + (" (кэш)" if cached else "")
         dialog = Adw.Dialog(title=title)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, css_classes=["dialog-body"], margin_top=12, margin_bottom=12, margin_start=16, margin_end=16)
+        body = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            css_classes=["dialog-body"],
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=16,
+            margin_end=16,
+        )
         head = Gtk.Label(label=title, css_classes=["task-title"], halign=Gtk.Align.START, xalign=0)
         body.append(head)
         if not ok:
-            err = Gtk.Label(label=text or "Ошибка генерации", wrap=True, halign=Gtk.Align.START, xalign=0, selectable=True, css_classes=["dim-hint"])
+            err = Gtk.Label(
+                label=text or "Ошибка генерации",
+                wrap=True,
+                halign=Gtk.Align.START,
+                xalign=0,
+                selectable=True,
+                css_classes=["dim-hint"],
+            )
             err.set_max_width_chars(80)
             body.append(err)
         else:
@@ -357,7 +410,9 @@ class DailyView(Gtk.Box):
             sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             sc.set_min_content_height(220)
             sc.set_min_content_width(480)
-            lbl = Gtk.Label(label=text.strip(), wrap=True, halign=Gtk.Align.START, xalign=0, selectable=True)
+            lbl = Gtk.Label(
+                label=text.strip(), wrap=True, halign=Gtk.Align.START, xalign=0, selectable=True
+            )
             lbl.set_max_width_chars(80)
             lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             sc.set_child(lbl)
@@ -367,6 +422,7 @@ class DailyView(Gtk.Box):
             insert_row.set_halign(Gtk.Align.END)
             copy_btn = Gtk.Button(label="Копировать", css_classes=["mod-neutral"])
             insert_btn = Gtk.Button(label="Вставить в заметку", css_classes=["suggested-action"])
+
             def _do_copy(*_):
                 try:
                     disp = self.get_display()
@@ -376,6 +432,7 @@ class DailyView(Gtk.Box):
                 except Exception:
                     pass
                 dialog.close()
+
             def _do_insert(*_):
                 try:
                     buf = self._text.get_buffer()
@@ -387,6 +444,7 @@ class DailyView(Gtk.Box):
                 except Exception:
                     pass
                 dialog.close()
+
             copy_btn.connect("clicked", _do_copy)
             insert_btn.connect("clicked", _do_insert)
             insert_row.append(copy_btn)

@@ -71,6 +71,7 @@ from typing import Any
 
 # ── Утилиты ────────────────────────────────────────────────────────────────
 
+
 def get_canvas_replica_id(settings: dict[str, Any] | None = None) -> str:
     """Стабильный replica_id для canvas-коллаба.
 
@@ -113,6 +114,7 @@ def _norm_color(c: str) -> str:
 
 # ── Операции ───────────────────────────────────────────────────────────────
 
+
 @dataclass
 class CanvasOperation:
     """Одна операция над canvas.
@@ -152,9 +154,11 @@ class CanvasOperation:
 
 # ── CRDT для canvas фигур ─────────────────────────────────────────────────
 
+
 @dataclass
 class _ShapeEntry:
     """Внутреннее хранение фигуры + LWW-метаданные."""
+
     shape: dict[str, Any]
     shape_id: str
     timestamp: int
@@ -248,22 +252,46 @@ class CanvasCRDT:
             # копия с id
             sc = copy.deepcopy(shape)
             sc["id"] = sid
-            entry = _ShapeEntry(shape=sc, shape_id=sid, timestamp=ts, replica_id=self.replica_id, deleted=False, vector=dict(self._vector))
+            entry = _ShapeEntry(
+                shape=sc,
+                shape_id=sid,
+                timestamp=ts,
+                replica_id=self.replica_id,
+                deleted=False,
+                vector=dict(self._vector),
+            )
             # LWW: если уже есть — побеждает более свежий
             existing = self._entries.get(sid)
             if existing is not None:
                 if (ts, self.replica_id) < (existing.timestamp, existing.replica_id):
                     return sid
                 # если уже удалён tombstone с большим ts — не воскрешаем старой записью
-                if existing.deleted and (ts, self.replica_id) <= (existing.timestamp, existing.replica_id):
+                if existing.deleted and (ts, self.replica_id) <= (
+                    existing.timestamp,
+                    existing.replica_id,
+                ):
                     return sid
             self._entries[sid] = entry
-            self._op_log.append(CanvasOperation(op="add", shape_id=sid, shape=copy.deepcopy(sc), timestamp=ts, replica_id=self.replica_id))
+            self._op_log.append(
+                CanvasOperation(
+                    op="add",
+                    shape_id=sid,
+                    shape=copy.deepcopy(sc),
+                    timestamp=ts,
+                    replica_id=self.replica_id,
+                )
+            )
             if len(self._op_log) > 512:
                 self._op_log = self._op_log[-512:]
             return sid
 
-    def update_shape(self, shape_id: str, patch: dict[str, Any] | None = None, shape: dict[str, Any] | None = None, timestamp: int | None = None) -> bool:
+    def update_shape(
+        self,
+        shape_id: str,
+        patch: dict[str, Any] | None = None,
+        shape: dict[str, Any] | None = None,
+        timestamp: int | None = None,
+    ) -> bool:
         """Обновить фигуру. Принимает либо ``shape`` целиком, либо ``patch``."""
         with self._lock:
             sid = str(shape_id)
@@ -291,7 +319,16 @@ class CanvasCRDT:
             e.timestamp = ts
             e.replica_id = self.replica_id
             e.vector = dict(self._vector)
-            self._op_log.append(CanvasOperation(op="update", shape_id=sid, shape=copy.deepcopy(e.shape), timestamp=ts, replica_id=self.replica_id, meta=dict(patch or {})))
+            self._op_log.append(
+                CanvasOperation(
+                    op="update",
+                    shape_id=sid,
+                    shape=copy.deepcopy(e.shape),
+                    timestamp=ts,
+                    replica_id=self.replica_id,
+                    meta=dict(patch or {}),
+                )
+            )
             if len(self._op_log) > 512:
                 self._op_log = self._op_log[-512:]
             return True
@@ -303,8 +340,19 @@ class CanvasCRDT:
             ts = int(timestamp) if timestamp is not None else self._next_ts()
             if e is None:
                 # создаём tombstone
-                self._entries[sid] = _ShapeEntry(shape={"id": sid, "type": "deleted"}, shape_id=sid, timestamp=ts, replica_id=self.replica_id, deleted=True, vector=dict(self._vector))
-                self._op_log.append(CanvasOperation(op="delete", shape_id=sid, timestamp=ts, replica_id=self.replica_id))
+                self._entries[sid] = _ShapeEntry(
+                    shape={"id": sid, "type": "deleted"},
+                    shape_id=sid,
+                    timestamp=ts,
+                    replica_id=self.replica_id,
+                    deleted=True,
+                    vector=dict(self._vector),
+                )
+                self._op_log.append(
+                    CanvasOperation(
+                        op="delete", shape_id=sid, timestamp=ts, replica_id=self.replica_id
+                    )
+                )
                 return True
             if (ts, self.replica_id) < (e.timestamp, e.replica_id):
                 return False
@@ -318,7 +366,9 @@ class CanvasCRDT:
             e.timestamp = ts
             e.replica_id = self.replica_id
             e.vector = dict(self._vector)
-            self._op_log.append(CanvasOperation(op="delete", shape_id=sid, timestamp=ts, replica_id=self.replica_id))
+            self._op_log.append(
+                CanvasOperation(op="delete", shape_id=sid, timestamp=ts, replica_id=self.replica_id)
+            )
             if len(self._op_log) > 512:
                 self._op_log = self._op_log[-512:]
             return True
@@ -354,7 +404,16 @@ class CanvasCRDT:
             e.timestamp = ts
             e.replica_id = self.replica_id
             e.vector = dict(self._vector)
-            self._op_log.append(CanvasOperation(op="move", shape_id=sid, shape=copy.deepcopy(sh), timestamp=ts, replica_id=self.replica_id, meta={"dx": float(dx), "dy": float(dy)}))
+            self._op_log.append(
+                CanvasOperation(
+                    op="move",
+                    shape_id=sid,
+                    shape=copy.deepcopy(sh),
+                    timestamp=ts,
+                    replica_id=self.replica_id,
+                    meta={"dx": float(dx), "dy": float(dy)},
+                )
+            )
             return True
 
     def clear(self, timestamp: int | None = None) -> None:
@@ -365,7 +424,9 @@ class CanvasCRDT:
                     e.deleted = True
                     e.timestamp = ts
                     e.replica_id = self.replica_id
-            self._op_log.append(CanvasOperation(op="clear", timestamp=ts, replica_id=self.replica_id))
+            self._op_log.append(
+                CanvasOperation(op="clear", timestamp=ts, replica_id=self.replica_id)
+            )
 
     def set_shapes(self, shapes: list[dict[str, Any]]) -> None:
         """Полная перезапись из списка фигур (LWW, через add/update/delete)."""
@@ -421,7 +482,10 @@ class CanvasCRDT:
                     )
                     changed = True
                 else:
-                    if (oentry.timestamp, oentry.replica_id) > (sentry.timestamp, sentry.replica_id):
+                    if (oentry.timestamp, oentry.replica_id) > (
+                        sentry.timestamp,
+                        sentry.replica_id,
+                    ):
                         sentry.shape = copy.deepcopy(oentry.shape)
                         sentry.timestamp = oentry.timestamp
                         sentry.replica_id = oentry.replica_id
@@ -442,27 +506,53 @@ class CanvasCRDT:
         with self._lock:
             # обновить вектор часов для реплики операции
             if op.replica_id:
-                self._vector[op.replica_id] = max(self._vector.get(op.replica_id, 0), int(op.timestamp))
+                self._vector[op.replica_id] = max(
+                    self._vector.get(op.replica_id, 0), int(op.timestamp)
+                )
             if op.op == "add" and op.shape is not None:
                 # LWW add
                 sid = str(op.shape_id or op.shape.get("id") or "")
                 if not sid:
                     sid = self._ensure_id(op.shape)
                 existing = self._entries.get(sid)
-                if existing is None or (op.timestamp, op.replica_id) > (existing.timestamp, existing.replica_id):
-                    self._entries[sid] = _ShapeEntry(shape=copy.deepcopy(op.shape), shape_id=sid, timestamp=op.timestamp, replica_id=op.replica_id, deleted=False, vector={op.replica_id: op.timestamp})
+                if existing is None or (op.timestamp, op.replica_id) > (
+                    existing.timestamp,
+                    existing.replica_id,
+                ):
+                    self._entries[sid] = _ShapeEntry(
+                        shape=copy.deepcopy(op.shape),
+                        shape_id=sid,
+                        timestamp=op.timestamp,
+                        replica_id=op.replica_id,
+                        deleted=False,
+                        vector={op.replica_id: op.timestamp},
+                    )
                     return True
             elif op.op == "update" and op.shape is not None:
                 sid = str(op.shape_id)
                 e = self._entries.get(sid)
                 if e is None or (op.timestamp, op.replica_id) >= (e.timestamp, e.replica_id):
-                    self._entries[sid] = _ShapeEntry(shape=copy.deepcopy(op.shape), shape_id=sid, timestamp=op.timestamp, replica_id=op.replica_id, deleted=False, vector={op.replica_id: op.timestamp})
+                    self._entries[sid] = _ShapeEntry(
+                        shape=copy.deepcopy(op.shape),
+                        shape_id=sid,
+                        timestamp=op.timestamp,
+                        replica_id=op.replica_id,
+                        deleted=False,
+                        vector={op.replica_id: op.timestamp},
+                    )
                     return True
             elif op.op == "delete":
                 sid = str(op.shape_id)
                 e = self._entries.get(sid)
                 if e is None:
-                    self._entries[sid] = _ShapeEntry(shape={"id": sid}, shape_id=sid, timestamp=op.timestamp, replica_id=op.replica_id, deleted=True, vector={op.replica_id: op.timestamp})
+                    self._entries[sid] = _ShapeEntry(
+                        shape={"id": sid},
+                        shape_id=sid,
+                        timestamp=op.timestamp,
+                        replica_id=op.replica_id,
+                        deleted=True,
+                        vector={op.replica_id: op.timestamp},
+                    )
                     return True
                 if (op.timestamp, op.replica_id) > (e.timestamp, e.replica_id):
                     e.deleted = True
@@ -473,12 +563,22 @@ class CanvasCRDT:
                 sid = str(op.shape_id)
                 e = self._entries.get(sid)
                 if e is None or (op.timestamp, op.replica_id) >= (e.timestamp, e.replica_id):
-                    self._entries[sid] = _ShapeEntry(shape=copy.deepcopy(op.shape), shape_id=sid, timestamp=op.timestamp, replica_id=op.replica_id, deleted=False, vector={op.replica_id: op.timestamp})
+                    self._entries[sid] = _ShapeEntry(
+                        shape=copy.deepcopy(op.shape),
+                        shape_id=sid,
+                        timestamp=op.timestamp,
+                        replica_id=op.replica_id,
+                        deleted=False,
+                        vector={op.replica_id: op.timestamp},
+                    )
                     return True
             elif op.op == "clear":
                 # clear — tombstone все
                 for e in self._entries.values():
-                    if not e.deleted and (op.timestamp, op.replica_id) > (e.timestamp, e.replica_id):
+                    if not e.deleted and (op.timestamp, op.replica_id) > (
+                        e.timestamp,
+                        e.replica_id,
+                    ):
                         e.deleted = True
                         e.timestamp = op.timestamp
                         e.replica_id = op.replica_id
@@ -543,9 +643,11 @@ CanvasLWW = CanvasCRDT
 
 # ── Shared Cursors ─────────────────────────────────────────────────────────
 
+
 @dataclass
 class CursorState:
     """Состояние курсора одного участника."""
+
     replica_id: str
     x: float
     y: float
@@ -601,7 +703,15 @@ class CursorManager:
     def set_callback(self, cb: Callable[[dict[str, CursorState]], None] | None) -> None:
         self._on_changed = cb
 
-    def update_local(self, x: float, y: float, color: str | None = None, label: str | None = None, tool: str | None = None, selected: list[str] | None = None) -> CursorState | None:
+    def update_local(
+        self,
+        x: float,
+        y: float,
+        color: str | None = None,
+        label: str | None = None,
+        tool: str | None = None,
+        selected: list[str] | None = None,
+    ) -> CursorState | None:
         """Обновить локальный курсор (throttled). Возвращает state если отправлено."""
         now = _now_ms()
         with self._lock:
@@ -609,7 +719,9 @@ class CursorManager:
                 # throttle — всё равно обновляем внутри, но не триггерим колбэк
                 cur = self._cursors.get(self.replica_id)
                 if cur is not None:
-                    cur.x = float(x); cur.y = float(y); cur.timestamp = now
+                    cur.x = float(x)
+                    cur.y = float(y)
+                    cur.timestamp = now
                     if color is not None:
                         cur.color = _norm_color(color)
                     if label is not None:
@@ -619,14 +731,35 @@ class CursorManager:
                     if selected is not None:
                         cur.selected = list(selected)
                 else:
-                    self._cursors[self.replica_id] = CursorState(replica_id=self.replica_id, x=float(x), y=float(y), color=_norm_color(color or "#8ab4ff"), label=str(label or self.replica_id), timestamp=now, tool=str(tool or "select"), selected=list(selected or []))
+                    self._cursors[self.replica_id] = CursorState(
+                        replica_id=self.replica_id,
+                        x=float(x),
+                        y=float(y),
+                        color=_norm_color(color or "#8ab4ff"),
+                        label=str(label or self.replica_id),
+                        timestamp=now,
+                        tool=str(tool or "select"),
+                        selected=list(selected or []),
+                    )
                 return None
             self._last_emit = now
             state = CursorState(
                 replica_id=self.replica_id,
-                x=float(x), y=float(y),
-                color=_norm_color(color or self._cursors.get(self.replica_id, CursorState(self.replica_id, 0, 0)).color),
-                label=str(label if label is not None else (self._cursors.get(self.replica_id).label if self._cursors.get(self.replica_id) else self.replica_id)),
+                x=float(x),
+                y=float(y),
+                color=_norm_color(
+                    color
+                    or self._cursors.get(self.replica_id, CursorState(self.replica_id, 0, 0)).color
+                ),
+                label=str(
+                    label
+                    if label is not None
+                    else (
+                        self._cursors.get(self.replica_id).label
+                        if self._cursors.get(self.replica_id)
+                        else self.replica_id
+                    )
+                ),
                 timestamp=now,
                 tool=str(tool or "select"),
                 selected=list(selected or []),
@@ -648,7 +781,11 @@ class CursorManager:
                 state = CursorState.from_dict(state)
             except Exception:
                 return
-        if not isinstance(state, CursorState) or not state.replica_id or state.replica_id == self.replica_id:
+        if (
+            not isinstance(state, CursorState)
+            or not state.replica_id
+            or state.replica_id == self.replica_id
+        ):
             return
         with self._lock:
             # LWW по timestamp
@@ -689,7 +826,11 @@ class CursorManager:
 
     def prune_locked(self) -> None:
         now = _now_ms()
-        dead = [rid for rid, c in self._cursors.items() if now - c.timestamp > self.CURSOR_TTL_MS * 2 and rid != self.replica_id]
+        dead = [
+            rid
+            for rid, c in self._cursors.items()
+            if now - c.timestamp > self.CURSOR_TTL_MS * 2 and rid != self.replica_id
+        ]
         for rid in dead:
             self._cursors.pop(rid, None)
 
@@ -699,7 +840,10 @@ class CursorManager:
 
     def to_dict(self) -> dict[str, Any]:
         with self._lock:
-            return {"replica_id": self.replica_id, "cursors": {k: v.to_dict() for k, v in self._cursors.items()}}
+            return {
+                "replica_id": self.replica_id,
+                "cursors": {k: v.to_dict() for k, v in self._cursors.items()},
+            }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CursorManager:
@@ -722,6 +866,7 @@ SharedCursorManager = CursorManager
 
 
 # ── File Sync для canvas ──────────────────────────────────────────────────
+
 
 class CanvasFileSync:
     """Синхронизация CRDT через sidecar-файл.
@@ -790,6 +935,7 @@ class CanvasFileSync:
 
 # ── WebSocket Sync Stub ────────────────────────────────────────────────────
 
+
 class CanvasSyncStub:
     """Заглушка WebSocket-синхронизации для canvas.
 
@@ -801,7 +947,12 @@ class CanvasSyncStub:
     ``add_peer``. В проде заменить на ``websockets.connect(...)``.
     """
 
-    def __init__(self, doc: CanvasCRDT, endpoint: str | None = None, cursor_manager: CursorManager | None = None) -> None:
+    def __init__(
+        self,
+        doc: CanvasCRDT,
+        endpoint: str | None = None,
+        cursor_manager: CursorManager | None = None,
+    ) -> None:
         self.doc = doc
         self.endpoint = endpoint or "stub://local/canvas"
         self.cursor_manager = cursor_manager
@@ -820,7 +971,14 @@ class CanvasSyncStub:
             if self._connected:
                 return True
             self._connected = True
-            self._log.append({"op": "connect", "at": _now_ms(), "endpoint": self.endpoint, "doc_id": self.doc.doc_id})
+            self._log.append(
+                {
+                    "op": "connect",
+                    "at": _now_ms(),
+                    "endpoint": self.endpoint,
+                    "doc_id": self.doc.doc_id,
+                }
+            )
         return True
 
     def disconnect(self) -> None:
@@ -851,7 +1009,14 @@ class CanvasSyncStub:
             "_endpoint": self.endpoint,
         }
         with self._lock:
-            self._log.append({"op": "send_operation", "at": _now_ms(), "payload_op": op.op, "shape_id": op.shape_id})
+            self._log.append(
+                {
+                    "op": "send_operation",
+                    "at": _now_ms(),
+                    "payload_op": op.op,
+                    "shape_id": op.shape_id,
+                }
+            )
             # broadcast peers in-memory
             for stub in list(self._peer_stubs):
                 try:
@@ -897,7 +1062,9 @@ class CanvasSyncStub:
             "_endpoint": self.endpoint,
         }
         with self._lock:
-            self._log.append({"op": "send_cursor", "at": _now_ms(), "replica": cur.get("replica_id")})
+            self._log.append(
+                {"op": "send_cursor", "at": _now_ms(), "replica": cur.get("replica_id")}
+            )
             for stub in list(self._peer_stubs):
                 try:
                     stub.receive(payload)
@@ -938,7 +1105,9 @@ class CanvasSyncStub:
             # fallback: shapes list
             if not changed and isinstance(payload.get("shapes"), list):
                 try:
-                    other = CanvasCRDT(self.doc.doc_id, replica_id=payload.get("_endpoint") or "remote")
+                    other = CanvasCRDT(
+                        self.doc.doc_id, replica_id=payload.get("_endpoint") or "remote"
+                    )
                     for s in payload["shapes"]:
                         if isinstance(s, dict):
                             other.add_shape(s, timestamp=0)
@@ -971,7 +1140,9 @@ class CanvasSyncStub:
                 except Exception:
                     pass
         with self._lock:
-            self._log.append({"op": "receive", "at": _now_ms(), "type": ptype, "changed": bool(changed)})
+            self._log.append(
+                {"op": "receive", "at": _now_ms(), "type": ptype, "changed": bool(changed)}
+            )
         if changed and self._on_shapes is not None:
             try:
                 self._on_shapes(self.doc.get_shapes())
@@ -984,7 +1155,9 @@ class CanvasSyncStub:
     push = send_shapes
     on_message = receive
 
-    def sync(self, other_doc: CanvasCRDT | None = None, other_stub: CanvasSyncStub | None = None) -> bool:
+    def sync(
+        self, other_doc: CanvasCRDT | None = None, other_stub: CanvasSyncStub | None = None
+    ) -> bool:
         """Двусторонний sync с другим документом/стабом."""
         if other_stub is not None:
             # sync stubs взаимно
@@ -997,13 +1170,27 @@ class CanvasSyncStub:
                 for c in other_stub.cursor_manager.get_all().values():
                     self.cursor_manager.update_remote(c)
             with self._lock:
-                self._log.append({"op": "sync_stub", "at": _now_ms(), "a_changed": bool(a_changed), "b_changed": bool(b_changed)})
+                self._log.append(
+                    {
+                        "op": "sync_stub",
+                        "at": _now_ms(),
+                        "a_changed": bool(a_changed),
+                        "b_changed": bool(b_changed),
+                    }
+                )
             return bool(a_changed or b_changed)
         if other_doc is not None:
             a_changed = self.doc.merge(other_doc)
             b_changed = other_doc.merge(self.doc)
             with self._lock:
-                self._log.append({"op": "sync_doc", "at": _now_ms(), "a_changed": bool(a_changed), "b_changed": bool(b_changed)})
+                self._log.append(
+                    {
+                        "op": "sync_doc",
+                        "at": _now_ms(),
+                        "a_changed": bool(a_changed),
+                        "b_changed": bool(b_changed),
+                    }
+                )
             if a_changed and self._on_shapes is not None:
                 try:
                     self._on_shapes(self.doc.get_shapes())
@@ -1055,6 +1242,7 @@ WebSocketSyncStub = CanvasSyncStub
 
 # ── Фасад ──────────────────────────────────────────────────────────────────
 
+
 class CanvasCollabService:
     """Фасад коллаборации: CRDT + WebSocket stub + cursors.
 
@@ -1090,9 +1278,17 @@ class CanvasCollabService:
         else:
             raise TypeError("doc must be CanvasCRDT or str doc_id")
         # endpoint
-        self.endpoint = endpoint or str(self.settings.get("canvas_collab_endpoint") or self.settings.get("collab_endpoint") or "ws://localhost:8765/canvas")
+        self.endpoint = endpoint or str(
+            self.settings.get("canvas_collab_endpoint")
+            or self.settings.get("collab_endpoint")
+            or "ws://localhost:8765/canvas"
+        )
         # cursors
-        self.cursors = cursor_manager if cursor_manager is not None else CursorManager(replica_id=self.replica_id)
+        self.cursors = (
+            cursor_manager
+            if cursor_manager is not None
+            else CursorManager(replica_id=self.replica_id)
+        )
         # sync stub
         self.sync = CanvasSyncStub(self.doc, endpoint=self.endpoint, cursor_manager=self.cursors)
         self._enabled: bool = bool(self.settings.get("canvas_collab_enabled", False))
@@ -1178,19 +1374,43 @@ class CanvasCollabService:
         return self.sync.send_operation(op)
 
     def push_shape(self, shape: dict[str, Any]) -> dict[str, Any] | None:
-        op = CanvasOperation(op="add", shape_id=str(shape.get("id") or ""), shape=copy.deepcopy(shape), timestamp=_now_ms(), replica_id=self.replica_id)
+        op = CanvasOperation(
+            op="add",
+            shape_id=str(shape.get("id") or ""),
+            shape=copy.deepcopy(shape),
+            timestamp=_now_ms(),
+            replica_id=self.replica_id,
+        )
         return self.broadcast_operation(op)
 
     def push_update(self, shape_id: str, shape: dict[str, Any]) -> dict[str, Any] | None:
-        op = CanvasOperation(op="update", shape_id=str(shape_id), shape=copy.deepcopy(shape), timestamp=_now_ms(), replica_id=self.replica_id)
+        op = CanvasOperation(
+            op="update",
+            shape_id=str(shape_id),
+            shape=copy.deepcopy(shape),
+            timestamp=_now_ms(),
+            replica_id=self.replica_id,
+        )
         return self.broadcast_operation(op)
 
     def push_delete(self, shape_id: str) -> dict[str, Any] | None:
-        op = CanvasOperation(op="delete", shape_id=str(shape_id), timestamp=_now_ms(), replica_id=self.replica_id)
+        op = CanvasOperation(
+            op="delete", shape_id=str(shape_id), timestamp=_now_ms(), replica_id=self.replica_id
+        )
         return self.broadcast_operation(op)
 
-    def update_cursor(self, x: float, y: float, color: str | None = None, label: str | None = None, tool: str | None = None, selected: list[str] | None = None) -> None:
-        state = self.cursors.update_local(x=float(x), y=float(y), color=color, label=label, tool=tool, selected=selected)
+    def update_cursor(
+        self,
+        x: float,
+        y: float,
+        color: str | None = None,
+        label: str | None = None,
+        tool: str | None = None,
+        selected: list[str] | None = None,
+    ) -> None:
+        state = self.cursors.update_local(
+            x=float(x), y=float(y), color=color, label=label, tool=tool, selected=selected
+        )
         if state is not None and self.sync.is_connected:
             try:
                 self.sync.send_cursor(state)
@@ -1257,7 +1477,10 @@ CanvasCollaborationService = CanvasCollabService
 
 # ── Helpers для canvas_view ────────────────────────────────────────────────
 
-def create_canvas_crdt_for_path(canvas_path: Path | str, settings: dict[str, Any] | None = None) -> CanvasCRDT:
+
+def create_canvas_crdt_for_path(
+    canvas_path: Path | str, settings: dict[str, Any] | None = None
+) -> CanvasCRDT:
     """Создать CRDT для пути canvas-файла, попытаться подтянуть sidecar."""
     p = Path(canvas_path)
     doc_id = p.stem.replace(".canvas", "").replace(".whiteboard", "") or p.name
@@ -1286,7 +1509,9 @@ def create_canvas_crdt_for_path(canvas_path: Path | str, settings: dict[str, Any
     return crdt
 
 
-def shapes_to_crdt(shapes: list[dict[str, Any]], doc_id: str = "canvas", replica_id: str | None = None) -> CanvasCRDT:
+def shapes_to_crdt(
+    shapes: list[dict[str, Any]], doc_id: str = "canvas", replica_id: str | None = None
+) -> CanvasCRDT:
     crdt = CanvasCRDT(doc_id, replica_id=replica_id or get_canvas_replica_id())
     crdt.set_shapes(shapes)
     return crdt

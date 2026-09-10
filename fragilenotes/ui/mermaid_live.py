@@ -31,7 +31,7 @@ EXAMPLES: dict[str, str] = {
     "Class": "classDiagram\n    class Note {\n        +String title\n        +String body\n        +save()\n    }\n    Note <|-- DailyNote",
     "State": "stateDiagram-v2\n    [*] --> Idle\n    Idle --> Processing : событие\n    Processing --> Idle : готово\n    Processing --> Error : ошибка\n    Error --> Idle : retry",
     "Gantt": "gantt\n    title План релиза\n    dateFormat  YYYY-MM-DD\n    section Разработка\n    Дизайн       :a1, 2026-01-01, 7d\n    Кодинг       :after a1, 10d\n    section Тест\n    QA           :after a1, 12d",
-    "Pie": "pie title Распределение\n    \"Код\" : 42\n    \"Тесты\" : 30\n    \"Док\" : 15\n    \"Ревью\" : 13",
+    "Pie": 'pie title Распределение\n    "Код" : 42\n    "Тесты" : 30\n    "Док" : 15\n    "Ревью" : 13',
     "ER": "erDiagram\n    VAULT ||--o{ NOTE : содержит\n    NOTE ||--o{ TAG : имеет\n    NOTE }o--|| USER : автор",
     "Mindmap": "mindmap\n  root((FragileNotes))\n    Vault\n      Заметки\n      Шаблоны\n    Граф\n    Mermaid",
     "Пусто": "graph TD\n    A[Пусто — введите диаграмму]",
@@ -46,6 +46,7 @@ def extract_code_from_text(text: str) -> str:
         return EXAMPLES["Flowchart"]
     try:
         from .mermaid import extract_mermaid_blocks, has_mermaid
+
         if has_mermaid(text):
             blocks = extract_mermaid_blocks(text)
             if blocks:
@@ -57,7 +58,18 @@ def extract_code_from_text(text: str) -> str:
     if stripped and not stripped.startswith("#") and "```" not in stripped:
         # считаем что это уже mermaid-код
         # но если строка короткая и без ключевых слов — вернём пример
-        keywords = ("graph", "sequenceDiagram", "classDiagram", "stateDiagram", "gantt", "pie", "erDiagram", "mindmap", "flowchart", "journey")
+        keywords = (
+            "graph",
+            "sequenceDiagram",
+            "classDiagram",
+            "stateDiagram",
+            "gantt",
+            "pie",
+            "erDiagram",
+            "mindmap",
+            "flowchart",
+            "journey",
+        )
         low = stripped.lower()
         if any(k.lower() in low for k in keywords):
             return stripped
@@ -121,7 +133,9 @@ if _GTK_AVAILABLE:
         """Split view: слева TextView-редактор, справа WebView preview с 300 мс debounce."""
 
         def __init__(self, settings: dict | None = None, initial_code: str | None = None) -> None:
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True)
+            super().__init__(
+                orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True
+            )
             self.settings = dict(settings or {})
             self._preview_timer: int | None = None
             self._webview: object | None = None
@@ -147,9 +161,17 @@ if _GTK_AVAILABLE:
             # Header
             from .widgets import view_header  # local import to avoid cycle
 
-            self.append(view_header("🧜", "Mermaid Live", "Split view: слева редактор, справа live preview (300 мс debounce)"))
+            self.append(
+                view_header(
+                    "🧜",
+                    "Mermaid Live",
+                    "Split view: слева редактор, справа live preview (300 мс debounce)",
+                )
+            )
 
-            toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"])
+            toolbar = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"]
+            )
             toolbar.set_margin_start(14)
             toolbar.set_margin_end(14)
 
@@ -175,11 +197,18 @@ if _GTK_AVAILABLE:
             toolbar.append(ex_btn)
 
             # actions
-            copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Копировать код", css_classes=["flat"])
+            copy_btn = Gtk.Button(
+                icon_name="edit-copy-symbolic", tooltip_text="Копировать код", css_classes=["flat"]
+            )
             copy_btn.connect("clicked", self._on_copy)
             toolbar.append(copy_btn)
 
-            export_btn = Gtk.Button(label="Экспорт SVG", icon_name="document-save-symbolic", css_classes=["flat"], tooltip_text="Экспорт в SVG (mermaid-cli)")
+            export_btn = Gtk.Button(
+                label="Экспорт SVG",
+                icon_name="document-save-symbolic",
+                css_classes=["flat"],
+                tooltip_text="Экспорт в SVG (mermaid-cli)",
+            )
             export_btn.connect("clicked", self._on_export)
             toolbar.append(export_btn)
 
@@ -193,13 +222,25 @@ if _GTK_AVAILABLE:
             self._save_btn = save_btn
 
             # status
-            self._status = Gtk.Label(label="", css_classes=["dim-hint"], hexpand=True, halign=Gtk.Align.END, xalign=1, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            self._status = Gtk.Label(
+                label="",
+                css_classes=["dim-hint"],
+                hexpand=True,
+                halign=Gtk.Align.END,
+                xalign=1,
+                ellipsize=Pango.EllipsizeMode.MIDDLE,
+            )
             toolbar.append(self._status)
 
             self.append(toolbar)
 
             # Paned split
-            paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True, vexpand=True, css_classes=["mermaid-live-paned"])
+            paned = Gtk.Paned(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["mermaid-live-paned"],
+            )
             paned.set_margin_start(14)
             paned.set_margin_end(14)
             paned.set_margin_bottom(14)
@@ -213,11 +254,21 @@ if _GTK_AVAILABLE:
                 pass
 
             # ── left: editor ──────────────────────────────────────
-            left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True)
+            left = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True
+            )
             left.set_size_request(380, -1)
             left_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            left_hdr.append(Gtk.Label(label="Редактор", css_classes=["dim-hint", "mermaid-header"], halign=Gtk.Align.START))
-            self._line_label = Gtk.Label(label="—", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1)
+            left_hdr.append(
+                Gtk.Label(
+                    label="Редактор",
+                    css_classes=["dim-hint", "mermaid-header"],
+                    halign=Gtk.Align.START,
+                )
+            )
+            self._line_label = Gtk.Label(
+                label="—", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1
+            )
             left_hdr.append(self._line_label)
             clear_btn = Gtk.Button(label="Очистить", css_classes=["flat", "pill"])
             clear_btn.connect("clicked", self._on_clear)
@@ -258,30 +309,56 @@ if _GTK_AVAILABLE:
             left.append(hint)
 
             # ── right: preview ────────────────────────────────────
-            right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True)
+            right = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True, vexpand=True
+            )
             right.set_size_request(380, -1)
             right_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            right_hdr.append(Gtk.Label(label="Preview (live, 300 мс)", css_classes=["dim-hint", "mermaid-header"], halign=Gtk.Align.START))
-            self._preview_status = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1)
+            right_hdr.append(
+                Gtk.Label(
+                    label="Preview (live, 300 мс)",
+                    css_classes=["dim-hint", "mermaid-header"],
+                    halign=Gtk.Align.START,
+                )
+            )
+            self._preview_status = Gtk.Label(
+                label="", css_classes=["dim-hint"], halign=Gtk.Align.END, hexpand=True, xalign=1
+            )
             right_hdr.append(self._preview_status)
-            refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить сейчас", css_classes=["flat"])
+            refresh_btn = Gtk.Button(
+                icon_name="view-refresh-symbolic",
+                tooltip_text="Обновить сейчас",
+                css_classes=["flat"],
+            )
             refresh_btn.connect("clicked", lambda *_: self._schedule_preview(force=True))
             right_hdr.append(refresh_btn)
             right.append(right_hdr)
 
             # preview stack: webview | fallback
-            self._preview_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
+            self._preview_stack = Gtk.Stack(
+                transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True
+            )
 
             # webview container
-            self._web_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
-            self._web_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame", "mermaid-frame"])
+            self._web_container = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True
+            )
+            self._web_scroll = Gtk.ScrolledWindow(
+                hexpand=True, vexpand=True, css_classes=["editor-frame", "mermaid-frame"]
+            )
             self._web_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             # WebView will be placed inside _web_scroll
             self._web_container.append(self._web_scroll)
             self._preview_stack.add_named(self._web_container, "webview")
 
             # fallback container
-            fb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, vexpand=True, css_classes=["mermaid-fallback"])
+            fb_box = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL,
+                spacing=8,
+                hexpand=True,
+                vexpand=True,
+                css_classes=["mermaid-fallback"],
+            )
             fb_box.set_margin_top(12)
             fb_box.set_margin_start(12)
             fb_box.set_margin_end(12)
@@ -293,7 +370,12 @@ if _GTK_AVAILABLE:
                 xalign=0,
             )
             fb_box.append(self._fallback_label)
-            self._fallback_view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD, css_classes=["mermaid-code"])
+            self._fallback_view = Gtk.TextView(
+                editable=False,
+                cursor_visible=False,
+                wrap_mode=Gtk.WrapMode.WORD,
+                css_classes=["mermaid-code"],
+            )
             self._fallback_view.set_size_request(-1, 200)
             fb_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame"])
             fb_scroll.set_child(self._fallback_view)
@@ -567,7 +649,9 @@ if _GTK_AVAILABLE:
             try:
                 dlg = Gtk.FileDialog()
                 dlg.set_title("Сохранить mermaid")
-                dlg.set_initial_name(self._current_file.name if self._current_file else "diagram.mmd")
+                dlg.set_initial_name(
+                    self._current_file.name if self._current_file else "diagram.mmd"
+                )
 
                 def _on_save(d, res) -> None:
                     try:
@@ -648,7 +732,9 @@ else:  # headless fallback
 
 
 # ── Dialog helper (for FilesView integration) ──────────────────────────
-def create_dialog(parent: object | None, settings: dict | None, initial_code: str | None = None) -> object | None:
+def create_dialog(
+    parent: object | None, settings: dict | None, initial_code: str | None = None
+) -> object | None:
     """Создать Adw.Dialog с MermaidLiveView. Возвращает диалог или None без GTK."""
     if not _GTK_AVAILABLE:
         return None
@@ -685,11 +771,19 @@ def create_dialog(parent: object | None, settings: dict | None, initial_code: st
         return None
 
 
-def open_mermaid_live(parent: Gtk.Widget | None, settings: dict | None, code: str | None = None) -> object | None:
+def open_mermaid_live(
+    parent: Gtk.Widget | None, settings: dict | None, code: str | None = None
+) -> object | None:
     """Удобный хелпер для FilesView: открыть live-диалог с кодом."""
     c = _sanitize(code or EXAMPLES["Flowchart"])
     return create_dialog(parent, settings or {}, initial_code=c)
 
 
-__all__ = ["MermaidLiveView", "create_dialog", "open_mermaid_live", "extract_code_from_text", "EXAMPLES", "DEBOUNCE_MS"]
-
+__all__ = [
+    "MermaidLiveView",
+    "create_dialog",
+    "open_mermaid_live",
+    "extract_code_from_text",
+    "EXAMPLES",
+    "DEBOUNCE_MS",
+]

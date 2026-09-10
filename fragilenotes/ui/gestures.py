@@ -47,7 +47,9 @@ DRAG_DISTANCE_THRESHOLD: float = 80.0
 
 
 # ── Утилиты направления ────────────────────────────────────────────────────
-def get_swipe_direction(vx: float, vy: float, threshold: float = SWIPE_VELOCITY_THRESHOLD) -> str | None:
+def get_swipe_direction(
+    vx: float, vy: float, threshold: float = SWIPE_VELOCITY_THRESHOLD
+) -> str | None:
     """Определить направление свайпа по вектору скорости.
 
     Args:
@@ -264,7 +266,9 @@ def create_three_finger_swipe_gesture(window: Gtk.Widget) -> Gtk.GestureSwipe | 
             swipe.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         except Exception:
             pass
-        swipe.connect("swipe", lambda gesture, vx, vy: handle_three_finger_swipe(window, float(vx), float(vy)))
+        swipe.connect(
+            "swipe", lambda gesture, vx, vy: handle_three_finger_swipe(window, float(vx), float(vy))
+        )
         return swipe
     except Exception:
         return None
@@ -285,7 +289,10 @@ def create_three_finger_drag_gesture(window: Gtk.Widget) -> Gtk.GestureDrag | No
             drag.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         except Exception:
             pass
-        drag.connect("drag-end", lambda gesture, dx, dy: handle_three_finger_drag(window, float(dx), float(dy)))
+        drag.connect(
+            "drag-end",
+            lambda gesture, dx, dy: handle_three_finger_drag(window, float(dx), float(dy)),
+        )
         return drag
     except Exception:
         return None
@@ -358,7 +365,9 @@ def setup_three_finger_gestures(window: Gtk.Widget) -> list[Gtk.Gesture]:
                 fallback.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
             except Exception:
                 pass
-            fallback.connect("swipe", lambda g, vx, vy: handle_three_finger_swipe(window, float(vx), float(vy)))
+            fallback.connect(
+                "swipe", lambda g, vx, vy: handle_three_finger_swipe(window, float(vx), float(vy))
+            )
             window.add_controller(fallback)  # type: ignore[attr-defined]
             gestures.append(fallback)
             try:

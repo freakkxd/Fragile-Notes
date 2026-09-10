@@ -20,6 +20,7 @@ try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
     from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+
     _GTK_AVAILABLE = True
 except Exception:  # noqa: BLE001
     Adw = Gio = GLib = Gtk = Pango = None  # type: ignore[assignment]
@@ -31,6 +32,7 @@ from .widgets import empty_state, status_pill, view_header  # noqa: E402
 REGISTRY_FILENAME = "plugin_registry.json"
 
 # ── чистые функции (тестируются без GTK) ─────────────────────────────────────
+
 
 def _registry_candidates(settings: dict | None = None) -> list[Path]:
     """Список путей где ищем registry JSON (порядок приоритета)."""
@@ -102,7 +104,12 @@ def _resolve_source_file(plugin: dict, registry_path: Path | None = None) -> Pat
     - fragilenotes/data/plugins/
     - пакетных кандидатов
     """
-    fname = plugin.get("filename") or plugin.get("file") or (plugin.get("id") and f"{plugin['id']}.py") or ""
+    fname = (
+        plugin.get("filename")
+        or plugin.get("file")
+        or (plugin.get("id") and f"{plugin['id']}.py")
+        or ""
+    )
     source = plugin.get("source") or plugin.get("source_path") or fname
     if not source:
         return None
@@ -191,19 +198,21 @@ def load_registry(settings: dict | None = None) -> list[dict[str, Any]]:
                     # registry может содержать без расширения? добавим
                     if "." not in fname:
                         fname += ".py"
-                out.append({
-                    "id": pid,
-                    "name": str(it.get("name") or pid),
-                    "version": str(it.get("version") or "0.1.0"),
-                    "description": str(it.get("description") or ""),
-                    "author": str(it.get("author") or ""),
-                    "filename": fname,
-                    "source": str(it.get("source") or it.get("source_path") or fname),
-                    "hooks": list(it.get("hooks") or []),
-                    "category": str(it.get("category") or ""),
-                    "code": it.get("code"),  # опционально inline
-                    "_raw": it,
-                })
+                out.append(
+                    {
+                        "id": pid,
+                        "name": str(it.get("name") or pid),
+                        "version": str(it.get("version") or "0.1.0"),
+                        "description": str(it.get("description") or ""),
+                        "author": str(it.get("author") or ""),
+                        "filename": fname,
+                        "source": str(it.get("source") or it.get("source_path") or fname),
+                        "hooks": list(it.get("hooks") or []),
+                        "category": str(it.get("category") or ""),
+                        "code": it.get("code"),  # опционально inline
+                        "_raw": it,
+                    }
+                )
         out.sort(key=lambda x: x["name"].lower())
         return out
     except Exception:
@@ -229,7 +238,9 @@ def is_installed(settings: dict, plugin: dict | str) -> bool:
             # считаем id или filename
             plugins = load_registry(settings)
             found = get_plugin_by_id(plugins, plugin)
-            fname = found["filename"] if found else plugin if plugin.endswith(".py") else f"{plugin}.py"
+            fname = (
+                found["filename"] if found else plugin if plugin.endswith(".py") else f"{plugin}.py"
+            )
         else:
             fname = str(plugin.get("filename") or plugin.get("id") or "").strip()
             if not fname:
@@ -246,7 +257,7 @@ def _sanitize_filename(name: str) -> str:
     s = str(name).strip().replace("/", "_").replace("\\", "_")
     if not s:
         return ""
-    for ch in ('\0', ':', '*', '?', '"', '<', '>', '|'):
+    for ch in ("\0", ":", "*", "?", '"', "<", ">", "|"):
         s = s.replace(ch, "_")
     s = s.strip()
     if s.startswith("."):
@@ -275,7 +286,9 @@ def _validate_py(path: Path) -> tuple[bool, str]:
         return False, f"error: {e}"
 
 
-def install_plugin(settings: dict, plugin: dict, plugin_manager: Any | None = None) -> tuple[bool, str]:
+def install_plugin(
+    settings: dict, plugin: dict, plugin_manager: Any | None = None
+) -> tuple[bool, str]:
     """Установить плагин: скопировать .py из registry в vault/_System/Plugins/.
 
     Args:
@@ -378,7 +391,9 @@ def install_plugin(settings: dict, plugin: dict, plugin_manager: Any | None = No
     return True, f"установлен {filename} → {PLUGINS_REL}/"
 
 
-def uninstall_plugin(settings: dict, plugin: dict | str, plugin_manager: Any | None = None) -> tuple[bool, str]:
+def uninstall_plugin(
+    settings: dict, plugin: dict | str, plugin_manager: Any | None = None
+) -> tuple[bool, str]:
     """Удалить плагин из vault/_System/Plugins/ (unlink).
 
     Args:
@@ -487,10 +502,18 @@ if _GTK_AVAILABLE:
 
         # ── сборка ────────────────────────────────────────────────────────
         def _build(self) -> None:
-            self.append(view_header("🧩", "Магазин плагинов", "Локальный registry · установка в vault/_System/Plugins/ · проверка py_compile"))
+            self.append(
+                view_header(
+                    "🧩",
+                    "Магазин плагинов",
+                    "Локальный registry · установка в vault/_System/Plugins/ · проверка py_compile",
+                )
+            )
 
             # toolbar
-            bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["toolbar"])
+            bar = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["toolbar"]
+            )
             bar.set_margin_start(14)
             bar.set_margin_end(14)
             self._search = Gtk.SearchEntry(placeholder_text="Поиск плагинов…", hexpand=True)
@@ -499,13 +522,18 @@ if _GTK_AVAILABLE:
             refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить список")
             refresh.connect("clicked", lambda *_: self.reload(force=True))
             bar.append(refresh)
-            open_btn = Gtk.Button(label="Открыть папку", tooltip_text="Открыть vault/_System/Plugins/ в файловом менеджере")
+            open_btn = Gtk.Button(
+                label="Открыть папку",
+                tooltip_text="Открыть vault/_System/Plugins/ в файловом менеджере",
+            )
             open_btn.connect("clicked", lambda *_: self._open_plugins_folder())
             bar.append(open_btn)
             self.append(bar)
 
             # info bar
-            self._info = Gtk.Label(label="", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"])
+            self._info = Gtk.Label(
+                label="", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"]
+            )
             self._info.set_margin_start(14)
             self._info.set_margin_end(14)
             self.append(self._info)
@@ -525,15 +553,33 @@ if _GTK_AVAILABLE:
             body.append(self._listbox)
 
             # empty states
-            self._empty = empty_state("🧩", "Плагинов не найдено", hint="Проверь fragilenotes/data/plugin_registry.json", action_label="Обновить", on_action=lambda: self.reload(force=True))
+            self._empty = empty_state(
+                "🧩",
+                "Плагинов не найдено",
+                hint="Проверь fragilenotes/data/plugin_registry.json",
+                action_label="Обновить",
+                on_action=lambda: self.reload(force=True),
+            )
             self._empty.set_visible(False)
             body.append(self._empty)
-            self._filter_empty = empty_state("🔍", "Ничего не найдено", hint="Попробуй другой запрос", action_label="Очистить", on_action=lambda: self._search.set_text(""))
+            self._filter_empty = empty_state(
+                "🔍",
+                "Ничего не найдено",
+                hint="Попробуй другой запрос",
+                action_label="Очистить",
+                on_action=lambda: self._search.set_text(""),
+            )
             self._filter_empty.set_visible(False)
             body.append(self._filter_empty)
 
             # hint внизу
-            hint = Gtk.Label(label="Плагины — Python файлы из vault/_System/Plugins/*.py · хуки: on_open, on_save, on_new · register_hook(name, fn)", halign=Gtk.Align.START, xalign=0, wrap=True, css_classes=["dim-hint"])
+            hint = Gtk.Label(
+                label="Плагины — Python файлы из vault/_System/Plugins/*.py · хуки: on_open, on_save, on_new · register_hook(name, fn)",
+                halign=Gtk.Align.START,
+                xalign=0,
+                wrap=True,
+                css_classes=["dim-hint"],
+            )
             hint.set_margin_top(8)
             body.append(hint)
             self._count = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.START)
@@ -562,8 +608,14 @@ if _GTK_AVAILABLE:
             except Exception:
                 installed = []
             reg_txt = str(reg) if reg is not None else "не найден"
-            self._info.set_text(f"registry: {reg_txt} · {len(self._registry)} доступно · {len(installed)} установлено · папка: {pdir}")
-            self._count.set_text(f"{len(self._registry)} плагинов · {len(installed)} установлено" if self._registry else "")
+            self._info.set_text(
+                f"registry: {reg_txt} · {len(self._registry)} доступно · {len(installed)} установлено · папка: {pdir}"
+            )
+            self._count.set_text(
+                f"{len(self._registry)} плагинов · {len(installed)} установлено"
+                if self._registry
+                else ""
+            )
 
         def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
             self._filter_text = entry.get_text().strip().lower()
@@ -575,7 +627,16 @@ if _GTK_AVAILABLE:
                 return list(self._registry)
             out: list[dict] = []
             for p in self._registry:
-                hay = " ".join([str(p.get("id", "")), str(p.get("name", "")), str(p.get("description", "")), str(p.get("author", "")), str(p.get("filename", "")), str(p.get("category", ""))]).lower()
+                hay = " ".join(
+                    [
+                        str(p.get("id", "")),
+                        str(p.get("name", "")),
+                        str(p.get("description", "")),
+                        str(p.get("author", "")),
+                        str(p.get("filename", "")),
+                        str(p.get("category", "")),
+                    ]
+                ).lower()
                 if q in hay:
                     out.append(p)
             return out
@@ -595,7 +656,9 @@ if _GTK_AVAILABLE:
 
         def _row_for(self, plugin: dict) -> Gtk.Widget:
             installed = is_installed(self.settings, plugin)
-            row = Gtk.ListBoxRow(activatable=False, selectable=False, css_classes=["plugin-row", "glass-card"])
+            row = Gtk.ListBoxRow(
+                activatable=False, selectable=False, css_classes=["plugin-row", "glass-card"]
+            )
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             card.set_margin_top(8)
             card.set_margin_bottom(8)
@@ -603,17 +666,35 @@ if _GTK_AVAILABLE:
             card.set_margin_end(12)
 
             # header: icon + name + version + pill
-            head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
+            head = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER
+            )
             head.set_hexpand(True)
             icon = Gtk.Label(label="🧩", css_classes=["sb-nav-icon"])
             head.append(icon)
             vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
-            title = Gtk.Label(label=str(plugin.get("name", plugin.get("id"))), halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["task-title"])
+            title = Gtk.Label(
+                label=str(plugin.get("name", plugin.get("id"))),
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+                css_classes=["task-title"],
+            )
             vbox.append(title)
-            sub = Gtk.Label(label=f"{plugin.get('id')} · v{plugin.get('version')} · {plugin.get('author')}" if plugin.get("author") else f"{plugin.get('id')} · v{plugin.get('version')}", halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["dim-hint", "dim-label"])
+            sub = Gtk.Label(
+                label=f"{plugin.get('id')} · v{plugin.get('version')} · {plugin.get('author')}"
+                if plugin.get("author")
+                else f"{plugin.get('id')} · v{plugin.get('version')}",
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+                css_classes=["dim-hint", "dim-label"],
+            )
             vbox.append(sub)
             head.append(vbox)
-            pill = status_pill("установлен" if installed else "не установлен", "ok" if installed else "idle")
+            pill = status_pill(
+                "установлен" if installed else "не установлен", "ok" if installed else "idle"
+            )
             head.append(pill)
             # версия badge
             ver = Gtk.Label(label=f"v{plugin.get('version')}", css_classes=["pill", "pill-idle"])
@@ -623,15 +704,26 @@ if _GTK_AVAILABLE:
             # description
             desc = str(plugin.get("description") or "").strip()
             if desc:
-                lbl = Gtk.Label(label=desc, halign=Gtk.Align.START, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, css_classes=["dim-hint"])
+                lbl = Gtk.Label(
+                    label=desc,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    wrap=True,
+                    wrap_mode=Pango.WrapMode.WORD_CHAR,
+                    css_classes=["dim-hint"],
+                )
                 lbl.set_max_width_chars(80)
                 card.append(lbl)
 
             # meta line: filename + hooks + category
-            meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["plugin-meta"])
+            meta = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["plugin-meta"]
+            )
             meta.set_margin_top(2)
             fname = str(plugin.get("filename") or "")
-            meta.append(Gtk.Label(label=f"📄 {fname}", css_classes=["dim-hint", "pill", "pill-idle"]))
+            meta.append(
+                Gtk.Label(label=f"📄 {fname}", css_classes=["dim-hint", "pill", "pill-idle"])
+            )
             hooks = plugin.get("hooks") or []
             if hooks:
                 meta.append(Gtk.Label(label="hooks: " + ", ".join(hooks), css_classes=["dim-hint"]))
@@ -675,7 +767,9 @@ if _GTK_AVAILABLE:
 
         def _on_uninstall(self, plugin: dict) -> None:
             fname = plugin.get("filename") or plugin.get("id")
-            dlg = Adw.MessageDialog.new(self.get_root(), f"Удалить плагин «{plugin.get('name', fname)}»?")
+            dlg = Adw.MessageDialog.new(
+                self.get_root(), f"Удалить плагин «{plugin.get('name', fname)}»?"
+            )
             dlg.add_response("cancel", "Отмена")
             dlg.add_response("delete", "Удалить")
             dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -707,12 +801,25 @@ if _GTK_AVAILABLE:
             box.set_margin_bottom(12)
             box.set_margin_start(12)
             box.set_margin_end(12)
-            header = Gtk.Label(label=f"{path.name} · {len(text.splitlines())} строк", halign=Gtk.Align.START, css_classes=["dim-hint"])
+            header = Gtk.Label(
+                label=f"{path.name} · {len(text.splitlines())} строк",
+                halign=Gtk.Align.START,
+                css_classes=["dim-hint"],
+            )
             box.append(header)
             buf = Gtk.TextBuffer(text=text)
-            view = Gtk.TextView(buffer=buf, editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD, hexpand=True, vexpand=True)
+            view = Gtk.TextView(
+                buffer=buf,
+                editable=False,
+                monospace=True,
+                wrap_mode=Gtk.WrapMode.WORD,
+                hexpand=True,
+                vexpand=True,
+            )
             view.set_margin_top(6)
-            sc = Gtk.ScrolledWindow(vexpand=True, hexpand=True, min_content_height=320, min_content_width=560)
+            sc = Gtk.ScrolledWindow(
+                vexpand=True, hexpand=True, min_content_height=320, min_content_width=560
+            )
             sc.set_child(view)
             sc.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             box.append(sc)

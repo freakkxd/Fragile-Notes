@@ -57,7 +57,37 @@ BG_SCAN_MS = 15000
 
 VIEW_TITLES = ws.VIEW_TITLES
 
-VIEWS = ("home", "runner", "tasks", "habits", "pomodoro", "daily", "calendar", "review", "srs", "media", "voice", "video", "files", "templates", "graph", "canvas", "whiteboard", "kanban", "database", "slides", "mindmap", "mermaid_live", "latex_live", "tags", "ai_chat", "analytics", "plugin_store", "theme_editor", "settings")
+VIEWS = (
+    "home",
+    "runner",
+    "tasks",
+    "habits",
+    "pomodoro",
+    "daily",
+    "calendar",
+    "review",
+    "srs",
+    "media",
+    "voice",
+    "video",
+    "files",
+    "templates",
+    "graph",
+    "canvas",
+    "whiteboard",
+    "kanban",
+    "database",
+    "slides",
+    "mindmap",
+    "mermaid_live",
+    "latex_live",
+    "tags",
+    "ai_chat",
+    "analytics",
+    "plugin_store",
+    "theme_editor",
+    "settings",
+)
 
 # Иконки на левом ribbon (аналогия .workspace-ribbon → clickable-icon).
 RIB_ICONS = ws.VIEW_ICONS
@@ -97,6 +127,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             pass
         try:
             from .style import apply_custom_css as _apply_ccss
+
             _apply_ccss(self.settings)
         except Exception:
             try:
@@ -126,7 +157,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.llm = LlmService(self.settings)
         self.web_clipper = WebClipperService(self.settings)
         self.controller = RunnerController(
-            self.settings, self.engine, self.llm,
+            self.settings,
+            self.engine,
+            self.llm,
             history=self.settings.get("task_history"),
         )
         self.enrich = EnrichStatus()
@@ -171,6 +204,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                     svc.ensure_file_tree(force=True, settings=settings)
                 else:
                     from ..services import vault
+
                     vault.ensure_file_tree(settings, force=True)
             except Exception:  # noqa: BLE001
                 pass
@@ -194,6 +228,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # кастом CSS должен оставаться поверх базового — переприменяем
         try:
             from .style import apply_custom_css as _apply_ccss2
+
             _apply_ccss2(self.settings)
         except Exception:
             try:
@@ -250,14 +285,16 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
         # Верх: Paned как в Obsidian — левая колонка тянется мышью за handle
         self._sidebar_width = self._get_sidebar_width()
-        self.top = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True,
-                             css_classes=["workspace-paned"])
+        self.top = Gtk.Paned(
+            orientation=Gtk.Orientation.HORIZONTAL, vexpand=True, css_classes=["workspace-paned"]
+        )
         try:
             self.top.set_wide_handle(True)
         except Exception:
             pass
-        self.side_column = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True,
-                                   css_classes=["side-column"])
+        self.side_column = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, vexpand=True, css_classes=["side-column"]
+        )
         # Ribbon в скролле — при 30 иконок не уходит за экран (как в Obsidian)
         self.rail_scroller = Gtk.ScrolledWindow(vexpand=True, css_classes=["rail-scroller"])
         self.rail_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -282,7 +319,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         if not hasattr(self.sidebar, "_ws_list"):
             try:
                 # пробуем донастроить через публичные методы
-                self.sidebar.set_workspace_callbacks(on_switch=self._on_workspace_switch, on_add=self._show_workspace_switcher)
+                self.sidebar.set_workspace_callbacks(
+                    on_switch=self._on_workspace_switch, on_add=self._show_workspace_switcher
+                )
                 self.sidebar.set_vaults(vaults, self.settings.get("vault_root"))
             except Exception:
                 pass
@@ -343,7 +382,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
     def _build_ribbon(self) -> Gtk.Widget:
         """Левый ribbon как у Obsidian: состав и порядок иконок из workspace-конфига."""
         items = ws.normalize(self.settings)["ribbon"]
-        rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["workspace-ribbon"])
+        rail = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["workspace-ribbon"]
+        )
         self._ribbon_btns: dict[str, Gtk.ToggleButton] = {}
         self._cmd_btns: dict[str, Gtk.Button] = {}
         for it in items:
@@ -361,13 +402,17 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         if t == "view":
             key = it["id"]
             b = Gtk.ToggleButton(
-                label=RIB_ICONS[key], tooltip_text=VIEW_TITLES[key],
-                css_classes=["ribbon-btn"], can_focus=True,
+                label=RIB_ICONS[key],
+                tooltip_text=VIEW_TITLES[key],
+                css_classes=["ribbon-btn"],
+                can_focus=True,
             )
             b.set_size_request(36, 36)
             b.set_focusable(True)
             b.update_property(Gtk.AccessibleProperty.LABEL, VIEW_TITLES[key])
-            b.update_property(Gtk.AccessibleProperty.DESCRIPTION, f"Открыть раздел {VIEW_TITLES[key]}")
+            b.update_property(
+                Gtk.AccessibleProperty.DESCRIPTION, f"Открыть раздел {VIEW_TITLES[key]}"
+            )
             b.connect("clicked", self._on_ribbon_click, key)
             self._ribbon_btns[key] = b
             rail.append(b)
@@ -401,7 +446,8 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             tip = it.get("tip") or str(path)
             b = Gtk.Button(
                 label=it.get("icon") or "📄",
-                tooltip_text=tip, css_classes=["ribbon-btn"],
+                tooltip_text=tip,
+                css_classes=["ribbon-btn"],
                 can_focus=True,
             )
             b.set_size_request(36, 36)
@@ -413,8 +459,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
     def _cmd_button(self, cid: str) -> Gtk.Button:
         b = Gtk.Button(
-            icon_name=ws.CMD_ICONS[cid], tooltip_text=ws.CMD_TIPS[cid],
-            css_classes=["ribbon-btn"], can_focus=True,
+            icon_name=ws.CMD_ICONS[cid],
+            tooltip_text=ws.CMD_TIPS[cid],
+            css_classes=["ribbon-btn"],
+            can_focus=True,
         )
         b.set_size_request(36, 36)
         b.set_focusable(True)
@@ -424,7 +472,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         return b
 
     def _append_llm_btn(self, rail: Gtk.Box) -> None:
-        self.llm_btn = Gtk.MenuButton(icon_name="network-server-symbolic", tooltip_text="LLM", css_classes=["ribbon-btn"])
+        self.llm_btn = Gtk.MenuButton(
+            icon_name="network-server-symbolic", tooltip_text="LLM", css_classes=["ribbon-btn"]
+        )
         self.llm_btn.set_can_focus(True)
         self.llm_btn.set_focusable(True)
         self.llm_btn.update_property(Gtk.AccessibleProperty.LABEL, "LLM")
@@ -464,92 +514,122 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         """Вкладка строится при первом открытии; модуль импортируется там же."""
         if name == "home":
             from .home_view import HomeView
+
             return HomeView(self.settings, self._on_nav)
         if name == "runner":
             from .runner_view import RunnerView
+
             return RunnerView(self.controller, self._on_runner_action)
         if name == "tasks":
             from .tasks_view import TasksView
+
             return TasksView(self.settings, self._on_task_action)
         if name == "habits":
             from .habit_view import HabitView
+
             return HabitView(self.settings, self._open_note)
         if name == "pomodoro":
             from .pomodoro_view import PomodoroView
+
             return PomodoroView(self.settings, self._on_pomodoro_action)
         if name == "daily":
             from .daily_view import DailyView
+
             return DailyView(self.settings, self._open_note)
         if name == "calendar":
             from .calendar_view import CalendarView
+
             return CalendarView(self.settings, self._open_note)
         if name == "review":
             from .review_view import ReviewView
+
             return ReviewView(self.settings, self._open_note)
         if name == "srs":
             from .srs_view import SrsView
+
             return SrsView(self.settings, self._open_note)
         if name == "media":
             from .media_view import MediaView
+
             return MediaView(self.settings)
         if name == "voice":
             from .voice_view import VoiceView
+
             return VoiceView(self.settings)
         if name == "video":
             from .video_view import VideoView
+
             return VideoView(self.settings)
         if name == "files":
             from .files_view import FilesView
+
             return FilesView(self.settings)
         if name == "templates":
             from .templates_view import TemplatesView
+
             return TemplatesView(self.settings)
         if name == "tags":
             from .files_view import FilesView
+
             return FilesView(self.settings)
         if name == "graph":
             from .graph_view import GraphView
+
             return GraphView(self.settings, self._open_note)
         if name == "canvas":
             from .canvas_view import CanvasView
+
             return CanvasView(self.settings)
         if name == "whiteboard":
             from .whiteboard_view import WhiteboardView
+
             return WhiteboardView(self.settings, self._open_note)
         if name == "kanban":
             from .kanban_view import KanbanView
+
             return KanbanView(self.settings, self._open_note)
         if name == "database":
             from .database_view import DatabaseView
+
             return DatabaseView(self.settings, self._open_note)
         if name == "slides":
             from .slides_view import SlidesView
+
             return SlidesView(self.settings)
         if name == "mindmap":
             from .mindmap_view import MindMapView
+
             return MindMapView(self.settings, self._on_mindmap_navigate)
         if name == "mermaid_live":
             from .mermaid_live import MermaidLiveView
+
             return MermaidLiveView(self.settings)
         if name == "latex_live":
             from .latex_live import LatexLiveView
+
             return LatexLiveView(self.settings)
         if name == "ai_chat":
             from .ai_chat_view import AiChatView
+
             return AiChatView(self.llm, self.settings)
         if name == "analytics":
             from .analytics_view import AnalyticsView
+
             return AnalyticsView(self.settings, self._open_note)
         if name == "plugin_store":
             from .plugin_store_view import PluginStoreView
+
             return PluginStoreView(self.settings, self.plugin_manager)
         if name == "theme_editor":
             from .theme_editor_view import ThemeEditorView
+
             return ThemeEditorView(self.settings)
         if name == "settings":
             from .settings_view import SettingsView
+
             return SettingsView(
-                self.settings, self._on_settings_saved,
+                self.settings,
+                self._on_settings_saved,
                 on_ribbon_changed=self._rebuild_ribbon,
                 on_window_resize=self._resize_window,
             )
@@ -586,13 +666,25 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             except Exception:
                 pass
 
-    def _on_mindmap_navigate(self, line: int, title: str | None = None, path: Path | None = None) -> None:
+    def _on_mindmap_navigate(
+        self, line: int, title: str | None = None, path: Path | None = None
+    ) -> None:
         """Клик по узлу Mind Map → скролл к заголовку в редакторе."""
         # открываем нужную заметку если клик из другого файла (при ручном открытии)
-        target = path if path is not None else getattr(self._views.get("files"), "_current", None) if self._views.get("files") is not None else None
+        target = (
+            path
+            if path is not None
+            else getattr(self._views.get("files"), "_current", None)
+            if self._views.get("files") is not None
+            else None
+        )
         if target is not None and Path(target).is_file():
             # если текущая заметка != target, откроем target
-            cur = getattr(self._views.get("files"), "_current", None) if self._views.get("files") is not None else None
+            cur = (
+                getattr(self._views.get("files"), "_current", None)
+                if self._views.get("files") is not None
+                else None
+            )
             try:
                 if cur is None or Path(cur).resolve() != Path(target).resolve():
                     self._open_note(str(target))
@@ -632,7 +724,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 pass
 
     def _llm_row(self, icon: str, text: str) -> Gtk.Label:
-        lbl = Gtk.Label(label=f"{icon}  {text}", halign=Gtk.Align.START, xalign=0, css_classes=["sb-llm-row"])
+        lbl = Gtk.Label(
+            label=f"{icon}  {text}", halign=Gtk.Align.START, xalign=0, css_classes=["sb-llm-row"]
+        )
         return lbl
 
     def _refresh_llm_popover(self) -> None:
@@ -641,13 +735,29 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         day = self.llm.get_status("day")
         arch = self.llm.get_status("archive")
         self.llm_pop_box.append(self._llm_row("💎", "Qwen3‑14B (day)"))
-        self.llm_pop_box.append(self._llm_row("   ", "статус: " + ("ВКЛ" if day.online else "ВЫКЛ" if day.online is False else "не проверен")))
+        self.llm_pop_box.append(
+            self._llm_row(
+                "   ",
+                "статус: "
+                + ("ВКЛ" if day.online else "ВЫКЛ" if day.online is False else "не проверен"),
+            )
+        )
         if day.ctx_size:
-            self.llm_pop_box.append(self._llm_row("   ", f"ctx: {day.ctx_size} · порт {self.llm.port('day')}"))
+            self.llm_pop_box.append(
+                self._llm_row("   ", f"ctx: {day.ctx_size} · порт {self.llm.port('day')}")
+            )
         self.llm_pop_box.append(self._llm_row("🌙", "Gemma‑4‑26B (archive)"))
-        self.llm_pop_box.append(self._llm_row("   ", "статус: " + ("ВКЛ" if arch.online else "ВЫКЛ" if arch.online is False else "не проверен")))
+        self.llm_pop_box.append(
+            self._llm_row(
+                "   ",
+                "статус: "
+                + ("ВКЛ" if arch.online else "ВЫКЛ" if arch.online is False else "не проверен"),
+            )
+        )
         if arch.ctx_size:
-            self.llm_pop_box.append(self._llm_row("   ", f"ctx: {arch.ctx_size} · порт {self.llm.port('archive')}"))
+            self.llm_pop_box.append(
+                self._llm_row("   ", f"ctx: {arch.ctx_size} · порт {self.llm.port('archive')}")
+            )
         self.llm_pop_box.append(self._llm_row("🛠", f"скрипт: {self.llm.script.name}"))
 
     # ── Навигация ────────────────────────────────────────────
@@ -692,7 +802,8 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             "duplicate_line": self._duplicate_line,
             "toggle_preview": self._toggle_editor_preview,
             "sidebar": self._on_toggle_sidebar,
-            "quick_capture": lambda: getattr(self, "quick_capture", None) and self.quick_capture.open(),
+            "quick_capture": lambda: getattr(self, "quick_capture", None)
+            and self.quick_capture.open(),
             "web_clip": self._web_clip_dialog,
             "snippets": self._open_snippets_palette,
             "files": lambda: self._on_nav("files"),
@@ -722,7 +833,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             self.side_column.prepend(self.rail)
         # Восстановить позицию Paned после пересборки (GTK может сбросить)
         if hasattr(self, "top"):
-            GLib.idle_add(lambda: self.top.set_position(pos) if self.top.get_position() != pos else False)
+            GLib.idle_add(
+                lambda: self.top.set_position(pos) if self.top.get_position() != pos else False
+            )
         self._update_sidebar_chrome()
         self._sync_chrome(cur)
 
@@ -840,7 +953,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         except Exception:
             pass
         try:
-            if getattr(self, "sidebar_revealer", None) is not None and self.sidebar_revealer.get_reveal_child():
+            if (
+                getattr(self, "sidebar_revealer", None) is not None
+                and self.sidebar_revealer.get_reveal_child()
+            ):
                 self.sidebar_revealer.set_reveal_child(False)
                 self._update_sidebar_chrome()
         except Exception:
@@ -897,7 +1013,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             try:
                 from .gestures import SWIPE_VELOCITY_THRESHOLD, get_swipe_direction
 
-                direction = get_swipe_direction(float(vx), float(vy), threshold=SWIPE_VELOCITY_THRESHOLD)
+                direction = get_swipe_direction(
+                    float(vx), float(vy), threshold=SWIPE_VELOCITY_THRESHOLD
+                )
                 if direction == "up":
                     # палитра команд (3 пальца вверх)
                     try:
@@ -1086,7 +1204,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             return
         # если уже текущий — ничего
         try:
-            cur = str(Path(str(self.settings.get("vault_root") or "")).expanduser().resolve(strict=False))
+            cur = str(
+                Path(str(self.settings.get("vault_root") or "")).expanduser().resolve(strict=False)
+            )
         except Exception:
             cur = str(self.settings.get("vault_root") or "")
         if p == cur:
@@ -1117,13 +1237,21 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
         dialog = Adw.Dialog(title="Workspaces — vault")
         dialog.set_content_width(520)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["dialog-body"])
+        body = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["dialog-body"]
+        )
         body.set_margin_top(12)
         body.set_margin_bottom(12)
         body.set_margin_start(16)
         body.set_margin_end(16)
 
-        header = Gtk.Label(label="Workspaces — несколько vault в одном окне\nCtrl+Shift+O — быстрый свитч", halign=Gtk.Align.START, xalign=0, css_classes=["dim-label"], wrap=True)
+        header = Gtk.Label(
+            label="Workspaces — несколько vault в одном окне\nCtrl+Shift+O — быстрый свитч",
+            halign=Gtk.Align.START,
+            xalign=0,
+            css_classes=["dim-label"],
+            wrap=True,
+        )
         body.append(header)
 
         # поиск-фильтр
@@ -1141,7 +1269,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         status = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.START, wrap=True)
         body.append(status)
 
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["btn-row"])
+        btn_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["btn-row"]
+        )
         btn_row.set_halign(Gtk.Align.END)
         close_btn = Gtk.Button(label="Закрыть", css_classes=["mod-neutral"])
         add_btn = Gtk.Button(label="＋ Добавить", css_classes=["suggested-action", "mod-cta"])
@@ -1167,8 +1297,17 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                     is_cur = str(Path(path).expanduser().resolve(strict=False)) == cur_norm
                 except Exception:
                     is_cur = path == current
-                row = Gtk.ListBoxRow(activatable=True, selectable=True, css_classes=["ws-switch-row"] + (["ws-current"] if is_cur else []))
-                h = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER, hexpand=True)
+                row = Gtk.ListBoxRow(
+                    activatable=True,
+                    selectable=True,
+                    css_classes=["ws-switch-row"] + (["ws-current"] if is_cur else []),
+                )
+                h = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL,
+                    spacing=8,
+                    valign=Gtk.Align.CENTER,
+                    hexpand=True,
+                )
                 h.set_margin_top(6)
                 h.set_margin_bottom(6)
                 h.set_margin_start(8)
@@ -1176,8 +1315,20 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 dot = Gtk.Label(label="●" if is_cur else "○", css_classes=["sb-ws-icon"])
                 h.append(dot)
                 vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
-                title = Gtk.Label(label=name + ("  · текущий" if is_cur else ""), halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, css_classes=["sb-ws-name"])
-                path_lbl = Gtk.Label(label=path, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, css_classes=["dim-label", "sb-ws-path"])
+                title = Gtk.Label(
+                    label=name + ("  · текущий" if is_cur else ""),
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    ellipsize=Pango.EllipsizeMode.MIDDLE,
+                    css_classes=["sb-ws-name"],
+                )
+                path_lbl = Gtk.Label(
+                    label=path,
+                    halign=Gtk.Align.START,
+                    xalign=0,
+                    ellipsize=Pango.EllipsizeMode.MIDDLE,
+                    css_classes=["dim-label", "sb-ws-path"],
+                )
                 vbox.append(title)
                 vbox.append(path_lbl)
                 h.append(vbox)
@@ -1188,7 +1339,12 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 shown += 1
             if shown == 0:
                 row = Gtk.ListBoxRow(activatable=False, selectable=False)
-                row.set_child(Gtk.Label(label="ничего не найдено" if q else "список пуст — добавь vault", css_classes=["dim-label"]))
+                row.set_child(
+                    Gtk.Label(
+                        label="ничего не найдено" if q else "список пуст — добавь vault",
+                        css_classes=["dim-label"],
+                    )
+                )
                 lb.append(row)
             # состояние кнопок
             sel = lb.get_selected_row()
@@ -1255,13 +1411,20 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             _rebuild(filter_entry.get_text())
             try:
                 if hasattr(self.sidebar, "set_vaults"):
-                    self.sidebar.set_vaults(workspaces_core.get_vaults(self.settings), self.settings.get("vault_root"))
+                    self.sidebar.set_vaults(
+                        workspaces_core.get_vaults(self.settings), self.settings.get("vault_root")
+                    )
             except Exception:
                 pass
             self._notify_toast(f"удалён: {Path(path).name}")
             status.set_label(f"удалён: {path}")
 
-        switch_btn.connect("clicked", lambda *_: _do_switch(getattr(lb.get_selected_row(), "_ws_path", None) if lb.get_selected_row() else None))
+        switch_btn.connect(
+            "clicked",
+            lambda *_: _do_switch(
+                getattr(lb.get_selected_row(), "_ws_path", None) if lb.get_selected_row() else None
+            ),
+        )
         add_btn.connect("clicked", _do_add)
         remove_btn.connect("clicked", _do_remove)
         close_btn.connect("clicked", lambda *_: dialog.close())
@@ -1274,13 +1437,21 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
     def _show_add_workspace_dialog(self, parent_dialog=None, on_added=None) -> None:
         """Диалог добавления vault: путь + имя."""
         dialog = Adw.Dialog(title="Добавить vault")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, css_classes=["dialog-body"])
+        body = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=12, css_classes=["dialog-body"]
+        )
         body.set_margin_top(12)
         body.set_margin_bottom(12)
         body.set_margin_start(16)
         body.set_margin_end(16)
 
-        hint = Gtk.Label(label="Укажи путь к папке vault (существующая или новая)\nИмя подставится из имени папки, если оставить пустым.", wrap=True, halign=Gtk.Align.START, xalign=0, css_classes=["dim-label"])
+        hint = Gtk.Label(
+            label="Укажи путь к папке vault (существующая или новая)\nИмя подставится из имени папки, если оставить пустым.",
+            wrap=True,
+            halign=Gtk.Align.START,
+            xalign=0,
+            css_classes=["dim-label"],
+        )
         body.append(hint)
 
         path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
@@ -1291,17 +1462,25 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         browse_btn = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Выбрать папку")
         browse_btn.set_can_focus(False)
         path_row.append(browse_btn)
-        body.append(Gtk.Label(label="Путь", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"]))
+        body.append(
+            Gtk.Label(
+                label="Путь", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"]
+            )
+        )
         body.append(path_row)
 
         name_entry = Gtk.Entry(placeholder_text="Имя воркспейса (опционально)", hexpand=True)
-        body.append(Gtk.Label(label="Имя", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"]))
+        body.append(
+            Gtk.Label(label="Имя", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"])
+        )
         body.append(name_entry)
 
         status = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.START, wrap=True)
         body.append(status)
 
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["btn-row"])
+        btn_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["btn-row"]
+        )
         btn_row.set_halign(Gtk.Align.END)
         cancel = Gtk.Button(label="Отмена", css_classes=["mod-neutral"])
         create = Gtk.Button(label="Добавить", css_classes=["suggested-action", "mod-cta"])
@@ -1328,7 +1507,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 pass
             # fallback: FileChooserDialog
             try:
-                chooser = Gtk.FileChooserDialog(title="Выбери папку vault", action=Gtk.FileChooserAction.SELECT_FOLDER, transient_for=self)
+                chooser = Gtk.FileChooserDialog(
+                    title="Выбери папку vault",
+                    action=Gtk.FileChooserAction.SELECT_FOLDER,
+                    transient_for=self,
+                )
                 chooser.add_button("Отмена", Gtk.ResponseType.CANCEL)
                 chooser.add_button("Выбрать", Gtk.ResponseType.ACCEPT)
                 chooser.connect("response", lambda d, r: _on_chooser_response(d, r))
@@ -1389,7 +1572,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             # обновить sidebar
             try:
                 if hasattr(self.sidebar, "set_vaults"):
-                    self.sidebar.set_vaults(workspaces_core.get_vaults(self.settings), self.settings.get("vault_root"))
+                    self.sidebar.set_vaults(
+                        workspaces_core.get_vaults(self.settings), self.settings.get("vault_root")
+                    )
             except Exception:
                 pass
             self._notify_toast(f"добавлен: {Path(norm).name}")
@@ -1513,6 +1698,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # список шаблонов для выпадающего меню
         try:
             from ..core.templates import list_templates as _list_tpl
+
             templates = _list_tpl(self.settings)
             tpl_names = ["— без шаблона —"] + [p.stem for p in templates]
         except Exception:
@@ -1520,11 +1706,20 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             tpl_names = ["— без шаблона —"]
 
         dialog = Adw.Dialog(title="Новая заметка")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
-                       css_classes=["dialog-body"], margin_top=8, margin_bottom=8,
-                       margin_start=24, margin_end=24)
-        hint = Gtk.Label(label=folder.relative_to(root).as_posix() or root.as_posix(),
-                         css_classes=["dim-label"], halign=Gtk.Align.START)
+        body = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=16,
+            css_classes=["dialog-body"],
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=24,
+            margin_end=24,
+        )
+        hint = Gtk.Label(
+            label=folder.relative_to(root).as_posix() or root.as_posix(),
+            css_classes=["dim-label"],
+            halign=Gtk.Align.START,
+        )
         hint.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         entry = Gtk.Entry(placeholder_text="Название заметки", hexpand=True)
         body.append(hint)
@@ -1532,11 +1727,20 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # выбор шаблона
         if len(tpl_names) > 1:
             tpl_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            tpl_row.append(Gtk.Label(label="Шаблон", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"]))
+            tpl_row.append(
+                Gtk.Label(
+                    label="Шаблон", halign=Gtk.Align.START, xalign=0, css_classes=["settings-label"]
+                )
+            )
             tpl_drop = Gtk.DropDown.new_from_strings(tpl_names)
             tpl_drop.set_selected(0)
             tpl_row.append(tpl_drop)
-            hint2 = Gtk.Label(label="vault/_System/Templates/ · {{date}} {{time}} {{title}} {{uuid}}", halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"])
+            hint2 = Gtk.Label(
+                label="vault/_System/Templates/ · {{date}} {{time}} {{title}} {{uuid}}",
+                halign=Gtk.Align.START,
+                xalign=0,
+                css_classes=["dim-hint"],
+            )
             hint2.set_wrap(True)
             tpl_row.append(hint2)
             body.append(tpl_row)
@@ -1546,13 +1750,20 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         cancel = Gtk.Button(label="Отмена", css_classes=["mod-neutral"])
         create = Gtk.Button(label="Создать", css_classes=["suggested-action", "mod-cta"])
         cancel.connect("clicked", lambda *_: dialog.close())
+
         def _do_create(*_):
             sel = ""
             if tpl_drop is not None:
                 idx = tpl_drop.get_selected()
                 if idx > 0:
                     sel = tpl_names[int(idx)]
-            self._create_note(dialog, entry.get_text().strip(), folder, template_name=sel if sel and sel != "— без шаблона —" else None)
+            self._create_note(
+                dialog,
+                entry.get_text().strip(),
+                folder,
+                template_name=sel if sel and sel != "— без шаблона —" else None,
+            )
+
         create.connect("clicked", _do_create)
         entry.connect("activate", _do_create)
         row.append(cancel)
@@ -1566,7 +1777,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         dialog.present(self)
         entry.grab_focus()
 
-    def _create_note(self, dialog, name: str, folder: Path, template_name: str | None = None) -> None:
+    def _create_note(
+        self, dialog, name: str, folder: Path, template_name: str | None = None
+    ) -> None:
         if not name:
             return
         target = folder / (name if name.lower().endswith(".md") else name + ".md")
@@ -1579,6 +1792,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         if template_name:
             try:
                 from ..core.templates import render_for_new_note
+
                 title = target.stem
                 content = render_for_new_note(self.settings, template_name, title)
             except Exception:
@@ -1592,7 +1806,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             pass
         dialog.close()
         self._open_note(target)
-        self._notify_toast(f"создана: {target.name}" + (f" из шаблона {template_name}" if template_name else ""))
+        self._notify_toast(
+            f"создана: {target.name}" + (f" из шаблона {template_name}" if template_name else "")
+        )
 
     # ── Web Clipper ──────────────────────────────────────────────
     def _web_clip_dialog(self) -> None:
@@ -1602,19 +1818,33 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         except Exception:
             clip_dir = Path(self.settings["vault_root"]) / "Clippings"
         dialog = Adw.Dialog(title="Web Clipper")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                       css_classes=["dialog-body"], margin_top=8, margin_bottom=8,
-                       margin_start=24, margin_end=24)
-        hint = Gtk.Label(label=f"Сохранит в {clip_dir}/*.md", css_classes=["dim-label"],
-                         halign=Gtk.Align.START, wrap=True)
+        body = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            css_classes=["dialog-body"],
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=24,
+            margin_end=24,
+        )
+        hint = Gtk.Label(
+            label=f"Сохранит в {clip_dir}/*.md",
+            css_classes=["dim-label"],
+            halign=Gtk.Align.START,
+            wrap=True,
+        )
         hint.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         url_entry = Gtk.Entry(placeholder_text="https://example.com/article", hexpand=True)
         url_entry.set_input_purpose(Gtk.InputPurpose.URL)
-        title_entry = Gtk.Entry(placeholder_text="Заголовок (опционально — возьмётся из <title>)", hexpand=True)
+        title_entry = Gtk.Entry(
+            placeholder_text="Заголовок (опционально — возьмётся из <title>)", hexpand=True
+        )
         body.append(hint)
         body.append(Gtk.Label(label="URL", halign=Gtk.Align.START, css_classes=["settings-label"]))
         body.append(url_entry)
-        body.append(Gtk.Label(label="Заголовок", halign=Gtk.Align.START, css_classes=["settings-label"]))
+        body.append(
+            Gtk.Label(label="Заголовок", halign=Gtk.Align.START, css_classes=["settings-label"])
+        )
         body.append(title_entry)
         status = Gtk.Label(label="", css_classes=["dim-hint"], halign=Gtk.Align.START, wrap=True)
         body.append(status)
@@ -1727,9 +1957,17 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # Восстановить ширину сайдбара в Paned (отложенно — после realize)
         if hasattr(self, "top") and hasattr(self, "_sidebar_width"):
             w = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
-            is_open = self.sidebar_revealer.get_reveal_child() if hasattr(self, "sidebar_revealer") else False
+            is_open = (
+                self.sidebar_revealer.get_reveal_child()
+                if hasattr(self, "sidebar_revealer")
+                else False
+            )
             target = w if is_open else _SIDEBAR_COLLAPSED
-            GLib.idle_add(lambda: self.top.set_position(target) if self.top.get_position() != target else False)
+            GLib.idle_add(
+                lambda: self.top.set_position(target)
+                if self.top.get_position() != target
+                else False
+            )
 
     def _on_close_request(self, _win) -> bool:
         # Tray daemon: скрыть окно вместо выхода, держать Gio.Application --gapplication-service
@@ -1741,7 +1979,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                     self._flush_dirty()
                 except Exception:
                     pass
-                if hasattr(self, "top") and getattr(self, "sidebar_revealer", None) and self.sidebar_revealer.get_reveal_child():
+                if (
+                    hasattr(self, "top")
+                    and getattr(self, "sidebar_revealer", None)
+                    and self.sidebar_revealer.get_reveal_child()
+                ):
                     cur = self.top.get_position()
                     if _SIDEBAR_MIN <= cur <= _SIDEBAR_MAX:
                         self._save_sidebar_width(cur)
@@ -1783,7 +2025,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         except Exception:
             pass
         # Сохранить актуальную ширину сайдбара если он открыт и в лимитах
-        if hasattr(self, "top") and getattr(self, "sidebar_revealer", None) and self.sidebar_revealer.get_reveal_child():
+        if (
+            hasattr(self, "top")
+            and getattr(self, "sidebar_revealer", None)
+            and self.sidebar_revealer.get_reveal_child()
+        ):
             cur = self.top.get_position()
             if _SIDEBAR_MIN <= cur <= _SIDEBAR_MAX:
                 self._save_sidebar_width(cur)
@@ -1805,14 +2051,21 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             try:
                 if name == "files" and getattr(v, "_dirty", False):
                     v._on_save(None)
-                elif name == "daily" and getattr(v, "save_btn", None) is not None \
-                        and v.save_btn.get_sensitive():
+                elif (
+                    name == "daily"
+                    and getattr(v, "save_btn", None) is not None
+                    and v.save_btn.get_sensitive()
+                ):
                     v._on_save(None)
             except Exception:  # noqa: BLE001
                 pass
 
     def _on_task_action(self, action: str) -> None:
-        labels = {"done": "✓ Задача выполнена", "skip": "⏭ Рутина пропущена", "pay": "✓ Счёт оплачен"}
+        labels = {
+            "done": "✓ Задача выполнена",
+            "skip": "⏭ Рутина пропущена",
+            "pay": "✓ Счёт оплачен",
+        }
         self._notify_toast(labels.get(action, action))
         self._tasks_dirty = True
         self.refresh_all()
@@ -1881,6 +2134,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             pass
         try:
             from .style import reload_custom_css as _reload_ccss
+
             _reload_ccss(settings)
         except Exception:
             try:
@@ -1896,7 +2150,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.engine = EngineBridge(settings)
         self.llm = LlmService(settings)
         self.controller = RunnerController(
-            settings, self.engine, self.llm,
+            settings,
+            self.engine,
+            self.llm,
             history=settings.get("task_history"),
         )
         self.quick.settings = settings
@@ -1963,6 +2219,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             day = self.llm.ping("day")
             arch = self.llm.ping("archive")
             GLib.idle_add(self._llm_ready)
+
         threading.Thread(target=work, daemon=True).start()
 
     def _llm_ready(self) -> None:
@@ -1972,9 +2229,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         url = self.settings.get("engine_status_url", "")
         if not url:
             return
+
         def work() -> None:
             st = fetch_enrich_status(url)
             GLib.idle_add(self._enrich_ready, st)
+
         threading.Thread(target=work, daemon=True).start()
 
     def _enrich_ready(self, st: EnrichStatus) -> None:
@@ -1993,7 +2252,9 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
         if cur == "home" and "home" in self._views:
             self._views["home"].refresh(
-                self.controller, self.llm, self.enrich,
+                self.controller,
+                self.llm,
+                self.enrich,
                 due_today=self._task_counts["today"],
                 overdue=self._task_counts["overdue"],
             )
@@ -2069,7 +2330,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         day = self.llm.get_status("day")
         arch = self.llm.get_status("archive")
         sig = (
-            day.online, day.ctx_size, arch.online, arch.ctx_size,
+            day.online,
+            day.ctx_size,
+            arch.online,
+            arch.ctx_size,
             str(getattr(self.llm.script, "name", "")),
         )
         if sig == getattr(self, "_llm_sig", None):
@@ -2096,6 +2360,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
     def _bg_scan_work(self, settings: dict) -> None:
         from ..core import tasks as tm
         from ..paths import resolve_paths
+
         svc = getattr(self, "vault_service", None)
         undecided = 0
         try:
@@ -2103,6 +2368,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 _, _, undecided = svc.scan_inbox(limit=1, settings=settings)
             else:
                 from ..services import vault
+
                 _, _, undecided = vault.scan_inbox(settings, limit=1)
         except Exception:  # noqa: BLE001
             undecided = 0
@@ -2165,7 +2431,13 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 pass
             self._vault_monitor_timer = None
 
-    def _on_vault_changed(self, _mon: Gio.FileMonitor, _file: Gio.File, _other: Gio.File | None, event: Gio.FileMonitorEvent) -> None:
+    def _on_vault_changed(
+        self,
+        _mon: Gio.FileMonitor,
+        _file: Gio.File,
+        _other: Gio.File | None,
+        event: Gio.FileMonitorEvent,
+    ) -> None:
         # реагируем только на реальные изменения структуры/содержимого
         if event not in (
             Gio.FileMonitorEvent.CREATED,
@@ -2199,6 +2471,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         except Exception:
             try:
                 from ..services import vault as _vault
+
                 _vault.invalidate_vault_cache()
             except Exception:
                 pass
@@ -2270,7 +2543,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # Фильтруем по имени если мониторим директорию
         try:
             fname = _file.get_basename() if _file is not None else ""
-            if fname and fname != "custom.css" and getattr(self, "_custom_css_monitor", None) is not None:
+            if (
+                fname
+                and fname != "custom.css"
+                and getattr(self, "_custom_css_monitor", None) is not None
+            ):
                 # если мониторим папку — реагируем только на custom.css
                 is_dir = theme_manager.custom_css_path(self.settings).parent.is_dir()
                 if is_dir and fname != "custom.css":
@@ -2298,6 +2575,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self._custom_css_timer = None
         try:
             from .style import reload_custom_css as _reload
+
             _reload(self.settings)
         except Exception:
             try:
@@ -2318,8 +2596,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
     def _persist_history(self) -> bool:
         self.settings["task_history"] = {
-            k: [r.__dict__ for r in v]
-            for k, v in self.controller.task_history.items()
+            k: [r.__dict__ for r in v] for k, v in self.controller.task_history.items()
         }
         save_settings(self.settings)
         return True

@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover — fallback если модуль не н
     def _is_mermaid_lang(lang: str | None) -> bool:  # type: ignore[no-redef]
         return bool(lang and lang.strip().lower() == "mermaid")
 
+
 # ── LaTeX поддержка (WebView + KaTeX/MathJax / PNG via matplotlib/pdflatex) ──
 try:
     from fragilenotes.ui.latex import has_latex as _has_latex  # noqa: E402
@@ -34,36 +35,37 @@ except Exception:  # pragma: no cover — fallback
     def _has_latex(text: str) -> bool:  # type: ignore[no-redef]
         return bool(text and "$" in text and ("$$" in text or "$" in text))
 
+
 # ── Палитра (AO Glass, канон ao-glass-tokens / ao-glass-note) ──
-H1 = "#f0f4fc"       # h1: rgba(240,244,252,0.98) near-white
-H2 = "#afbacc"       # h2: text-muted (ПРОПИСНЫЕ)
-H3 = "#e4eaf6"       # h3: var(--ao-text) яркий
-TEXT = "#d2dae8"     # тело: text-secondary
-MUTED = "#afbacc"    # em, thead: text-muted
-FAINT = "#8c98ac"    # hr, слабое
-ACCENT = "#8ab4ff"   # ссылки: var(--ao-link)
+H1 = "#f0f4fc"  # h1: rgba(240,244,252,0.98) near-white
+H2 = "#afbacc"  # h2: text-muted (ПРОПИСНЫЕ)
+H3 = "#e4eaf6"  # h3: var(--ao-text) яркий
+TEXT = "#d2dae8"  # тело: text-secondary
+MUTED = "#afbacc"  # em, thead: text-muted
+FAINT = "#8c98ac"  # hr, слабое
+ACCENT = "#8ab4ff"  # ссылки: var(--ao-link)
 SUCCESS = "#78d296"  # ✓ выполнено
 CODE_BG = "#171a20"  # инлайн-код: rgba(255,255,255,0.06) над #06080d
 CODE_FG = "#d2dae8"
 CODEBLOCK_BG = "#04050a"  # код-блок: rgba(0,0,0,0.35) над #06080d
-QUOTE = "#c9d1de"    # текст цитаты (text-normal)
-TAG_BG = "#1c1b2a"   # тег-пилюля: rgba(190,165,255,0.12) над фоном
-TAG_FG = "#bea5ff"   # violet
+QUOTE = "#c9d1de"  # текст цитаты (text-normal)
+TAG_BG = "#1c1b2a"  # тег-пилюля: rgba(190,165,255,0.12) над фоном
+TAG_FG = "#bea5ff"  # violet
 MARK_BG = "#1c2538"  # ==выделение==: rgba(130,168,255,0.18) над фоном
 SEARCH_BG = "#203055"  # подсветка результата поиска: rgba(130,168,255,0.26) над фоном
-TH_BG = "#101520"    # thead: rgba(130,168,255,0.08) над фоном
-ZEBRA_BG = "#0b0d12" # зебра: rgba(255,255,255,0.02) над фоном
+TH_BG = "#101520"  # thead: rgba(130,168,255,0.08) над фоном
+ZEBRA_BG = "#0b0d12"  # зебра: rgba(255,255,255,0.02) над фоном
 
 _MONO = "JetBrains Mono, Source Code Pro, Fira Code, monospace"
 
 # ── Подсветка синтаксиса (Obsidian one-dark спектр, ao-glass-palette) ──
-SYN_KW = "#bea5ff"      # ключевые слова: purple-violet
-SYN_STR = "#78d296"     # строки: green
-SYN_COM = "#8c98ac"     # комментарии: muted, курсив
-SYN_NUM = "#e6af6e"     # числа: amber
-SYN_FUNC = "#8ab4ff"    # функции: blue
-SYN_KEY = "#78c8dc"     # ключи JSON: cyan
-SYN_VAR = "#ffd28c"     # переменные bash: warm
+SYN_KW = "#bea5ff"  # ключевые слова: purple-violet
+SYN_STR = "#78d296"  # строки: green
+SYN_COM = "#8c98ac"  # комментарии: muted, курсив
+SYN_NUM = "#e6af6e"  # числа: amber
+SYN_FUNC = "#8ab4ff"  # функции: blue
+SYN_KEY = "#78c8dc"  # ключи JSON: cyan
+SYN_VAR = "#ffd28c"  # переменные bash: warm
 
 _QUOTE_BG = "#151a26"  # стеклянная подложка цитаты (rgba(focus,0.06) над фоном панели)
 _CALLOUT_BG = "#12161f"  # callout-стекло (glass поверх канваса)
@@ -72,39 +74,39 @@ _CALLOUT_BG = "#12161f"  # callout-стекло (glass поверх канвас
 # тип: (иконка, (r,g,b) акцент-цвета). tm-* — каждодневные секции дневника,
 # стандартные — базовые callout'ы Obsidian.
 _CALLOUT_FACE = {
-    "tm-today":       ("✦", (100, 180, 220)),
-    "tm-context":     ("⚡", (130, 168, 255)),
-    "tm-sleep":       ("😴", (150, 140, 220)),
-    "tm-mood":        ("🧠", (190, 165, 255)),
-    "tm-body":        ("🫀", (220, 145, 165)),
-    "tm-day":         ("📦", (120, 200, 220)),
-    "tm-substances":  ("💊", (210, 170, 120)),
-    "tm-summary":     ("✅", (120, 210, 150)),
-    "note":           ("📝", (130, 170, 255)),
-    "info":           ("ℹ️", (130, 168, 255)),
-    "tip":            ("🔥", (120, 200, 220)),
-    "hint":           ("💡", (120, 200, 220)),
-    "important":      ("❗", (230, 175, 110)),
-    "success":        ("✅", (120, 210, 150)),
-    "done":           ("✓", (120, 210, 150)),
-    "question":       ("❓", (130, 170, 255)),
-    "help":           ("🆘", (130, 170, 255)),
-    "warning":        ("⚠️", (230, 175, 110)),
-    "caution":        ("⚠️", (230, 175, 110)),
-    "attention":      ("⚠️", (230, 175, 110)),
-    "danger":         ("⚡", (220, 130, 145)),
-    "error":          ("✖️", (220, 130, 145)),
-    "abstract":       ("📋", (130, 170, 210)),
-    "summary":        ("📋", (120, 200, 220)),
-    "tldr":           ("📋", (120, 200, 220)),
-    "example":        ("⭐", (190, 165, 255)),
-    "quote":          ("🕮", (175, 186, 204)),
-    "cite":           ("🕮", (175, 186, 204)),
-    "todo":           ("☑", (120, 210, 150)),
-    "fail":           ("✖️", (220, 130, 145)),
-    "bug":            ("🐞", (220, 130, 145)),
-    "wip":            ("🚧", (230, 175, 110)),
-    "pinned":         ("📌", (130, 168, 255)),
+    "tm-today": ("✦", (100, 180, 220)),
+    "tm-context": ("⚡", (130, 168, 255)),
+    "tm-sleep": ("😴", (150, 140, 220)),
+    "tm-mood": ("🧠", (190, 165, 255)),
+    "tm-body": ("🫀", (220, 145, 165)),
+    "tm-day": ("📦", (120, 200, 220)),
+    "tm-substances": ("💊", (210, 170, 120)),
+    "tm-summary": ("✅", (120, 210, 150)),
+    "note": ("📝", (130, 170, 255)),
+    "info": ("ℹ️", (130, 168, 255)),
+    "tip": ("🔥", (120, 200, 220)),
+    "hint": ("💡", (120, 200, 220)),
+    "important": ("❗", (230, 175, 110)),
+    "success": ("✅", (120, 210, 150)),
+    "done": ("✓", (120, 210, 150)),
+    "question": ("❓", (130, 170, 255)),
+    "help": ("🆘", (130, 170, 255)),
+    "warning": ("⚠️", (230, 175, 110)),
+    "caution": ("⚠️", (230, 175, 110)),
+    "attention": ("⚠️", (230, 175, 110)),
+    "danger": ("⚡", (220, 130, 145)),
+    "error": ("✖️", (220, 130, 145)),
+    "abstract": ("📋", (130, 170, 210)),
+    "summary": ("📋", (120, 200, 220)),
+    "tldr": ("📋", (120, 200, 220)),
+    "example": ("⭐", (190, 165, 255)),
+    "quote": ("🕮", (175, 186, 204)),
+    "cite": ("🕮", (175, 186, 204)),
+    "todo": ("☑", (120, 210, 150)),
+    "fail": ("✖️", (220, 130, 145)),
+    "bug": ("🐞", (220, 130, 145)),
+    "wip": ("🚧", (230, 175, 110)),
+    "pinned": ("📌", (130, 168, 255)),
 }
 _CALLOUT_DEFAULT = ("▸", (155, 165, 190))
 _CALLOUT_TYPE = re.compile(r"^\[!([A-Za-z0-9_-]+)(\|[-+])?\]\s*(.*)$")
@@ -337,7 +339,12 @@ def inline_segments(text: str) -> list[tuple[str, str | None, str | None]]:
         elif part.startswith("$$") and part.endswith("$$") and len(part) >= 5:
             # display math $$...$$ — внутри параграфа (inline-display)
             out.append((part[2:-2].strip(), "latex_display", None))
-        elif part.startswith("$") and part.endswith("$") and len(part) >= 3 and not part.startswith("$$"):
+        elif (
+            part.startswith("$")
+            and part.endswith("$")
+            and len(part) >= 3
+            and not part.startswith("$$")
+        ):
             # inline math $...$ — экранированный \$ не входит из-за _INLINE
             inner = part[1:-1]
             # защита от lone $ с пробелами: требуем непустой и не только пробелы
@@ -372,8 +379,12 @@ class MarkdownView(Gtk.TextView):
             editable=False,
             cursor_visible=False,
             wrap_mode=Gtk.WrapMode.WORD,
-            top_margin=6, bottom_margin=6, left_margin=10, right_margin=10,
-            hexpand=True, vexpand=True,
+            top_margin=6,
+            bottom_margin=6,
+            left_margin=10,
+            right_margin=10,
+            hexpand=True,
+            vexpand=True,
             css_classes=["markdown"],
         )
         self._buf = Gtk.TextBuffer()
@@ -381,7 +392,9 @@ class MarkdownView(Gtk.TextView):
         self._tags: dict[str, object] = {}
         self._callout_tags: dict[str, object] = {}
         self._wikilinks: list[tuple[int, int, str]] = []
-        self._mermaid_widgets: list[object] = []  # удержание Gtk.Widget от GC (TextView child anchor)
+        self._mermaid_widgets: list[
+            object
+        ] = []  # удержание Gtk.Widget от GC (TextView child anchor)
         self._latex_widgets: list[object] = []  # WebView/PNG для LaTeX
         self.on_wikilink = None
         self._vault_root: str | None = None
@@ -410,50 +423,144 @@ class MarkdownView(Gtk.TextView):
     def _mk_tags(self) -> None:
         mk = lambda name, **kw: self._tags.__setitem__(name, self._buf.create_tag(name, **kw))  # noqa: E731
         mk("para", foreground=TEXT, pixels_below_lines=3)
-        mk("h1", foreground=H1, scale=1.5, weight=Pango.Weight.SEMIBOLD, pixels_above_lines=14, pixels_below_lines=4)
-        mk("h2", foreground=H2, scale=0.82, weight=Pango.Weight.BOLD, pixels_above_lines=18, pixels_below_lines=8)
-        mk("h3", foreground=H3, scale=1.11, weight=Pango.Weight.SEMIBOLD, pixels_above_lines=12, pixels_below_lines=2)
+        mk(
+            "h1",
+            foreground=H1,
+            scale=1.5,
+            weight=Pango.Weight.SEMIBOLD,
+            pixels_above_lines=14,
+            pixels_below_lines=4,
+        )
+        mk(
+            "h2",
+            foreground=H2,
+            scale=0.82,
+            weight=Pango.Weight.BOLD,
+            pixels_above_lines=18,
+            pixels_below_lines=8,
+        )
+        mk(
+            "h3",
+            foreground=H3,
+            scale=1.11,
+            weight=Pango.Weight.SEMIBOLD,
+            pixels_above_lines=12,
+            pixels_below_lines=2,
+        )
         mk("h4", foreground=TEXT, scale=1.0, weight=Pango.Weight.SEMIBOLD, pixels_above_lines=10)
         mk("bold", foreground=H3, weight=Pango.Weight.SEMIBOLD)
         mk("italic", style=Pango.Style.ITALIC, foreground=MUTED)
         mk("strike", strikethrough=True, foreground=MUTED)
         mk("code", font="JetBrains Mono", background=CODE_BG, foreground=CODE_FG, scale=0.85)
-        mk("codeblock", font="JetBrains Mono", background=CODEBLOCK_BG, foreground=CODE_FG, scale=0.85,
-           left_margin=12, right_margin=12, pixels_above_lines=6, pixels_below_lines=6)
+        mk(
+            "codeblock",
+            font="JetBrains Mono",
+            background=CODEBLOCK_BG,
+            foreground=CODE_FG,
+            scale=0.85,
+            left_margin=12,
+            right_margin=12,
+            pixels_above_lines=6,
+            pixels_below_lines=6,
+        )
         # mermaid — чуть светлее codeblock, акцент синий как у ссылок
-        mk("mermaid", font="JetBrains Mono", background="#0a0f1e", foreground="#c9d1de", scale=0.85,
-           left_margin=12, right_margin=12, pixels_above_lines=6, pixels_below_lines=6)
-        mk("mermaid_header", foreground=ACCENT, weight=Pango.Weight.SEMIBOLD, scale=0.85,
-           pixels_above_lines=8, pixels_below_lines=2)
+        mk(
+            "mermaid",
+            font="JetBrains Mono",
+            background="#0a0f1e",
+            foreground="#c9d1de",
+            scale=0.85,
+            left_margin=12,
+            right_margin=12,
+            pixels_above_lines=6,
+            pixels_below_lines=6,
+        )
+        mk(
+            "mermaid_header",
+            foreground=ACCENT,
+            weight=Pango.Weight.SEMIBOLD,
+            scale=0.85,
+            pixels_above_lines=8,
+            pixels_below_lines=2,
+        )
         # latex — inline и display (KaTeX/MathJax)
-        mk("latex_inline", font="JetBrains Mono", background="#1a1f2e", foreground="#e4eaf6", scale=0.9)
-        mk("latex_display", font="JetBrains Mono", background="#0a0f1e", foreground="#d2dae8", scale=0.95,
-           left_margin=12, right_margin=12, pixels_above_lines=8, pixels_below_lines=8,
-           justification=Gtk.Justification.CENTER)
-        mk("latex_block", font="JetBrains Mono", background="#0a0f1e", foreground="#d2dae8", scale=0.9,
-           left_margin=12, right_margin=12, pixels_above_lines=8, pixels_below_lines=8,
-           justification=Gtk.Justification.CENTER)
-        mk("latex_header", foreground=ACCENT, weight=Pango.Weight.SEMIBOLD, scale=0.85,
-           pixels_above_lines=8, pixels_below_lines=2)
+        mk(
+            "latex_inline",
+            font="JetBrains Mono",
+            background="#1a1f2e",
+            foreground="#e4eaf6",
+            scale=0.9,
+        )
+        mk(
+            "latex_display",
+            font="JetBrains Mono",
+            background="#0a0f1e",
+            foreground="#d2dae8",
+            scale=0.95,
+            left_margin=12,
+            right_margin=12,
+            pixels_above_lines=8,
+            pixels_below_lines=8,
+            justification=Gtk.Justification.CENTER,
+        )
+        mk(
+            "latex_block",
+            font="JetBrains Mono",
+            background="#0a0f1e",
+            foreground="#d2dae8",
+            scale=0.9,
+            left_margin=12,
+            right_margin=12,
+            pixels_above_lines=8,
+            pixels_below_lines=8,
+            justification=Gtk.Justification.CENTER,
+        )
+        mk(
+            "latex_header",
+            foreground=ACCENT,
+            weight=Pango.Weight.SEMIBOLD,
+            scale=0.85,
+            pixels_above_lines=8,
+            pixels_below_lines=2,
+        )
         mk("link", foreground=ACCENT)
         mk("wikilink", foreground=ACCENT, underline=Pango.Underline.SINGLE)
         mk("mark", background=MARK_BG)
         mk("search", background=SEARCH_BG, foreground=ACCENT)
         mk("tag", background=TAG_BG, foreground=TAG_FG, scale=0.9)
-        mk("quote", foreground=QUOTE, style=Pango.Style.ITALIC, background=_QUOTE_BG,
-           pixels_above_lines=6, pixels_below_lines=6)
+        mk(
+            "quote",
+            foreground=QUOTE,
+            style=Pango.Style.ITALIC,
+            background=_QUOTE_BG,
+            pixels_above_lines=6,
+            pixels_below_lines=6,
+        )
         mk("quotemark", foreground=ACCENT, weight=Pango.Weight.BOLD, background=_QUOTE_BG)
         mk("callout", background=_CALLOUT_BG, pixels_above_lines=6, pixels_below_lines=6)
         mk("task_todo", foreground=MUTED, weight=Pango.Weight.BOLD)
         mk("task_done", foreground=SUCCESS, weight=Pango.Weight.BOLD)
         mk("list", foreground=TEXT)
         mk("hr", foreground=FAINT, scale=0.8)
-        mk("meta_head", font="JetBrains Mono", foreground="rgb(155,165,190)",
-           weight=Pango.Weight.BOLD, scale=0.8, pixels_above_lines=2, pixels_below_lines=2)
+        mk(
+            "meta_head",
+            font="JetBrains Mono",
+            foreground="rgb(155,165,190)",
+            weight=Pango.Weight.BOLD,
+            scale=0.8,
+            pixels_above_lines=2,
+            pixels_below_lines=2,
+        )
         mk("meta", font="JetBrains Mono", foreground="rgb(130,140,162)", scale=0.85)
         mk("table", font="JetBrains Mono", foreground=TEXT, scale=0.85)
-        mk("th", font="JetBrains Mono", foreground=MUTED, weight=Pango.Weight.SEMIBOLD,
-           background=TH_BG, scale=0.85)
+        mk(
+            "th",
+            font="JetBrains Mono",
+            foreground=MUTED,
+            weight=Pango.Weight.SEMIBOLD,
+            background=TH_BG,
+            scale=0.85,
+        )
         mk("zebra", background=ZEBRA_BG)
         mk("syn_kw", foreground=SYN_KW)
         mk("syn_str", foreground=SYN_STR)
@@ -463,7 +570,13 @@ class MarkdownView(Gtk.TextView):
         mk("syn_key", foreground=SYN_KEY)
         mk("syn_var", foreground=SYN_VAR)
 
-    def set_markdown(self, text: str, highlight: str = "", vault_root: str | None = None, settings: dict | None = None) -> None:
+    def set_markdown(
+        self,
+        text: str,
+        highlight: str = "",
+        vault_root: str | None = None,
+        settings: dict | None = None,
+    ) -> None:
         # очистить предыдущие mermaid/ latex-виджеты (child anchor)
         for _w in getattr(self, "_mermaid_widgets", []):
             try:
@@ -503,9 +616,7 @@ class MarkdownView(Gtk.TextView):
         q = self._highlight
         if not q:
             return
-        text = self._buf.get_text(
-            self._buf.get_start_iter(), self._buf.get_end_iter(), True
-        )
+        text = self._buf.get_text(self._buf.get_start_iter(), self._buf.get_end_iter(), True)
         first: Gtk.TextIter | None = None
         idx = text.lower().find(q)
         while idx != -1:
@@ -527,11 +638,18 @@ class MarkdownView(Gtk.TextView):
             return name
         icon, (r, g, b) = _CALLOUT_FACE.get(ctype, _CALLOUT_DEFAULT)
         self._callout_tags[name] = self._buf.create_tag(
-            name, foreground=f"#{r:02x}{g:02x}{b:02x}", weight=Pango.Weight.SEMIBOLD,
+            name,
+            foreground=f"#{r:02x}{g:02x}{b:02x}",
+            weight=Pango.Weight.SEMIBOLD,
         )
         return name
 
-    def _put(self, text: str, tag: str | None, segs: list[tuple[str, str | None, str | None]] | None = None) -> None:
+    def _put(
+        self,
+        text: str,
+        tag: str | None,
+        segs: list[tuple[str, str | None, str | None]] | None = None,
+    ) -> None:
         if not text and not segs:
             return
         # Если переданы сегменты, вставляем склейку seg_text (без маркдаун-разметки **, $, $$ и т.п.)
@@ -615,9 +733,7 @@ class MarkdownView(Gtk.TextView):
                 if tag is not None:
                     self._buf.apply_tag(tag, sa, sb)
                 if seg_tag == "wikilink" and seg_target:
-                    self._wikilinks.append(
-                        (base_off + pos, base_off + pos + len(text), seg_target)
-                    )
+                    self._wikilinks.append((base_off + pos, base_off + pos + len(text), seg_target))
             pos += len(text)
 
     def _render_mermaid(self, code: str) -> None:
@@ -671,7 +787,10 @@ class MarkdownView(Gtk.TextView):
             # fallback: текстовый placeholder + код
             self._put(raw.strip() + "\n", "codeblock")
             # подсказка как включить предпросмотр
-            self._put("— предпросмотр: нужен WebKitGTK 6.0/4.1 + mermaid.js или mermaid-cli (npm i -g @mermaid-js/mermaid-cli)", "meta")
+            self._put(
+                "— предпросмотр: нужен WebKitGTK 6.0/4.1 + mermaid.js или mermaid-cli (npm i -g @mermaid-js/mermaid-cli)",
+                "meta",
+            )
             self._nl()
         # разделитель
         self._nl()
@@ -713,7 +832,10 @@ class MarkdownView(Gtk.TextView):
             self._put(raw.strip() + "\n", "latex_block")
         else:
             self._put(raw.strip() + "\n", "latex_block")
-            self._put("— предпросмотр: нужен WebKitGTK 6.0/4.1 + KaTeX/MathJax или python3-matplotlib / texlive (pdflatex+dvipng) для PNG", "meta")
+            self._put(
+                "— предпросмотр: нужен WebKitGTK 6.0/4.1 + KaTeX/MathJax или python3-matplotlib / texlive (pdflatex+dvipng) для PNG",
+                "meta",
+            )
             self._nl()
         self._nl()
 
@@ -730,7 +852,6 @@ class MarkdownView(Gtk.TextView):
         self._put(raw.strip() + "\n", "codeblock")
         # выполнить запрос
         try:
-
             from fragilenotes.core.dataview import execute_query as _dv_exec  # noqa: E402
 
             vault_root = getattr(self, "_vault_root", None)

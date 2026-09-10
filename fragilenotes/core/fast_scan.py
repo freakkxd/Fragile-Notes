@@ -30,22 +30,38 @@ from typing import Any
 # ── константы (как в fragilenotes.vault) ─────────────────────
 ALLOWED_EXTS = {".md", ".txt", ".json", ".yaml", ".yml", ".enc", ".pdf"}
 HEAVY_DIRS = {
-    "node_modules", ".git", "dist", "build", "target", ".venv", "venv",
-    "__pycache__", "bin", "obj", ".cache", ".trash",
-    ".obsidian", "Trash", "images", "ao-engine",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "bin",
+    "obj",
+    ".cache",
+    ".trash",
+    ".obsidian",
+    "Trash",
+    "images",
+    "ao-engine",
 }
 
 # попытка загрузить реальное Rust расширение (когда будет скомпилировано)
 try:  # type: ignore[import-not-found]
     import fragilenotes._rust_scan as _rust_ext  # noqa: F401
+
     _HAS_RUST = True
 except ImportError:
     try:
         import _rust_scan as _rust_ext  # noqa: F401
+
         _HAS_RUST = True
     except ImportError:
         _rust_ext = None  # type: ignore[assignment]
         _HAS_RUST = False
+
 
 # ── модели ───────────────────────────────────────────────────
 @dataclass(slots=True)
@@ -114,6 +130,7 @@ def _should_skip(name: str) -> bool:
 
 # ── rayon-like параллельный обход ────────────────────────────
 
+
 def _scandir_one(directory: Path) -> tuple[list[Path], list[tuple[str, str, float, int]]]:
     """Синхронный scandir одной директории: (подпапки, файлы)."""
     subdirs: list[Path] = []
@@ -140,7 +157,9 @@ def _scandir_one(directory: Path) -> tuple[list[Path], list[tuple[str, str, floa
     return subdirs, files
 
 
-def _collect_all_dirs_parallel(root: Path, max_workers: int | None = None) -> tuple[list[Path], dict[str, list[tuple[str, str]]]]:
+def _collect_all_dirs_parallel(
+    root: Path, max_workers: int | None = None
+) -> tuple[list[Path], dict[str, list[tuple[str, str]]]]:
     """BFS с пулом потоков — каждый уровень сканируется параллельно.
 
     Возвращает (все_папки, files_by_dir).
@@ -232,6 +251,7 @@ def _build_entries(root: Path, max_workers: int | None = None) -> list[ScanEntry
 
 # ── публичный API ────────────────────────────────────────────
 
+
 def fast_scan(
     root: Path | str,
     *,
@@ -246,7 +266,13 @@ def fast_scan(
 
     Кэш: TTL + per-key Event (anti-stampede).
     """
-    r = Path(root).resolve() if isinstance(root, str) else Path(root).resolve() if not Path(root).is_absolute() else Path(root)
+    r = (
+        Path(root).resolve()
+        if isinstance(root, str)
+        else Path(root).resolve()
+        if not Path(root).is_absolute()
+        else Path(root)
+    )
     # нормализуем без resolve для tmp (resolve может уйти в symlink)
     try:
         r = Path(root).expanduser().resolve(strict=False)
@@ -261,7 +287,11 @@ def fast_scan(
             raw = _rust_ext.scan(key, max_workers or 0)  # type: ignore[attr-defined]
             # адаптация raw -> FastScanResult (если вернёт dict/list)
             if isinstance(raw, dict) and "entries" in raw:
-                return FastScanResult(root=key, entries=raw["entries"], stats=ScanStats(elapsed=0.0, files=len(raw["entries"]), dirs=0, cached=False))
+                return FastScanResult(
+                    root=key,
+                    entries=raw["entries"],
+                    stats=ScanStats(elapsed=0.0, files=len(raw["entries"]), dirs=0, cached=False),
+                )
         except Exception:
             pass  # fallback на python
 
@@ -303,7 +333,14 @@ def fast_scan(
                         root=cached.root,
                         entries=list(cached.entries),
                         tree=cached.tree,
-                        stats=ScanStats(elapsed=0.0, files=len(cached.entries), dirs=0, cached=True, parallel=True, workers=max_workers or 0),
+                        stats=ScanStats(
+                            elapsed=0.0,
+                            files=len(cached.entries),
+                            dirs=0,
+                            cached=True,
+                            parallel=True,
+                            workers=max_workers or 0,
+                        ),
                     )
             return fast_scan(root, max_workers=max_workers, use_cache=True, ttl=ttl)
         # producer
@@ -314,7 +351,14 @@ def fast_scan(
             result = FastScanResult(
                 root=key,
                 entries=entries,
-                stats=ScanStats(elapsed=elapsed, files=len([e for e in entries if not e.is_dir]), dirs=len([e for e in entries if e.is_dir]), cached=False, parallel=True, workers=max_workers or min(32, (os.cpu_count() or 4) * 2)),
+                stats=ScanStats(
+                    elapsed=elapsed,
+                    files=len([e for e in entries if not e.is_dir]),
+                    dirs=len([e for e in entries if e.is_dir]),
+                    cached=False,
+                    parallel=True,
+                    workers=max_workers or min(32, (os.cpu_count() or 4) * 2),
+                ),
             )
             now2 = time.monotonic()
             with _fast_lock:
@@ -335,7 +379,14 @@ def fast_scan(
     return FastScanResult(
         root=key,
         entries=entries,
-        stats=ScanStats(elapsed=elapsed, files=len([e for e in entries if not e.is_dir]), dirs=len([e for e in entries if e.is_dir]), cached=False, parallel=True, workers=max_workers or min(32, (os.cpu_count() or 4) * 2)),
+        stats=ScanStats(
+            elapsed=elapsed,
+            files=len([e for e in entries if not e.is_dir]),
+            dirs=len([e for e in entries if e.is_dir]),
+            cached=False,
+            parallel=True,
+            workers=max_workers or min(32, (os.cpu_count() or 4) * 2),
+        ),
     )
 
 
@@ -397,7 +448,12 @@ def ensure_file_tree_fast(
                     raw = _rust_ext.file_tree(key)  # type: ignore[attr-defined]
                     if isinstance(raw, dict):
                         # adapt
-                        node = FileTreeNodeFast(name=raw.get("name", r.name), path=raw.get("path", key), dirs=[], files=raw.get("files", []))
+                        node = FileTreeNodeFast(
+                            name=raw.get("name", r.name),
+                            path=raw.get("path", key),
+                            dirs=[],
+                            files=raw.get("files", []),
+                        )
                         now2 = time.monotonic()
                         with _tree_lock:
                             _tree_cache[key] = (now2, node)
@@ -457,6 +513,7 @@ invalidate_fast_scan_cache = invalidate_fast_cache
 # ── симуляция 39k файлов за 0.3с ─────────────────────────────
 def _gen_synthetic_entries(n: int, root: str = "/vault") -> list[ScanEntry]:
     """Генерирует n синтетических ScanEntry без диска — для бенчмарка."""
+
     # rayon-like параллельная генерация через ThreadPoolExecutor
     def _chunk(start: int, end: int) -> list[ScanEntry]:
         chunk: list[ScanEntry] = []
@@ -465,7 +522,15 @@ def _gen_synthetic_entries(n: int, root: str = "/vault") -> list[ScanEntry]:
             d = i // 100
             name = f"note_{i:05d}.md"
             path = f"{root}/dir_{d:04d}/{name}"
-            chunk.append(ScanEntry(path=path, name=name, is_dir=False, mtime=float(1_700_000_000 + i), size=1024 + (i % 4096)))
+            chunk.append(
+                ScanEntry(
+                    path=path,
+                    name=name,
+                    is_dir=False,
+                    mtime=float(1_700_000_000 + i),
+                    size=1024 + (i % 4096),
+                )
+            )
         return chunk
 
     workers = min(32, (os.cpu_count() or 4) * 2)
@@ -478,7 +543,15 @@ def _gen_synthetic_entries(n: int, root: str = "/vault") -> list[ScanEntry]:
     # dirs
     dir_count = (n + 99) // 100
     for d in range(dir_count):
-        entries.append(ScanEntry(path=f"{root}/dir_{d:04d}", name=f"dir_{d:04d}", is_dir=True, mtime=float(1_700_000_000), size=0))
+        entries.append(
+            ScanEntry(
+                path=f"{root}/dir_{d:04d}",
+                name=f"dir_{d:04d}",
+                is_dir=True,
+                mtime=float(1_700_000_000),
+                size=0,
+            )
+        )
     entries.sort(key=lambda e: e.path.lower())
     return entries
 
@@ -505,7 +578,14 @@ def simulate_39k_scan(
                     root=cached.root,
                     entries=list(cached.entries),
                     tree=cached.tree,
-                    stats=ScanStats(elapsed=0.0, files=n, dirs=(n + 99) // 100, cached=True, parallel=True, workers=max_workers or 0),
+                    stats=ScanStats(
+                        elapsed=0.0,
+                        files=n,
+                        dirs=(n + 99) // 100,
+                        cached=True,
+                        parallel=True,
+                        workers=max_workers or 0,
+                    ),
                 )
             inflight = _fast_inflight.get(key)
             if inflight is not None:
@@ -530,7 +610,14 @@ def simulate_39k_scan(
             result = FastScanResult(
                 root=root,
                 entries=entries,
-                stats=ScanStats(elapsed=elapsed, files=n, dirs=(n + 99) // 100, cached=False, parallel=True, workers=max_workers or min(32, (os.cpu_count() or 4) * 2)),
+                stats=ScanStats(
+                    elapsed=elapsed,
+                    files=n,
+                    dirs=(n + 99) // 100,
+                    cached=False,
+                    parallel=True,
+                    workers=max_workers or min(32, (os.cpu_count() or 4) * 2),
+                ),
             )
             now2 = time.monotonic()
             with _fast_lock:
@@ -547,7 +634,14 @@ def simulate_39k_scan(
     return FastScanResult(
         root=root,
         entries=entries,
-        stats=ScanStats(elapsed=elapsed, files=n, dirs=(n + 99) // 100, cached=False, parallel=True, workers=max_workers or min(32, (os.cpu_count() or 4) * 2)),
+        stats=ScanStats(
+            elapsed=elapsed,
+            files=n,
+            dirs=(n + 99) // 100,
+            cached=False,
+            parallel=True,
+            workers=max_workers or min(32, (os.cpu_count() or 4) * 2),
+        ),
     )
 
 

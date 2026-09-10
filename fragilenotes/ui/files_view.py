@@ -71,6 +71,8 @@ class _NoteItem(GObject.Object):
         self.path = path
         self.lower_name = name.lower()
         self.lower_path = path.lower()
+
+
 from ..services.vault_service import VaultService, collect_notes, count_nodes, index_nodes
 from .markdown import MarkdownView
 from .scale import attach_zoom_keys
@@ -135,7 +137,9 @@ class FilesView(Gtk.Box):
         self._populated: set[str] = set()
         self._fill_tokens: dict[str, int] = {}
         self._path_to_iter: dict[str, Gtk.TreeIter] = {}
-        self._path_to_row: dict[str, Gtk.ListBoxRow] = {}  # compat shim (устар., теперь выбор через selection)
+        self._path_to_row: dict[
+            str, Gtk.ListBoxRow
+        ] = {}  # compat shim (устар., теперь выбор через selection)
         self._render_token = 0
         self._pending_rows: list[tuple[str, str]] = []
         self._filling = False
@@ -231,7 +235,9 @@ class FilesView(Gtk.Box):
     def _build(self) -> None:
         self.append(view_header("🗂", "Заметки", "Vault как в Obsidian: папки, один клик — открыть"))
 
-        split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, hexpand=True, vexpand=True)
+        split = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=12, hexpand=True, vexpand=True
+        )
         split.set_margin_start(14)
         split.set_margin_end(14)
         split.set_margin_bottom(14)
@@ -257,7 +263,11 @@ class FilesView(Gtk.Box):
             _names = ["— без шаблона —"] + [p.stem for p in _tpls]
             if len(_names) > 1:
                 tpl_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                tpl_box.append(Gtk.Label(label="Шаблон", halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]))
+                tpl_box.append(
+                    Gtk.Label(
+                        label="Шаблон", halign=Gtk.Align.START, xalign=0, css_classes=["dim-hint"]
+                    )
+                )
                 self._new_template_drop = Gtk.DropDown.new_from_strings(_names)
                 self._new_template_drop.set_selected(0)
                 tpl_box.append(self._new_template_drop)
@@ -273,7 +283,8 @@ class FilesView(Gtk.Box):
         new_btn.connect("clicked", lambda *_: self._popup_new(new_pop))
         actions.append(new_btn)
         self.filter_entry = Gtk.SearchEntry(
-            placeholder_text="Поиск по всем заметкам…", hexpand=True,
+            placeholder_text="Поиск по всем заметкам…",
+            hexpand=True,
         )
         self.filter_entry.connect("search-changed", lambda *_: self._on_filter_changed())
         actions.append(self.filter_entry)
@@ -337,7 +348,9 @@ class FilesView(Gtk.Box):
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._on_flat_factory_setup)
         factory.connect("bind", self._on_flat_factory_bind)
-        self._listview = Gtk.ListView(model=self._selection, factory=factory, css_classes=["file-list"])
+        self._listview = Gtk.ListView(
+            model=self._selection, factory=factory, css_classes=["file-list"]
+        )
         self._listview.set_single_click_activate(True)
         self._listview.connect("activate", self._on_listview_activate)
         flat_scroller = Gtk.ScrolledWindow(vexpand=True, css_classes=["editor-frame"])
@@ -360,7 +373,8 @@ class FilesView(Gtk.Box):
 
         # Пустые состояния — унифицированные .empty
         self._vault_empty = empty_state(
-            "📂", "Vault пуст — заметок пока нет",
+            "📂",
+            "Vault пуст — заметок пока нет",
             hint="Создайте первую заметку кнопкой «Новый»",
             action_label="Создать заметку",
             on_action=lambda: self._popup_new(self._new_popover),
@@ -369,7 +383,8 @@ class FilesView(Gtk.Box):
         left.append(self._vault_empty)
 
         self._filter_empty = empty_state(
-            "🔍", "Ничего не найдено",
+            "🔍",
+            "Ничего не найдено",
             hint="Попробуйте другой запрос",
             action_label="Очистить фильтр",
             on_action=lambda: self.filter_entry.set_text(""),
@@ -379,52 +394,83 @@ class FilesView(Gtk.Box):
         split.append(left)
 
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True)
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"])
-        self.file_label = Gtk.Label(label="", css_classes=["dim-label", "dim-hint"], hexpand=True, halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        toolbar = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6, css_classes=["toolbar"]
+        )
+        self.file_label = Gtk.Label(
+            label="",
+            css_classes=["dim-label", "dim-hint"],
+            hexpand=True,
+            halign=Gtk.Align.START,
+            xalign=0,
+            ellipsize=Pango.EllipsizeMode.MIDDLE,
+        )
         toolbar.append(self.file_label)
         # ── навигация по вхождениям (Ctrl+G / Ctrl+Shift+G) ──
-        search_nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2, css_classes=["search-nav"])
-        self.search_prev_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Предыдущее вхождение (Ctrl+Shift+G)", css_classes=["flat", "search-nav-btn"])
+        search_nav = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=2, css_classes=["search-nav"]
+        )
+        self.search_prev_btn = Gtk.Button(
+            icon_name="go-up-symbolic",
+            tooltip_text="Предыдущее вхождение (Ctrl+Shift+G)",
+            css_classes=["flat", "search-nav-btn"],
+        )
         self.search_prev_btn.connect("clicked", lambda *_: self._search_prev())
         self.search_prev_btn.set_sensitive(False)
         search_nav.append(self.search_prev_btn)
-        self.search_next_btn = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Следующее вхождение (Ctrl+G)", css_classes=["flat", "search-nav-btn"])
+        self.search_next_btn = Gtk.Button(
+            icon_name="go-down-symbolic",
+            tooltip_text="Следующее вхождение (Ctrl+G)",
+            css_classes=["flat", "search-nav-btn"],
+        )
         self.search_next_btn.connect("clicked", lambda *_: self._search_next())
         self.search_next_btn.set_sensitive(False)
         search_nav.append(self.search_next_btn)
         toolbar.append(search_nav)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         switcher = Gtk.StackSwitcher(stack=self.stack, css_classes=["toolbar-switcher"])
-        self.del_btn = Gtk.Button(icon_name="user-trash-symbolic",
-                                   tooltip_text="Удалить файл безвозвратно",
-                                   css_classes=["destructive-action", "flat"])
+        self.del_btn = Gtk.Button(
+            icon_name="user-trash-symbolic",
+            tooltip_text="Удалить файл безвозвратно",
+            css_classes=["destructive-action", "flat"],
+        )
         self.del_btn.set_sensitive(False)
         self.del_btn.connect("clicked", self._on_delete)
         toolbar.append(self.del_btn)
         # ── Шифрование AES-GCM .md.enc ─────────────────────
-        self.encrypt_btn = Gtk.Button(icon_name="system-lock-screen-symbolic",
-                                      tooltip_text="Зашифровать — AES-GCM .md.enc (ключ из пароля PBKDF2)",
-                                      css_classes=["flat"])
+        self.encrypt_btn = Gtk.Button(
+            icon_name="system-lock-screen-symbolic",
+            tooltip_text="Зашифровать — AES-GCM .md.enc (ключ из пароля PBKDF2)",
+            css_classes=["flat"],
+        )
         self.encrypt_btn.set_sensitive(False)
         self.encrypt_btn.connect("clicked", self._on_encrypt)
         toolbar.append(self.encrypt_btn)
-        self.decrypt_btn = Gtk.Button(icon_name="changes-allow-symbolic",
-                                      tooltip_text="Расшифровать .md.enc — AES-GCM",
-                                      css_classes=["flat"])
+        self.decrypt_btn = Gtk.Button(
+            icon_name="changes-allow-symbolic",
+            tooltip_text="Расшифровать .md.enc — AES-GCM",
+            css_classes=["flat"],
+        )
         self.decrypt_btn.set_sensitive(False)
         self.decrypt_btn.connect("clicked", self._on_decrypt)
         toolbar.append(self.decrypt_btn)
         # ── PDF экспорт ──────────────────────────────────────────
-        self.export_btn = Gtk.Button(label="Экспорт", icon_name="document-save-as-symbolic",
-                                     tooltip_text="Экспорт в PDF (тема AO Glass)",
-                                     css_classes=["flat"])
+        self.export_btn = Gtk.Button(
+            label="Экспорт",
+            icon_name="document-save-as-symbolic",
+            tooltip_text="Экспорт в PDF (тема AO Glass)",
+            css_classes=["flat"],
+        )
         self.export_btn.set_sensitive(False)
         self.export_btn.connect("clicked", self._on_export_pdf)
         toolbar.append(self.export_btn)
         # ── Publish: экспорт vault в статический сайт ─────────────
-        self.publish_btn = Gtk.Button(label="Публикация", icon_name="applications-internet-symbolic",
-                                      tooltip_text="Опубликовать сайт — экспорт vault в static HTML (fragile publish)",
-                                      css_classes=["flat"])
+        self.publish_btn = Gtk.Button(
+            label="Публикация",
+            icon_name="applications-internet-symbolic",
+            tooltip_text="Опубликовать сайт — экспорт vault в static HTML (fragile publish)",
+            css_classes=["flat"],
+        )
         self.publish_btn.connect("clicked", self._on_publish)
         toolbar.append(self.publish_btn)
         # ── CRDT совместное редактирование (опция) ─────────────
@@ -477,7 +523,10 @@ class FilesView(Gtk.Box):
         toolbar.append(self.save_btn)
         right.append(toolbar)
         # ── Vim command line (под toolbar, над редактором) ─────
-        self._vim_command_entry = Gtk.Entry(css_classes=["vim-command"], placeholder_text=":w :q :wq — Enter выполнить, Esc отменить")
+        self._vim_command_entry = Gtk.Entry(
+            css_classes=["vim-command"],
+            placeholder_text=":w :q :wq — Enter выполнить, Esc отменить",
+        )
         self._vim_command_entry.set_visible(True)
         self._vim_revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
         self._vim_revealer.set_child(self._vim_command_entry)
@@ -510,23 +559,38 @@ class FilesView(Gtk.Box):
         except Exception:
             # fallback: строки-цвета
             try:
-                t = self.buffer.create_tag("search_match", background="rgba(130,168,255,0.3)", foreground="#e4eaf6")
+                t = self.buffer.create_tag(
+                    "search_match", background="rgba(130,168,255,0.3)", foreground="#e4eaf6"
+                )
                 self._search_tag = t
-                ct = self.buffer.create_tag("search_match_current", background="rgba(130,168,255,0.55)", foreground="#ffffff", underline=Pango.Underline.SINGLE)
+                ct = self.buffer.create_tag(
+                    "search_match_current",
+                    background="rgba(130,168,255,0.55)",
+                    foreground="#ffffff",
+                    underline=Pango.Underline.SINGLE,
+                )
                 self._search_current_tag = ct
             except Exception:
                 pass
         self.editor = Gtk.TextView(
-            buffer=self.buffer, wrap_mode=Gtk.WrapMode.WORD,
-            hexpand=True, vexpand=True, css_classes=["editor"],
-            top_margin=14, bottom_margin=16, left_margin=20, right_margin=20,
+            buffer=self.buffer,
+            wrap_mode=Gtk.WrapMode.WORD,
+            hexpand=True,
+            vexpand=True,
+            css_classes=["editor"],
+            top_margin=14,
+            bottom_margin=16,
+            left_margin=20,
+            right_margin=20,
         )
         self.buffer.connect("changed", self._on_changed)
         ed_scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame"])
         ed_scroller.set_child(self.editor)
         self.preview = MarkdownView()
         self.preview.on_wikilink = self._on_wikilink
-        pv_scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame", "md-read"])
+        pv_scroller = Gtk.ScrolledWindow(
+            hexpand=True, vexpand=True, css_classes=["editor-frame", "md-read"]
+        )
         pv_scroller.set_child(self.preview)
         ed_clamp = _content_clamp(ed_scroller)
         pv_clamp = _content_clamp(pv_scroller)
@@ -535,7 +599,9 @@ class FilesView(Gtk.Box):
         self.stack.set_visible_child_name("Редактор")
         self.stack.connect("notify::visible-child-name", self._on_switch)
         # ── Outline + редактор (горизонтальная зона под toolbar) ──
-        editor_area = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True, vexpand=True)
+        editor_area = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True, vexpand=True
+        )
         editor_area.append(self.stack)
         self._build_outline_panel(editor_area)
         # ── Комментарии к строкам (gutter справа) ──────────────────
@@ -576,12 +642,16 @@ class FilesView(Gtk.Box):
     # ── Связи: исходящие и бэклинки ──────────────────────────
     def _build_links_panel(self, right: Gtk.Box) -> None:
         """Секция 'Связи' под редактором: Исходящие и Входящие/бэклинки."""
-        self._links_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["links-panel"])
+        self._links_panel = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["links-panel"]
+        )
         title = Gtk.Label(label="Связи", halign=Gtk.Align.START, css_classes=["links-title"])
         self._links_panel.append(title)
         # Исходящие
         out_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        out_hdr.append(Gtk.Label(label="Исходящие", css_classes=["links-subtitle"], halign=Gtk.Align.START))
+        out_hdr.append(
+            Gtk.Label(label="Исходящие", css_classes=["links-subtitle"], halign=Gtk.Align.START)
+        )
         self._outgoing_count = Gtk.Label(label="", css_classes=["dim-hint"])
         out_hdr.append(self._outgoing_count)
         self._links_panel.append(out_hdr)
@@ -592,7 +662,8 @@ class FilesView(Gtk.Box):
         # (см. _refresh_links — slice + счётчик "+N ещё").
         self._outgoing_flow = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            column_spacing=6, row_spacing=6,
+            column_spacing=6,
+            row_spacing=6,
             max_children_per_line=12,
             homogeneous=True,
             css_classes=["links-flow"],
@@ -603,13 +674,18 @@ class FilesView(Gtk.Box):
         self._links_panel.append(self._outgoing_empty)
         # Входящие / Бэклинки
         in_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        in_hdr.append(Gtk.Label(label="Входящие / Бэклинки", css_classes=["links-subtitle"], halign=Gtk.Align.START))
+        in_hdr.append(
+            Gtk.Label(
+                label="Входящие / Бэклинки", css_classes=["links-subtitle"], halign=Gtk.Align.START
+            )
+        )
         self._incoming_count = Gtk.Label(label="", css_classes=["dim-hint"])
         in_hdr.append(self._incoming_count)
         self._links_panel.append(in_hdr)
         self._incoming_flow = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            column_spacing=6, row_spacing=6,
+            column_spacing=6,
+            row_spacing=6,
             max_children_per_line=12,
             homogeneous=True,
             css_classes=["links-flow"],
@@ -625,13 +701,19 @@ class FilesView(Gtk.Box):
     # ── Теги: FlowBox с чипами ───────────────────────────────
     def _build_tags_panel(self, right: Gtk.Box) -> None:
         """Секция 'Теги' рядом с 'Связи' под редактором: чипы с счётчиками."""
-        self._tags_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["tags-panel"])
+        self._tags_panel = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["tags-panel"]
+        )
         title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        title_row.append(Gtk.Label(label="Теги", halign=Gtk.Align.START, css_classes=["tags-title"]))
+        title_row.append(
+            Gtk.Label(label="Теги", halign=Gtk.Align.START, css_classes=["tags-title"])
+        )
         self._tags_count = Gtk.Label(label="", css_classes=["dim-hint"])
         title_row.append(self._tags_count)
         # кнопка сброса фильтра
-        self._tags_clear = Gtk.Button(label="✕", css_classes=["flat", "tag-clear"], tooltip_text="Сбросить фильтр по тегу")
+        self._tags_clear = Gtk.Button(
+            label="✕", css_classes=["flat", "tag-clear"], tooltip_text="Сбросить фильтр по тегу"
+        )
         self._tags_clear.connect("clicked", lambda *_: self._clear_tag_filter())
         self._tags_clear.set_visible(False)
         title_row.append(self._tags_clear)
@@ -641,7 +723,8 @@ class FilesView(Gtk.Box):
         # homogeneous + max_children_per_line + лимит 100 (см. _refresh_tags).
         self._tags_flow = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            column_spacing=6, row_spacing=6,
+            column_spacing=6,
+            row_spacing=6,
             max_children_per_line=14,
             homogeneous=True,
             css_classes=["tags-flow"],
@@ -656,25 +739,41 @@ class FilesView(Gtk.Box):
     # ── Auto-tagging LLM: accept/reject бар ──────────────────
     def _build_auto_tag_bar(self, right: Gtk.Box) -> None:
         """Бар предложенных LLM тегов: #теги + Принять/Отклонить. Хранение — frontmatter."""
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["auto-tag-bar"])
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, css_classes=["auto-tag-bar"]
+        )
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        self._auto_tag_label = Gtk.Label(label="Предложенные теги:", css_classes=["dim-hint", "auto-tag-title"], halign=Gtk.Align.START)
+        self._auto_tag_label = Gtk.Label(
+            label="Предложенные теги:",
+            css_classes=["dim-hint", "auto-tag-title"],
+            halign=Gtk.Align.START,
+        )
         box.append(self._auto_tag_label)
         self._auto_tag_chips = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            column_spacing=6, row_spacing=6,
+            column_spacing=6,
+            row_spacing=6,
             max_children_per_line=10,
             homogeneous=False,
             css_classes=["auto-tag-flow"],
-            hexpand=True, halign=Gtk.Align.START,
+            hexpand=True,
+            halign=Gtk.Align.START,
         )
         box.append(self._auto_tag_chips)
-        accept = Gtk.Button(label="Принять", css_classes=["suggested-action", "pill"], tooltip_text="Добавить предложенные теги в frontmatter")
+        accept = Gtk.Button(
+            label="Принять",
+            css_classes=["suggested-action", "pill"],
+            tooltip_text="Добавить предложенные теги в frontmatter",
+        )
         accept.connect("clicked", self._on_auto_tag_accept)
         box.append(accept)
         self._auto_accept_btn = accept
-        reject = Gtk.Button(label="Отклонить", css_classes=["flat", "pill"], tooltip_text="Отклонить предложенные теги")
+        reject = Gtk.Button(
+            label="Отклонить",
+            css_classes=["flat", "pill"],
+            tooltip_text="Отклонить предложенные теги",
+        )
         reject.connect("clicked", self._on_auto_tag_reject)
         box.append(reject)
         self._auto_reject_btn = reject
@@ -716,6 +815,7 @@ class FilesView(Gtk.Box):
         tags = list(self._auto_suggested)
         target = Path(self._current)
         self._hide_auto_tag_bar()
+
         # применить в фоне чтобы не блокировать UI (диск + инвалидация кэша)
         def work() -> None:
             ok: bool = False
@@ -738,7 +838,9 @@ class FilesView(Gtk.Box):
                             merged.append(t)
                             seen.add(t.lower())
                     fm["tags"] = merged
-                    target.write_text(serialize_frontmatter(fm) + body.lstrip("\n"), encoding="utf-8")
+                    target.write_text(
+                        serialize_frontmatter(fm) + body.lstrip("\n"), encoding="utf-8"
+                    )
                     ok = True
             except Exception as exc:  # noqa: BLE001
                 ok = False
@@ -749,7 +851,9 @@ class FilesView(Gtk.Box):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_auto_tag_applied(self, ok: bool, err: str | None, tags: list[str], target: Path) -> bool:
+    def _on_auto_tag_applied(
+        self, ok: bool, err: str | None, tags: list[str], target: Path
+    ) -> bool:
         if not self._alive:
             return False
         if ok:
@@ -779,7 +883,7 @@ class FilesView(Gtk.Box):
                         pass
                 except Exception:
                     pass
-            self.file_label.set_text(f"теги добавлены: {', '.join('#'+t for t in tags)}")
+            self.file_label.set_text(f"теги добавлены: {', '.join('#' + t for t in tags)}")
             try:
                 self._refresh_tags()
             except Exception:
@@ -793,7 +897,7 @@ class FilesView(Gtk.Box):
                 root = self.get_root()
                 overlay = getattr(root, "toast_overlay", None) if root is not None else None
                 if overlay is not None:
-                    toast = Adw.Toast.new(f"Теги добавлены: {', '.join('#'+t for t in tags)}")
+                    toast = Adw.Toast.new(f"Теги добавлены: {', '.join('#' + t for t in tags)}")
                     toast.set_timeout(3)
                     overlay.add_toast(toast)
             except Exception:
@@ -881,7 +985,9 @@ class FilesView(Gtk.Box):
         )
         self.outline_panel.set_size_request(220, -1)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        header.append(Gtk.Label(label="Оглавление", halign=Gtk.Align.START, css_classes=["outline-title"]))
+        header.append(
+            Gtk.Label(label="Оглавление", halign=Gtk.Align.START, css_classes=["outline-title"])
+        )
         self.outline_count = Gtk.Label(label="", css_classes=["dim-hint"])
         header.append(self.outline_count)
         self.outline_panel.append(header)
@@ -897,7 +1003,9 @@ class FilesView(Gtk.Box):
         except AttributeError:
             pass
         self.outline_panel.append(scroller)
-        self.outline_empty = Gtk.Label(label="— нет заголовков —", css_classes=["dim-hint", "outline-empty"])
+        self.outline_empty = Gtk.Label(
+            label="— нет заголовков —", css_classes=["dim-hint", "outline-empty"]
+        )
         self.outline_panel.append(self.outline_empty)
         parent.append(self.outline_panel)
         self._refresh_outline()
@@ -1020,7 +1128,7 @@ class FilesView(Gtk.Box):
     def _make_tag_chip(self, tag: str, count: int) -> Gtk.Widget:
         # Obsidian-стиль: #tag · count
         label = f"#{tag}  · {count}" if count > 1 else f"#{tag}"
-        is_active = (self._selected_tag is not None and self._selected_tag.lower() == tag.lower())
+        is_active = self._selected_tag is not None and self._selected_tag.lower() == tag.lower()
         classes = ["tag-chip", "tag-chip--active"] if is_active else ["tag-chip"]
         btn = Gtk.Button(label=label, css_classes=classes)
         btn.set_tooltip_text(f"#{tag} — {count} файлов · клик для фильтра")
@@ -1098,7 +1206,9 @@ class FilesView(Gtk.Box):
         out_capped = len(outgoing) > _FLOW_CAP
         out_shown = sorted(outgoing, key=lambda pp: pp.stem.lower())[:_FLOW_CAP]
         extra_out = len(outgoing) - len(out_shown) if out_capped else 0
-        lbl_out = f"· {len(outgoing)}" + (f" · +{extra_out} скрыто (лимит {_FLOW_CAP})" if out_capped else "")
+        lbl_out = f"· {len(outgoing)}" + (
+            f" · +{extra_out} скрыто (лимит {_FLOW_CAP})" if out_capped else ""
+        )
         self._outgoing_count.set_text(lbl_out if outgoing else "")
         self._outgoing_empty.set_visible(not bool(outgoing))
         self._outgoing_flow.set_visible(bool(outgoing))
@@ -1109,7 +1219,9 @@ class FilesView(Gtk.Box):
         in_capped = len(incoming) > _FLOW_CAP
         in_shown = sorted(incoming, key=lambda pp: pp.stem.lower())[:_FLOW_CAP]
         extra_in = len(incoming) - len(in_shown) if in_capped else 0
-        lbl_in = f"· {len(incoming)}" + (f" · +{extra_in} скрыто (лимит {_FLOW_CAP})" if in_capped else "")
+        lbl_in = f"· {len(incoming)}" + (
+            f" · +{extra_in} скрыто (лимит {_FLOW_CAP})" if in_capped else ""
+        )
         self._incoming_count.set_text(lbl_in if incoming else "")
         self._incoming_empty.set_visible(not bool(incoming))
         self._incoming_flow.set_visible(bool(incoming))
@@ -1148,6 +1260,7 @@ class FilesView(Gtk.Box):
         try:
             self.settings["history_panel_visible"] = visible
             from ..config import save_settings as _save
+
             _save(self.settings)
         except Exception:
             pass
@@ -1157,7 +1270,11 @@ class FilesView(Gtk.Box):
             except Exception:
                 pass
         # при открытии — сразу обновить историю для текущего файла
-        if visible and self._current is not None and getattr(self, "history_panel", None) is not None:
+        if (
+            visible
+            and self._current is not None
+            and getattr(self, "history_panel", None) is not None
+        ):
             try:
                 self.history_panel.set_file(self._current)  # type: ignore[union-attr]
             except Exception:
@@ -1277,7 +1394,11 @@ class FilesView(Gtk.Box):
                 self.file_label.set_text("открой заметку для вставки сниппета")
                 return
             title = self._current.stem if self._current else ""
-            text = _snippets.render_expansion(expansion, title=title) if _snippets is not None else expansion
+            text = (
+                _snippets.render_expansion(expansion, title=title)
+                if _snippets is not None
+                else expansion
+            )
             insert = buf.get_insert()
             it = buf.get_iter_at_mark(insert)
             self._snippet_expanding = True
@@ -1312,7 +1433,12 @@ class FilesView(Gtk.Box):
             content.set_margin_bottom(12)
             content.set_margin_start(12)
             content.set_margin_end(12)
-            header = Gtk.Label(label="Триггер → вставка · Tab/Space в редакторе автозаменяет · Enter вставляет", css_classes=["dim-hint"], halign=Gtk.Align.START, wrap=True)
+            header = Gtk.Label(
+                label="Триггер → вставка · Tab/Space в редакторе автозаменяет · Enter вставляет",
+                css_classes=["dim-hint"],
+                halign=Gtk.Align.START,
+                wrap=True,
+            )
             content.append(header)
             # поиск по палитре
             search = Gtk.SearchEntry(placeholder_text="Фильтр по триггеру/тексту…", hexpand=True)
@@ -1320,20 +1446,29 @@ class FilesView(Gtk.Box):
             # список
             scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True, css_classes=["editor-frame"])
             scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            listbox = Gtk.ListBox(css_classes=["snippets-list"], selection_mode=Gtk.SelectionMode.SINGLE)
+            listbox = Gtk.ListBox(
+                css_classes=["snippets-list"], selection_mode=Gtk.SelectionMode.SINGLE
+            )
             scroller.set_child(listbox)
             content.append(scroller)
             # поле добавления нового сниппета
             add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             trig_entry = Gtk.Entry(placeholder_text="триггер (без пробелов)", hexpand=False)
             trig_entry.set_size_request(140, -1)
-            exp_entry = Gtk.Entry(placeholder_text="развёртывание — поддерживает {{date}} {{time}} {{title}} {{uuid}}", hexpand=True)
+            exp_entry = Gtk.Entry(
+                placeholder_text="развёртывание — поддерживает {{date}} {{time}} {{title}} {{uuid}}",
+                hexpand=True,
+            )
             add_btn = Gtk.Button(label="Добавить", css_classes=["suggested-action"])
             add_row.append(trig_entry)
             add_row.append(exp_entry)
             add_row.append(add_btn)
             content.append(add_row)
-            hint = Gtk.Label(label="Подсказка: {{date:YYYY-MM-DD}} {{time:HH:mm}} — формат как в шаблонах", css_classes=["dim-hint"], halign=Gtk.Align.START)
+            hint = Gtk.Label(
+                label="Подсказка: {{date:YYYY-MM-DD}} {{time:HH:mm}} — формат как в шаблонах",
+                css_classes=["dim-hint"],
+                halign=Gtk.Align.START,
+            )
             content.append(hint)
 
             def _populate(filter_text: str = "") -> None:
@@ -1352,12 +1487,27 @@ class FilesView(Gtk.Box):
                     box.set_margin_bottom(4)
                     box.set_margin_start(6)
                     box.set_margin_end(6)
-                    trig_lbl = Gtk.Label(label=trig, css_classes=["snippet-trigger"], halign=Gtk.Align.START, xalign=0)
+                    trig_lbl = Gtk.Label(
+                        label=trig,
+                        css_classes=["snippet-trigger"],
+                        halign=Gtk.Align.START,
+                        xalign=0,
+                    )
                     trig_lbl.set_size_request(120, -1)
                     trig_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-                    exp_lbl = Gtk.Label(label=exp.replace("\n", " ⏎ "), halign=Gtk.Align.START, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+                    exp_lbl = Gtk.Label(
+                        label=exp.replace("\n", " ⏎ "),
+                        halign=Gtk.Align.START,
+                        xalign=0,
+                        hexpand=True,
+                        ellipsize=Pango.EllipsizeMode.END,
+                    )
                     exp_lbl.set_tooltip_text(exp)
-                    del_btn = Gtk.Button(icon_name="user-trash-symbolic", css_classes=["flat", "destructive-action"], tooltip_text="Удалить сниппет")
+                    del_btn = Gtk.Button(
+                        icon_name="user-trash-symbolic",
+                        css_classes=["flat", "destructive-action"],
+                        tooltip_text="Удалить сниппет",
+                    )
                     # capture trig in closure
                     _t = trig
                     del_btn.connect("clicked", lambda _b, t=_t: _delete_snippet(t))
@@ -1370,7 +1520,11 @@ class FilesView(Gtk.Box):
                     listbox.append(row)
                 if not items:
                     row = Gtk.ListBoxRow(activatable=False, selectable=False)
-                    row.set_child(Gtk.Label(label="— нет сниппетов — добавьте первый", css_classes=["dim-hint"]))
+                    row.set_child(
+                        Gtk.Label(
+                            label="— нет сниппетов — добавьте первый", css_classes=["dim-hint"]
+                        )
+                    )
                     listbox.append(row)
 
             def _delete_snippet(trig: str) -> None:
@@ -1432,7 +1586,10 @@ class FilesView(Gtk.Box):
         except Exception as exc:  # noqa: BLE001
             # fallback: простой AlertDialog со списком
             try:
-                body = "\n".join(f"{it['trigger']} → {it['expansion'][:40]}" for it in items[:12]) or "нет сниппетов"
+                body = (
+                    "\n".join(f"{it['trigger']} → {it['expansion'][:40]}" for it in items[:12])
+                    or "нет сниппетов"
+                )
                 ad = Adw.AlertDialog(heading="Сниппеты", body=body)
                 ad.add_response("ok", "OK")
                 ad.present(self)
@@ -1457,7 +1614,20 @@ class FilesView(Gtk.Box):
             elif text.strip():
                 # если открыт .mmd или просто mermaid — берём как есть
                 low = text.strip().lower()
-                if any(k in low for k in ("graph", "sequencediagram", "classdiagram", "statediagram", "gantt", "pie", "erdiagram", "mindmap", "flowchart")):
+                if any(
+                    k in low
+                    for k in (
+                        "graph",
+                        "sequencediagram",
+                        "classdiagram",
+                        "statediagram",
+                        "gantt",
+                        "pie",
+                        "erdiagram",
+                        "mindmap",
+                        "flowchart",
+                    )
+                ):
                     code = text
                 else:
                     # нет mermaid — пример
@@ -1466,7 +1636,7 @@ class FilesView(Gtk.Box):
                 code = "graph TD\n    A[Вставьте диаграмму] --> B[Preview справа 300 мс]"
             code = sanitize_mermaid_code(code)
         except Exception:
-            code = (text or "graph TD\n    A[Вставьте диаграмму] --> B[Preview]")
+            code = text or "graph TD\n    A[Вставьте диаграмму] --> B[Preview]"
 
         # 1) пробуем отдельную вкладку mermaid_live в главном окне
         try:
@@ -1504,7 +1674,10 @@ class FilesView(Gtk.Box):
 
         # 3) fallback — простой диалог с копированием
         try:
-            ad = Adw.AlertDialog(heading="Mermaid Live", body=f"Код скопирован в буфер. Открой вкладку 🧜 Mermaid Live.\n\n{code[:400]}")
+            ad = Adw.AlertDialog(
+                heading="Mermaid Live",
+                body=f"Код скопирован в буфер. Открой вкладку 🧜 Mermaid Live.\n\n{code[:400]}",
+            )
             ad.add_response("ok", "OK")
             ad.present(self)
             # copy to clipboard
@@ -1564,7 +1737,11 @@ class FilesView(Gtk.Box):
         if new_line < buf.get_line_count():
             nit = buf.get_iter_at_line(new_line)
             # clamp offset
-            line_end = buf.get_iter_at_line(new_line + 1) if new_line + 1 < buf.get_line_count() else buf.get_end_iter()
+            line_end = (
+                buf.get_iter_at_line(new_line + 1)
+                if new_line + 1 < buf.get_line_count()
+                else buf.get_end_iter()
+            )
             line_text = buf.get_text(nit, line_end, True)
             # длина без \n
             line_len = len(line_text.rstrip("\n"))
@@ -1626,13 +1803,17 @@ class FilesView(Gtk.Box):
             self._vim = VimController(
                 editor=self.editor,
                 buffer=self.buffer,
-                on_save=lambda: self._on_save(None) if getattr(self, "_current", None) and getattr(self, "_dirty", False) else None,
+                on_save=lambda: self._on_save(None)
+                if getattr(self, "_current", None) and getattr(self, "_dirty", False)
+                else None,
                 on_quit=self._vim_quit,
                 status_label=getattr(self, "_vim_status", None),
                 command_entry=getattr(self, "_vim_command_entry", None),
                 command_revealer=getattr(self, "_vim_revealer", None),
             )
-            enabled = bool(self.settings.get("vim_mode", False) or self.settings.get("vim_enabled", False))
+            enabled = bool(
+                self.settings.get("vim_mode", False) or self.settings.get("vim_enabled", False)
+            )
             self._vim.set_enabled(enabled)
             # key controller с высшим приоритетом (CAPTURE)
             vim_key = Gtk.EventControllerKey.new()
@@ -1642,7 +1823,11 @@ class FilesView(Gtk.Box):
             self._vim_key_ctrl = vim_key
             # command entry activate уже внутри VimController, но дополнительно свяжем
             try:
-                self._vim_command_entry.connect("activate", lambda *_: self._vim and self._vim._on_command_activate(self._vim_command_entry))
+                self._vim_command_entry.connect(
+                    "activate",
+                    lambda *_: self._vim
+                    and self._vim._on_command_activate(self._vim_command_entry),
+                )
             except Exception:
                 pass
         except Exception:
@@ -2049,7 +2234,9 @@ class FilesView(Gtk.Box):
                 pass
         return False
 
-    def _tree_append(self, parent, emoji: str, name: str, path: str, is_dir: bool, placeholder: bool = False):
+    def _tree_append(
+        self, parent, emoji: str, name: str, path: str, is_dir: bool, placeholder: bool = False
+    ):
         it = self._store.append(parent, [emoji, name, path, is_dir])
         if placeholder:
             self._store.append(it, ["", "", "", False])
@@ -2067,8 +2254,13 @@ class FilesView(Gtk.Box):
             has = bool(sub and (sub.dirs or sub.files))
             self._tree_append(None, "📁", d.name, d.path, True, placeholder=has)
         for fname, fpath in node.files:
-            self._tree_append(None, FILE_EMOJI.get(Path(fname).suffix.lower(), "📄"),
-                              Path(fname).stem, fpath, False)
+            self._tree_append(
+                None,
+                FILE_EMOJI.get(Path(fname).suffix.lower(), "📄"),
+                Path(fname).stem,
+                fpath,
+                False,
+            )
         self._update_tree_counts()
 
     def _update_tree_counts(self) -> None:
@@ -2112,13 +2304,13 @@ class FilesView(Gtk.Box):
         self._vault_empty.set_visible(False)
         self._filter_empty.set_visible(False)
 
-
     # ── Flat ListView factory + compat ──────────────────────────
     def _install_listbox_compat(self) -> None:
         """Совместимость со старым API self.listbox (Gtk.ListBox)."""
         lv = self._listview
         if lv is None:
             return
+
         # select_row(row) -> найти позицию по пути и выбрать
         def _compat_select_row(row) -> None:  # row может быть path str или ListBoxRow shim
             if row is None or self._selection is None:
@@ -2137,18 +2329,23 @@ class FilesView(Gtk.Box):
                 # row может быть уже путём из _open
                 return
             self._select_flat_path(path_str)
+
         def _compat_unselect_all() -> None:
             try:
                 if self._selection is not None:
                     self._selection.set_selected(Gtk.INVALID_LIST_POSITION)
             except Exception:
                 pass
+
         def _compat_get_first_child():
             return None  # виртуализован — детей нет в виджете
+
         def _compat_remove(child):
             return None
+
         def _compat_append(row):
             return None
+
         # обезьяний патч на экземпляр ListView чтобы старый код не падал
         try:
             lv.select_row = _compat_select_row  # type: ignore[attr-defined]
@@ -2159,7 +2356,9 @@ class FilesView(Gtk.Box):
         except Exception:
             pass
 
-    def _on_flat_factory_setup(self, _factory: Gtk.SignalListItemFactory, item: Gtk.ListItem) -> None:
+    def _on_flat_factory_setup(
+        self, _factory: Gtk.SignalListItemFactory, item: Gtk.ListItem
+    ) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         box.set_margin_top(5)
         box.set_margin_bottom(5)
@@ -2168,14 +2367,21 @@ class FilesView(Gtk.Box):
         icon = Gtk.Label(css_classes=["file-icon"])
         info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
         title = Gtk.Label(halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
-        rel = Gtk.Label(css_classes=["dim-hint"], halign=Gtk.Align.START, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        rel = Gtk.Label(
+            css_classes=["dim-hint"],
+            halign=Gtk.Align.START,
+            xalign=0,
+            ellipsize=Pango.EllipsizeMode.END,
+        )
         info.append(title)
         info.append(rel)
         box.append(icon)
         box.append(info)
         item.set_child(box)
 
-    def _on_flat_factory_bind(self, _factory: Gtk.SignalListItemFactory, item: Gtk.ListItem) -> None:
+    def _on_flat_factory_bind(
+        self, _factory: Gtk.SignalListItemFactory, item: Gtk.ListItem
+    ) -> None:
         note = item.get_item()
         box = item.get_child()
         if note is None or box is None:
@@ -2210,7 +2416,9 @@ class FilesView(Gtk.Box):
                 self._selection.set_selected(i)
                 return
 
-    def _on_tree_expanded(self, _tree: Gtk.TreeView, _it: Gtk.TreeIter, _path: Gtk.TreePath) -> None:
+    def _on_tree_expanded(
+        self, _tree: Gtk.TreeView, _it: Gtk.TreeIter, _path: Gtk.TreePath
+    ) -> None:
         it = self._store.get_iter(_path)
         self._store.set_value(it, 0, "📂")
         node = self._nodes.get(self._store.get_value(it, 2))
@@ -2228,8 +2436,9 @@ class FilesView(Gtk.Box):
             has = bool(sub and (sub.dirs or sub.files))
             self._tree_append(it, "📁", d.name, d.path, True, placeholder=has)
         for fname, fpath in node.files:
-            self._tree_append(it, FILE_EMOJI.get(Path(fname).suffix.lower(), "📄"),
-                              Path(fname).stem, fpath, False)
+            self._tree_append(
+                it, FILE_EMOJI.get(Path(fname).suffix.lower(), "📄"), Path(fname).stem, fpath, False
+            )
 
     def _on_tree_collapsed(self, _tree: Gtk.TreeView, _path: Gtk.TreePath) -> None:
         it = self._store.get_iter(_path)
@@ -2373,7 +2582,10 @@ class FilesView(Gtk.Box):
         raw_snapshot = raw
         query_snapshot = query
         vault_ref = self._vault
-        settings_snapshot = dict(self.settings) if isinstance(getattr(self, "settings", None), dict) else {}
+        settings_snapshot = (
+            dict(self.settings) if isinstance(getattr(self, "settings", None), dict) else {}
+        )
+
         # воркер: FTS5 полнотекстовый поиск (BM25) вместо substring-поиска, с fallback
         def work() -> None:
             matched_set: set[str] = set()
@@ -2411,7 +2623,9 @@ class FilesView(Gtk.Box):
                     fts_seen: set[str] = set()
                     if _fts is not None and len(q) >= 1:
                         try:
-                            fts_hits = _fts.search(settings_snapshot, raw_snapshot, limit=_RENDER_CAP)
+                            fts_hits = _fts.search(
+                                settings_snapshot, raw_snapshot, limit=_RENDER_CAP
+                            )
                             if fts_hits is not None:
                                 used_fts = True
                                 name_map = {p: n for n, p in notes_snapshot}
@@ -2449,7 +2663,12 @@ class FilesView(Gtk.Box):
                     if _embeddings is not None and len(q) >= 2:
                         try:
                             # semantic_search сам делает ensure_index (WAL sqlite)
-                            emb_hits = _embeddings.search(settings_snapshot, raw_snapshot, limit=_RENDER_CAP) or []
+                            emb_hits = (
+                                _embeddings.search(
+                                    settings_snapshot, raw_snapshot, limit=_RENDER_CAP
+                                )
+                                or []
+                            )
                         except Exception:
                             emb_hits = []
                     if emb_hits:
@@ -2459,10 +2678,14 @@ class FilesView(Gtk.Box):
                             if used_fts and filtered:
                                 # карты путей -> позиции/скоры
                                 fts_pos = {p: i for i, (_n, p) in enumerate(filtered)}
-                                emb_score = {h.get("path"): float(h.get("score") or 0) for h in emb_hits}
+                                emb_score = {
+                                    h.get("path"): float(h.get("score") or 0) for h in emb_hits
+                                }
                                 all_paths = set(fts_pos.keys()) | set(emb_score.keys())
                                 merged: list[tuple[float, str]] = []
-                                w_emb = 0.6 if " " in q else 0.35  # естественный язык -> вес семантики выше
+                                w_emb = (
+                                    0.6 if " " in q else 0.35
+                                )  # естественный язык -> вес семантики выше
                                 w_fts = 1.0 - w_emb
                                 for p in all_paths:
                                     fts_norm = 0.0
@@ -2536,11 +2759,23 @@ class FilesView(Gtk.Box):
             except Exception:
                 filtered = []
                 matched_set = set()
-            GLib.idle_add(lambda: self._apply_filter_results(token, filtered, matched_set, raw_snapshot, query_snapshot))
+            GLib.idle_add(
+                lambda: self._apply_filter_results(
+                    token, filtered, matched_set, raw_snapshot, query_snapshot
+                )
+            )
+
         threading.Thread(target=work, daemon=True).start()
         return False
 
-    def _apply_filter_results(self, token: int, filtered: list[tuple[str, str]], matched_set: set[str], raw: str, query: str) -> bool:
+    def _apply_filter_results(
+        self,
+        token: int,
+        filtered: list[tuple[str, str]],
+        matched_set: set[str],
+        raw: str,
+        query: str,
+    ) -> bool:
         if not self._alive or token != self._filter_token:
             return False
         # проверка что запрос не устарел
@@ -2601,7 +2836,11 @@ class FilesView(Gtk.Box):
                 shown_filter = 0
             shown = self._slice_model.get_n_items() if self._slice_model else shown_filter
             self._hit_cap = shown_filter > _RENDER_CAP
-            text = f"найдено {shown} из {total}" if not self._filter_query.startswith("#") else f"найдено {shown} из {total} · #{self._filter_query[1:]}"
+            text = (
+                f"найдено {shown} из {total}"
+                if not self._filter_query.startswith("#")
+                else f"найдено {shown} из {total} · #{self._filter_query[1:]}"
+            )
             if self._hit_cap:
                 text += f" · показаны первые {_RENDER_CAP} — уточни запрос"
             self.count_label.set_text(text)
@@ -2640,17 +2879,25 @@ class FilesView(Gtk.Box):
         box.append(Gtk.Label(label=FILE_EMOJI.get(Path(name).suffix.lower(), "📄")))
         info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
         title = self._vault.note_title_cached(Path(path)) or Path(path).stem
-        info.append(Gtk.Label(
-            label=title, halign=Gtk.Align.START, xalign=0,
-            ellipsize=Pango.EllipsizeMode.END,
-        ))
+        info.append(
+            Gtk.Label(
+                label=title,
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
+        )
         parent = Path(path).parent
         rel = parent.name if parent != self._root else ""
-        info.append(Gtk.Label(
-            label=rel, css_classes=["dim-hint"],
-            halign=Gtk.Align.START, xalign=0,
-            ellipsize=Pango.EllipsizeMode.END,
-        ))
+        info.append(
+            Gtk.Label(
+                label=rel,
+                css_classes=["dim-hint"],
+                halign=Gtk.Align.START,
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
+        )
         box.append(info)
         row.set_child(box)
         return row
@@ -2741,13 +2988,16 @@ class FilesView(Gtk.Box):
         # не спамим если уже есть кэш
         if _crypto_folder.resolve_password(self.settings):
             try:
-                txt = _crypto_folder.read_encrypted_text(p, _crypto_folder.resolve_password(self.settings))  # type: ignore[arg-type]
+                txt = _crypto_folder.read_encrypted_text(
+                    p, _crypto_folder.resolve_password(self.settings)
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             else:
                 self._open(p)
                 return False
             return False
+
         def _do(pwd: str) -> None:
             try:
                 _crypto_folder.set_cached_password(pwd)
@@ -2763,11 +3013,12 @@ class FilesView(Gtk.Box):
                 self._open(p)
             except Exception:
                 pass
+
         try:
             self._prompt_password(
                 "Авто-дешифрование",
                 "Расшифровать Secret?",
-                f"«{p.name}» в { _crypto_folder.get_crypto_folder_relative(self.settings) }/ — введите пароль для AES-GCM.",
+                f"«{p.name}» в {_crypto_folder.get_crypto_folder_relative(self.settings)}/ — введите пароль для AES-GCM.",
                 "Расшифровать",
                 _do,
             )
@@ -2815,11 +3066,16 @@ class FilesView(Gtk.Box):
                     self._on_save(None)
                 except Exception:
                     pass
+
             try:
                 # определяем заголовок
                 is_new_enc = not is_enc
                 title = "Авто-шифрование Secret" if is_new_enc else "Перешифровать Secret"
-                body = f"«{path.name}» → {path.name}.enc — введите пароль для AES-GCM." if is_new_enc else f"«{path.name}» — введите пароль для перезаписи AES-GCM."
+                body = (
+                    f"«{path.name}» → {path.name}.enc — введите пароль для AES-GCM."
+                    if is_new_enc
+                    else f"«{path.name}» — введите пароль для перезаписи AES-GCM."
+                )
                 self._prompt_password(title, title + "?", body, "Зашифровать", _do)
             except Exception:
                 pass
@@ -2949,7 +3205,9 @@ class FilesView(Gtk.Box):
                     # для LWW — set_text выиграет по времени; для RGA — set_text перезапишет
                     # но чтобы не терять concurrent правки, делаем merge через временный doc
                     try:
-                        tmp = _crdt.create_document(str(p), replica_id="disk", kind=self._crdt_kind())  # type: ignore
+                        tmp = _crdt.create_document(
+                            str(p), replica_id="disk", kind=self._crdt_kind()
+                        )  # type: ignore
                         tmp.set_text(disk_text)  # type: ignore
                         doc.merge(tmp)  # type: ignore
                     except Exception:
@@ -3122,7 +3380,9 @@ class FilesView(Gtk.Box):
                                 # CRDT слияние
                                 try:
                                     if self._crdt_is_enabled():
-                                        if self._crdt_doc is None or getattr(self._crdt_doc, "doc_id", None) != str(p):
+                                        if self._crdt_doc is None or getattr(
+                                            self._crdt_doc, "doc_id", None
+                                        ) != str(p):
                                             self._crdt_init_for_path(p)
                                         dec_text = self._crdt_after_open(p, dec_text)
                                 except Exception:
@@ -3188,7 +3448,9 @@ class FilesView(Gtk.Box):
             self._setup_file_monitor(p)
             self._loading = True
             try:
-                self.buffer.set_text("🔒 Файл зашифрован (AES-GCM .md.enc)\n\nНажмите «Расшифровать» и введите пароль.\n")
+                self.buffer.set_text(
+                    "🔒 Файл зашифрован (AES-GCM .md.enc)\n\nНажмите «Расшифровать» и введите пароль.\n"
+                )
             except Exception:
                 pass
             self._loading = False
@@ -3331,6 +3593,7 @@ class FilesView(Gtk.Box):
             dlg.set_extra_child(box)
         except Exception:
             pass
+
         def _resp(_d, resp: str) -> None:
             if resp != "ok":
                 return
@@ -3339,6 +3602,7 @@ class FilesView(Gtk.Box):
                 self.file_label.set_text("пароль не может быть пустым")
                 return
             on_ok(pwd)
+
         dlg.connect("response", _resp)
         dlg.present(self)
 
@@ -3356,6 +3620,7 @@ class FilesView(Gtk.Box):
             except Exception:
                 pass
         target = self._current
+
         def _do(pwd: str) -> None:
             if _crypto is None:
                 self.file_label.set_text("модуль crypto недоступен")
@@ -3384,7 +3649,9 @@ class FilesView(Gtk.Box):
             self._dirty = False
             self._loading = True
             try:
-                self.buffer.set_text("🔒 Файл зашифрован (AES-GCM .md.enc)\n\nНажмите «Расшифровать» и введите пароль.\n")
+                self.buffer.set_text(
+                    "🔒 Файл зашифрован (AES-GCM .md.enc)\n\nНажмите «Расшифровать» и введите пароль.\n"
+                )
             except Exception:
                 pass
             self._loading = False
@@ -3392,7 +3659,14 @@ class FilesView(Gtk.Box):
             self._update_crypto_buttons()
             self._invalidate_tree()
             self.reload(force=True)
-        self._prompt_password("Шифрование", "Зашифровать заметку?", f"«{target.name}» → {target.name}.enc\nAES-GCM, ключ PBKDF2 из пароля.", "Зашифровать", _do)
+
+        self._prompt_password(
+            "Шифрование",
+            "Зашифровать заметку?",
+            f"«{target.name}» → {target.name}.enc\nAES-GCM, ключ PBKDF2 из пароля.",
+            "Зашифровать",
+            _do,
+        )
 
     def _on_decrypt(self, _btn) -> None:
         if self._current is None:
@@ -3402,6 +3676,7 @@ class FilesView(Gtk.Box):
             self.file_label.set_text("файл не зашифрован (.enc)")
             return
         target = self._current
+
         def _do(pwd: str) -> None:
             if _crypto is None:
                 self.file_label.set_text("модуль crypto недоступен")
@@ -3432,7 +3707,14 @@ class FilesView(Gtk.Box):
                 self._open(Path(dec_path))
             except Exception:
                 self.file_label.set_text(f"расшифровано: {dec_path}")
-        self._prompt_password("Расшифровка", "Расшифровать заметку?", f"«{target.name}» — введите пароль для AES-GCM.", "Расшифровать", _do)
+
+        self._prompt_password(
+            "Расшифровка",
+            "Расшифровать заметку?",
+            f"«{target.name}» — введите пароль для AES-GCM.",
+            "Расшифровать",
+            _do,
+        )
 
     # ── PDF экспорт (fragilenotes.core.pdf_export) ─────────────────
     def _on_export_pdf(self, _btn) -> None:
@@ -3480,9 +3762,20 @@ class FilesView(Gtk.Box):
 
     def _fallback_export_dialog(self, theme: str, default_name: str) -> None:
         dialog = Adw.Dialog(title="Экспорт в PDF")
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=12, margin_start=16, margin_end=16)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=16,
+            margin_end=16,
+        )
         box.set_size_request(460, -1)
-        lbl = Gtk.Label(label=f"Имя PDF (сохранится рядом с {self._current.name if self._current else 'файлом'}):", halign=Gtk.Align.START, wrap=True)
+        lbl = Gtk.Label(
+            label=f"Имя PDF (сохранится рядом с {self._current.name if self._current else 'файлом'}):",
+            halign=Gtk.Align.START,
+            wrap=True,
+        )
         entry = Gtk.Entry(text=default_name)
         entry.set_hexpand(True)
         # выбор темы
@@ -3495,10 +3788,15 @@ class FilesView(Gtk.Box):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.END)
         cancel = Gtk.Button(label="Отмена")
         ok = Gtk.Button(label="Экспорт", css_classes=["suggested-action"])
-        row.append(cancel); row.append(ok)
-        box.append(lbl); box.append(entry); box.append(theme_row); box.append(row)
+        row.append(cancel)
+        row.append(ok)
+        box.append(lbl)
+        box.append(entry)
+        box.append(theme_row)
+        box.append(row)
         dialog.set_child(box)
         cancel.connect("clicked", lambda *_: dialog.close())
+
         def _do(*_):
             raw = entry.get_text().strip() or default_name
             if not raw.lower().endswith(".pdf"):
@@ -3513,6 +3811,7 @@ class FilesView(Gtk.Box):
             target = self._current.parent / raw if self._current is not None else Path.home() / raw
             dialog.close()
             self._do_export_pdf(self._current, target, theme_val)
+
         ok.connect("clicked", _do)
         entry.connect("activate", _do)
         dialog.present(self.get_root())
@@ -3664,15 +3963,14 @@ class FilesView(Gtk.Box):
         start, end = self.buffer.get_bounds()
         try:
             self.preview.set_markdown(
-                self.buffer.get_text(start, end, True), self._highlight,
+                self.buffer.get_text(start, end, True),
+                self._highlight,
                 vault_root=str(self._root) if hasattr(self, "_root") else None,
                 settings=self.settings if hasattr(self, "settings") else None,
             )
         except TypeError:
             # fallback для старой сигнатуры set_markdown(text, highlight)
-            self.preview.set_markdown(
-                self.buffer.get_text(start, end, True), self._highlight
-            )
+            self.preview.set_markdown(self.buffer.get_text(start, end, True), self._highlight)
 
     def _on_switch(self, _stack: Gtk.Stack, _pspec) -> None:
         if self.stack.get_visible_child_name() == "Просмотр":
@@ -3775,7 +4073,13 @@ class FilesView(Gtk.Box):
         self._file_monitor_path = None
         self._external_toast_pending = False
 
-    def _on_external_changed(self, _mon: Gio.FileMonitor, _file: Gio.File, _other: Gio.File | None, event: Gio.FileMonitorEvent) -> None:
+    def _on_external_changed(
+        self,
+        _mon: Gio.FileMonitor,
+        _file: Gio.File,
+        _other: Gio.File | None,
+        event: Gio.FileMonitorEvent,
+    ) -> None:
         # интересуют только изменения содержимого
         if event not in (
             Gio.FileMonitorEvent.CHANGED,
@@ -3826,7 +4130,9 @@ class FilesView(Gtk.Box):
         if overlay is None:
             # fallback: просто пометить label
             try:
-                self.file_label.set_text(f"⚠ файл изменён извне: {self._current.name if self._current else ''}")
+                self.file_label.set_text(
+                    f"⚠ файл изменён извне: {self._current.name if self._current else ''}"
+                )
             except Exception:
                 pass
             return False
@@ -3912,7 +4218,9 @@ class FilesView(Gtk.Box):
             # крипто-папка: .md.enc внутри Secret/ — перешифровать авто
             if _crypto_folder is not None:
                 try:
-                    if _crypto_folder.is_in_crypto_folder(self._current, self.settings) and _crypto_folder.is_auto_enabled(self.settings):
+                    if _crypto_folder.is_in_crypto_folder(
+                        self._current, self.settings
+                    ) and _crypto_folder.is_auto_enabled(self.settings):
                         start, end = self.buffer.get_bounds()
                         text = self.buffer.get_text(start, end, True)
                         try:
@@ -3944,12 +4252,18 @@ class FilesView(Gtk.Box):
                                 try:
                                     if _fts is not None:
                                         _p = Path(self._current)
-                                        threading.Thread(target=lambda: _fts.upsert_file(_p), daemon=True).start()
+                                        threading.Thread(
+                                            target=lambda: _fts.upsert_file(_p), daemon=True
+                                        ).start()
                                 except Exception:
                                     pass
                                 try:
                                     root = self.get_root() if hasattr(self, "get_root") else None
-                                    pm = getattr(root, "plugin_manager", None) if root is not None else None
+                                    pm = (
+                                        getattr(root, "plugin_manager", None)
+                                        if root is not None
+                                        else None
+                                    )
                                     if pm is not None and hasattr(pm, "trigger"):
                                         try:
                                             pm.trigger("on_save", self._current, text)
@@ -3957,6 +4271,7 @@ class FilesView(Gtk.Box):
                                             pm.trigger("on_save", self._current)
                                     else:
                                         from ..core.plugins import trigger as _plug_trigger
+
                                         try:
                                             _plug_trigger("on_save", self._current, text)
                                         except TypeError:
@@ -4011,12 +4326,18 @@ class FilesView(Gtk.Box):
                             try:
                                 if _fts is not None and self._current is not None:
                                     _p = Path(self._current)
-                                    threading.Thread(target=lambda: _fts.upsert_file(_p), daemon=True).start()
+                                    threading.Thread(
+                                        target=lambda: _fts.upsert_file(_p), daemon=True
+                                    ).start()
                             except Exception:
                                 pass
                             try:
                                 root = self.get_root() if hasattr(self, "get_root") else None
-                                pm = getattr(root, "plugin_manager", None) if root is not None else None
+                                pm = (
+                                    getattr(root, "plugin_manager", None)
+                                    if root is not None
+                                    else None
+                                )
                                 if pm is not None and hasattr(pm, "trigger"):
                                     try:
                                         pm.trigger("on_save", self._current, text)
@@ -4024,6 +4345,7 @@ class FilesView(Gtk.Box):
                                         pm.trigger("on_save", self._current)
                                 else:
                                     from ..core.plugins import trigger as _plug_trigger
+
                                     try:
                                         _plug_trigger("on_save", self._current, text)
                                     except TypeError:
@@ -4238,7 +4560,9 @@ class FilesView(Gtk.Box):
                     pwd = _crypto_folder.resolve_password(self.settings)
                     if pwd:
                         try:
-                            dst = _crypto_folder.write_encrypted_text(target, content, pwd, delete_original=True)
+                            dst = _crypto_folder.write_encrypted_text(
+                                target, content, pwd, delete_original=True
+                            )
                             target = Path(dst)
                         except Exception:
                             pass
@@ -4278,4 +4602,5 @@ class FilesView(Gtk.Box):
             self._vault.invalidate_cache()
         except Exception:
             from ..services import vault
+
             vault.invalidate_vault_cache()
