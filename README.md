@@ -1,4 +1,4 @@
-# Fragile Notes — v0.1
+# Fragile Notes — v0.1.10
 
 **Нативный аналог Obsidian для Linux/Windows.** Ядро = **AO Runner** (Node) + **Fragilich Suite** (Python) — всё в одном процессе, без Electron.
 
@@ -28,7 +28,7 @@
 
 ### Windows — один файл (рекомендуется)
 
-Скачай **FragileNotes-Setup-v0.1.1.exe (33M)** из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
+Скачай **FragileNotes-Setup-v0.1.10.exe (33M)** из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
 
 Двойной клик → Далее → Установить → Запустить. **Внутри уже** `Python 3.11` + `GTK4` + `PyGObject` + `PyYAML` + `cryptography` — интернет и `MSYS2` не нужны. Волт `~/desktop` (`%USERPROFILE%\desktop`) создастся сам.
 
@@ -133,7 +133,8 @@ scripts/
 - `v0.1.2` — Windows AllInOne 3.4M (депрекейтед)
 - `v0.1.6` — Full Offline 33M (PyInstaller + GTK, один exe)
 - `v0.1.7` — Windows - only Full
-- `v0.1.8` — Full Offline fix `collect-all gi` (текущий `master` `f447673` + ruff fix `f821fc0`)
+- `v0.1.8` — Full Offline fix `collect-all gi`
+- `v0.1.10` — Full Offline 33M самодостаточный, один exe (текущий)
 
 ## Лицензия
 
@@ -146,7 +147,7 @@ MIT — `LICENSE:1`
 ## FAQ
 
 **Q: `Namespace Gtk not available` на Windows?**  
-A: Старая AllInOne 3.4M требовала `MSYS2` — скачай **Full 33M** из `Releases → v0.1.6+` (внутри GTK). Или запусти `AllInOne` с интернетом — он сам скачает `MSYS2` (70M).
+A: Старая AllInOne 3.4M требовала `MSYS2` — скачай **Full 33M** из `Releases → v0.1.10` (внутри GTK). Или запусти `AllInOne` с интернетом — он сам скачает `MSYS2` (70M).
 
 **Q: Где волт?**  
 A: `~/desktop` — можно поменять в `Настройки → Волт` (`settings.json` `vault_root`).

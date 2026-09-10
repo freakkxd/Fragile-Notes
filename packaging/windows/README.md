@@ -1,12 +1,12 @@
-# Windows Installer — Fragile Notes v0.1.8+
+# Windows Installer — Fragile Notes v0.1.10
 
-> **Актуально:** только **Full Offline 33M** `FragileNotes-Setup-v0.1.1.exe` (внутри `Python 3.11` + `GTK4` + `PyGObject` + все deps). `Portable ZIP` и `AllInOne 3.4M` (исходники + `pip` на машине) — **депрекейтед**, остались в истории `5beb7bb`, больше не собираются.
+> **Актуально:** только **Full Offline 33M** `FragileNotes-Setup-v0.1.10.exe` (внутри `Python 3.11` + `GTK4` + `PyGObject` + все deps). `Portable ZIP` и `AllInOne 3.4M` (исходники + `pip` на машине) — **депрекейтед**, остались в истории `5beb7bb`, больше не собираются.
 
 ## Варианты (актуально)
 
 | Файл | Что внутри | Требует | Где брать |
 |------|------------|---------|-----------|
-| `FragileNotes-Setup-v0.1.1.exe` **33M** | Python + GTK4/libadwaita + PyGObject + PyYAML + cryptography (PyInstaller `UCRT64` + `Inno Setup 6`) | Ничего, один exe | `Releases` → `v0.1.6+` `https://github.com/freakkxd/Fragile-Notes/releases/latest` |
+| `FragileNotes-Setup-v0.1.10.exe` **33M** | Python + GTK4/libadwaita + PyGObject + PyYAML + cryptography (PyInstaller `UCRT64` + `Inno Setup 6`) | Ничего, один exe | `Releases` → `v0.1.10` `https://github.com/freakkxd/Fragile-Notes/releases/latest` |
 
 ## Сборка на Windows (для контрибьюторов)
 
@@ -18,7 +18,7 @@
 # 2. Сборка Full Offline (единственный)
 powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
 # → PyInstaller --collect-all gi + hidden-imports → dist/windows/FragileNotes/FragileNotes.exe
-# → Inno Setup → dist/FragileNotes-Setup-v0.1.1.exe 33M
+# → Inno Setup → dist/FragileNotes-Setup-v0.1.10.exe 33M
 
 # 3. Проверка (без установки)
 # dist/windows/FragileNotes/FragileNotes.exe --help
@@ -63,5 +63,5 @@ fragile-notes --help
 
 Для обхода SmartScreen подпиши exe (опционально):
 ```powershell
-signtool sign /fd SHA256 /a dist\FragileNotes-Setup-v0.1.1.exe
+signtool sign /fd SHA256 /a dist\FragileNotes-Setup-v0.1.10.exe
 ```
