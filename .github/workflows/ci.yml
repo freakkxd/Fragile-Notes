@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.9.6
       - name: ruff check
         run: ruff check .
 
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install mypy
-        run: pip install mypy types-PyYAML
+        run: pip install mypy==1.13.0 types-PyYAML
       - name: mypy
         run: mypy fragilenotes
 
@@ -41,7 +41,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install system deps (GTK for PyGObject)
+        run: sudo apt-get update && sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adwaita-1
       - name: Install dependencies
-        run: pip install PyYAML
+        run: pip install pytest PyYAML
       - name: Run tests
-        run: python tests/run.py
+        run: pytest -q
