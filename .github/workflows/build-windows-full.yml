@@ -33,7 +33,7 @@ jobs:
           pacman -S --noconfirm mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-python-pip mingw-w64-ucrt-x86_64-python-pillow 2>/dev/null || true
           python -m pip install --upgrade pip
           pip install -e . --no-deps
-          pip install pyinstaller Pillow pywin32-ctypes --no-deps 2>/dev/null || pip install pyinstaller Pillow pywin32-ctypes
+          pip install pyinstaller Pillow pefile pywin32-ctypes --no-deps 2>/dev/null || pip install pyinstaller Pillow pefile pywin32-ctypes
 
       - name: Build portable (PyInstaller)
         shell: msys2 {0}
