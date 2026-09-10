@@ -70,11 +70,7 @@ Type: filesandordirs; Name: "{app}\fragilenotes\__pycache__"
 
 [Code]
 function InitializeSetup(): Boolean;
-var
-  PythonFound: Boolean;
-  Msg: String;
 begin
-  PythonFound := FileExists(ExpandConstant('{app}\fragile-notes.exe')) or (Pos('python', GetEnv('PATH')) > 0);
-  // Проверку Python делаем в install-helper.ps1, здесь только варнинг
+  // Проверку Python и установку делаем в install-helper.ps1 после копирования файлов
   Result := True;
 end;
