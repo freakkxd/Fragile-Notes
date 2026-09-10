@@ -41,8 +41,14 @@ jobs:
       - name: Build portable (PyInstaller)
         shell: msys2 {0}
         run: |
-          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows"
-          ls -R dist/windows/FragileNotes | head -n 50
+          python -c "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1'); from gi.repository import Gtk, Adw; print('GTK OK')"
+          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --collect-all gi --collect-data gi --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="gi.repository.Gio" --hidden-import="gi.repository.GLib" --hidden-import="gi.repository.Gdk" --hidden-import="gi.repository.Pango" --hidden-import="yaml" --hidden-import="cryptography" --hidden-import="PIL" main.py --distpath="dist/windows" --workpath="build/windows"
+          echo "=== PyInstaller dist ==="
+          ls -R dist/windows/FragileNotes | head -n 100
+          echo "=== check gi typelib ==="
+          ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5
+          echo "=== test bundled exe (no display, just --help) ==="
+          ./dist/windows/FragileNotes/FragileNotes.exe --help 2>&1 | head -n 20 || echo "exe help failed (expected without display)"
 
       - name: Install Inno Setup
         run: choco install innosetup -y
