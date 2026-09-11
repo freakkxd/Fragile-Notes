@@ -1,5 +1,7 @@
 # Windows Installer — Fragile Notes v0.1.10
 
+> **Подпись:** последние `e51bbae` `C++ helper` (`installer_helper.cpp` `g++` `lole32`) + `c18c611` `real exe not bat` + `a197ff2` `bundle libstdc++/Gtk typelib` (фикс `Namespace Gtk` + `libstdc++-6.dll`); в работе `Full Offline` один файл 33M (без `AllInOne`); цель — `PyInstaller` `collect-all gi` без висения `30 мин` (сейчас `timeout 300` + `GDK_BACKEND`).
+
 > **Актуально:** только **Full Offline 33M** `FragileNotes-Setup-v0.1.10.exe` (внутри `Python 3.11` + `GTK4` + `PyGObject` + все deps). `Portable ZIP` и `AllInOne 3.4M` (исходники + `pip` на машине) — **депрекейтед**, остались в истории `5beb7bb`, больше не собираются.
 
 ## Варианты (актуально)

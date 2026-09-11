@@ -9,7 +9,11 @@ import sys
 # Для PyInstaller bundle — найти typelibs и DLL внутри _MEIPASS
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     meipass = sys._MEIPASS  # type: ignore[attr-defined]
-    for p in [os.path.join(meipass, "gi", "repository"), os.path.join(meipass, "lib", "girepository-1.0"), os.path.join(meipass, "girepository-1.0")]:
+    for p in [
+        os.path.join(meipass, "gi", "repository"),
+        os.path.join(meipass, "lib", "girepository-1.0"),
+        os.path.join(meipass, "girepository-1.0"),
+    ]:
         if os.path.isdir(p):
             os.environ["GI_TYPELIB_PATH"] = p + os.pathsep + os.environ.get("GI_TYPELIB_PATH", "")
     # DLLs

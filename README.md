@@ -1,5 +1,10 @@
 # Fragile Notes — v0.1.10
 
+> **Подпись — суть последних коммитов, что в работе и куда идем:**
+> - **Последние 5 коммитов:** `f20bd9b` `bump v0.1.10` → `f447673` `remove AllInOne (work only Full)` → `79f10cd` `Full offline bundle GTK` (`collect-all gi`) → `a2f1a86` `fix PyInstaller hang` (`GDK_BACKEND`) → `e402db3` `gcc for C++ helper` / `c18c611` `real exe not bat` + `a197ff2` `bundle libstdc++/Gtk typelib` (фикс `Namespace Gtk` + `libstdc++-6.dll`)
+> - **В работе:** `Full Offline 33M` (`PyInstaller` `UCRT64` + `Inno` `33M` `FragileNotes-Setup-v0.1.10.exe` — один файл, `Python+GTK` внутри, без `MSYS2` на юзере) — `Build Windows Full Installer` `success` `f821fc0` 24 сек, сейчас `v0.1.14` `in_progress` с `collect-all gi` + `install_helper.cpp` (`C++` вместо `PowerShell`)
+> - **Цель:** `v0.2` — стабильный `Full Offline` 33M из коробки (`ValueError: Namespace Gtk` закрыт), `CI` зеленый (`ruff`/`mypy`/`pytest` `xvfb`), `vault_guard` + `.gitignore` защита волта, далее **порт на C++** (`Qt`/`gtkmm`) — вручную, без спешки
+
 **Нативный аналог Obsidian для Linux/Windows.** Ядро = **AO Runner** (Node) + **Fragilich Suite** (Python) — всё в одном процессе, без Electron.
 
 > Работает **из коробки** — без волта, AO Engine и LLM тоже запускается. Волт (`~/desktop`) никогда не коммитится.
