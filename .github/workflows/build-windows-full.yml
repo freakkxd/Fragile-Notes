@@ -47,8 +47,13 @@ jobs:
         run: |
           export GDK_BACKEND=offscreen
           export GI_TYPELIB_PATH=/ucrt64/lib/girepository-1.0:$GI_TYPELIB_PATH
-          echo "=== PyInstaller (MSYS2, no collect-all hang) ==="
-          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
+          echo "=== PyInstaller (MSYS2, bundle GTK + gcc runtime) ==="
+          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" \
+            --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="gi.repository.Gio" --hidden-import="gi.repository.GLib" --hidden-import="gi.repository.Gdk" \
+            --hidden-import="yaml" --hidden-import="cryptography" \
+            --add-binary "/ucrt64/bin/libstdc++-6.dll;." --add-binary "/ucrt64/bin/libgcc_s_seh-1.dll;." --add-binary "/ucrt64/bin/libwinpthread-1.dll;." \
+            --add-data "/ucrt64/lib/girepository-1.0/Gtk-4.0.typelib;gi/repository" --add-data "/ucrt64/lib/girepository-1.0/Gdk-4.0.typelib;gi/repository" --add-data "/ucrt64/lib/girepository-1.0/Adw-1.typelib;gi/repository" --add-data "/ucrt64/lib/girepository-1.0/Gio-2.0.typelib;gi/repository" --add-data "/ucrt64/lib/girepository-1.0/GLib-2.0.typelib;gi/repository" \
+            main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
           echo "=== Dist ==="
           ls -lh dist/windows/FragileNotes/FragileNotes.exe 2>&1 | head -n 5 || true
           ls -R dist/windows/FragileNotes | head -n 30 || true

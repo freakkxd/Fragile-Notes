@@ -6,9 +6,26 @@ from __future__ import annotations
 import os
 import sys
 
+# Для PyInstaller bundle — найти typelibs и DLL внутри _MEIPASS
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    meipass = sys._MEIPASS  # type: ignore[attr-defined]
+    for p in [os.path.join(meipass, "gi", "repository"), os.path.join(meipass, "lib", "girepository-1.0"), os.path.join(meipass, "girepository-1.0")]:
+        if os.path.isdir(p):
+            os.environ["GI_TYPELIB_PATH"] = p + os.pathsep + os.environ.get("GI_TYPELIB_PATH", "")
+    # DLLs
+    try:
+        for dll_dir in [meipass, os.path.join(meipass, "bin"), os.path.join(meipass, "lib")]:
+            if os.path.isdir(dll_dir):
+                try:
+                    os.add_dll_directory(dll_dir)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
+
 # Для headless сборки (PyInstaller, CI) — не требовать дисплей
 os.environ.setdefault("GDK_BACKEND", "offscreen")
-os.environ.setdefault("GI_TYPELIB_PATH", os.environ.get("GI_TYPELIB_PATH", ""))
 
 import gi  # noqa: E402
 
