@@ -46,7 +46,7 @@ jobs:
         shell: msys2 {0}
         run: |
           python -c "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1'); from gi.repository import Gtk, Adw; print('GTK OK')"
-          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --collect-all gi --collect-data gi --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="gi.repository.Gio" --hidden-import="gi.repository.GLib" --hidden-import="gi.repository.Gdk" --hidden-import="gi.repository.Pango" --hidden-import="yaml" --hidden-import="cryptography" --hidden-import="PIL" main.py --distpath="dist/windows" --workpath="build/windows"
+          timeout 600 python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows" || python -m PyInstaller --noconfirm --windowed --name="FragileNotes" main.py --distpath="dist/windows" --workpath="build/windows"
           echo "=== PyInstaller dist ==="
           ls -R dist/windows/FragileNotes | head -n 100
           echo "=== check gi typelib ==="
