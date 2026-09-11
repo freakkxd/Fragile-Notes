@@ -41,6 +41,7 @@ Name: "vaultchooser"; Description: "Добавить 'Выбрать волт' �
 
 [Files]
 Source: "..\..\dist\windows\FragileNotes\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "installer_helper.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Vault не копируем — он создается в %USERPROFILE%\desktop
 
 [Icons]
@@ -49,6 +50,7 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "{app}\installer_helper.exe"; Parameters: "/install"; StatusMsg: "Настраиваю vault и зависимости..."; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]

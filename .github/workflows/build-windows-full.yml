@@ -68,6 +68,12 @@ jobs:
           echo "=== test bundled exe (no display, just --help) ==="
           ./dist/windows/FragileNotes/FragileNotes.exe --help 2>&1 | head -n 20 || echo "exe help failed (expected without display)"
 
+      - name: Compile C++ installer helper
+        shell: msys2 {0}
+        run: |
+          g++ -O2 -std=c++17 -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32
+          ls -lh packaging/windows/installer_helper.exe
+
       - name: Install Inno Setup
         run: choco install innosetup -y
 
