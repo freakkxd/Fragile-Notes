@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cstdlib>
 #include <filesystem>
