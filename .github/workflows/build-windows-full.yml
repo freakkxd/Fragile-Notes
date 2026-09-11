@@ -45,7 +45,9 @@ jobs:
       - name: Build portable (PyInstaller)
         shell: msys2 {0}
         run: |
-          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows"
+          export GDK_BACKEND=offscreen
+          export GI_TYPELIB_PATH=/ucrt64/lib/girepository-1.0:$GI_TYPELIB_PATH
+          timeout 300 python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN || python -m PyInstaller --noconfirm --windowed --name="FragileNotes" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
           echo "=== PyInstaller dist ==="
           ls -R dist/windows/FragileNotes | head -n 100
           echo "=== check gi typelib ==="

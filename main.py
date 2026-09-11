@@ -3,12 +3,21 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
-import gi
+# Для headless сборки (PyInstaller, CI) — не требовать дисплей
+os.environ.setdefault("GDK_BACKEND", "offscreen")
+os.environ.setdefault("GI_TYPELIB_PATH", os.environ.get("GI_TYPELIB_PATH", ""))
 
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
+import gi  # noqa: E402
+
+try:
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+except (ValueError, ImportError) as e:
+    # На CI без GTK — PyInstaller analysis не должен падать
+    print(f"Gtk/Adw not available at build time: {e}", file=sys.stderr)
 
 from gi.repository import Adw  # noqa: E402
 
