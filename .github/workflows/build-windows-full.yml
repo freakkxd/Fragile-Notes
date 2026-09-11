@@ -48,16 +48,18 @@ jobs:
           export GDK_BACKEND=offscreen
           MSYS_ROOT=$(cygpath -w /)
           echo "MSYS_ROOT $MSYS_ROOT"
-          ls -lh /ucrt64/bin/libstdc++-6.dll 2>&1 | head -n 5 || ls -lh $MSYS_ROOT/ucrt64/bin/libstdc++-6.dll 2>&1 | head -n 5 || true
-          echo "=== PyInstaller (MSYS2, bundle GTK + gcc runtime) ==="
-          # Use Windows paths for PyInstaller --add-binary (MSYS2 /ucrt64 -> C:/msys64/ucrt64 or D:/a/_temp/msys64/ucrt64)
-          PY_BIN=$(cygpath -w /ucrt64/bin/python.exe)
-          echo "PY_BIN $PY_BIN"
-          # Try with MSYS2 python, fallback to simple without add-binary if not found
+          UCRT_ROOT=$(cygpath -w /ucrt64)
+          echo "UCRT_ROOT $UCRT_ROOT"
+          ls -lh /ucrt64/bin/libstdc++-6.dll 2>&1 | head -n 5 || true
+          ls -lh /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5 || true
+          echo "=== PyInstaller Full Offline (bundled GTK + gcc) ==="
           python -m PyInstaller --noconfirm --windowed --name="FragileNotes" \
+            --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="gi.repository.Gio" --hidden-import="gi.repository.GLib" \
             --hidden-import="yaml" --hidden-import="cryptography" \
-            main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN || \
-          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
+            --add-binary "$UCRT_ROOT/bin/libstdc++-6.dll;." --add-binary "$UCRT_ROOT/bin/libgcc_s_seh-1.dll;." --add-binary "$UCRT_ROOT/bin/libwinpthread-1.dll;." \
+            --add-data "$UCRT_ROOT/lib/girepository-1.0/Gtk-4.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Gdk-4.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Adw-1.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Gio-2.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/GLib-2.0.typelib;gi/repository" \
+            --collect-data gi \
+            main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
           echo "=== Dist ==="
           ls -lh dist/windows/FragileNotes/FragileNotes.exe 2>&1 | head -n 5 || true
           ls -R dist/windows/FragileNotes | head -n 30 || true
