@@ -46,29 +46,12 @@ jobs:
         shell: msys2 {0}
         run: |
           export GDK_BACKEND=offscreen
-          echo "=== Creating portable (MSYS2 + source, no PyInstaller hang) ==="
-          mkdir -p dist/windows/FragileNotes
-          cp -r fragilenotes main.py pyproject.toml README.md LICENSE dist/windows/FragileNotes/
-          mkdir -p dist/windows/FragileNotes/bin dist/windows/FragileNotes/lib/girepository-1.0
-          cp /ucrt64/bin/python*.exe dist/windows/FragileNotes/bin/ 2>/dev/null || true
-          cp /ucrt64/bin/*.dll dist/windows/FragileNotes/bin/ 2>/dev/null || true
-          cp -r /ucrt64/lib/girepository-1.0/*.typelib dist/windows/FragileNotes/lib/girepository-1.0/ 2>/dev/null || true
-          cp -r /ucrt64/share/icons dist/windows/FragileNotes/share/ 2>/dev/null || true
-          echo '@echo off' > dist/windows/FragileNotes/FragileNotes.bat
-          echo 'set "PATH=%~dp0\bin;%PATH%"' >> dist/windows/FragileNotes/FragileNotes.bat
-          echo 'set "GI_TYPELIB_PATH=%~dp0\lib\girepository-1.0"' >> dist/windows/FragileNotes/FragileNotes.bat
-          echo 'set "GDK_BACKEND=win32"' >> dist/windows/FragileNotes/FragileNotes.bat
-          echo '"%~dp0\bin\python.exe" "%~dp0\main.py" %*' >> dist/windows/FragileNotes/FragileNotes.bat
-          cp dist/windows/FragileNotes/FragileNotes.bat dist/windows/FragileNotes/FragileNotes.exe 2>/dev/null || true
-          echo "=== Portable dist (MSYS2) ==="
-          ls -R dist/windows/FragileNotes | head -n 50 || true
-          echo "=== check ==="
-          ls dist/windows/FragileNotes/bin/python* 2>&1 | head -n 5 || true
-          ls -R dist/windows/FragileNotes | head -n 100 || true
-          echo "=== check gi typelib ==="
-          ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5 || true
-          echo "=== test bundled exe (no display, just --help) ==="
-          ./dist/windows/FragileNotes/FragileNotes.exe --help 2>&1 | head -n 20 || echo "exe help failed (expected without display)"
+          export GI_TYPELIB_PATH=/ucrt64/lib/girepository-1.0:$GI_TYPELIB_PATH
+          echo "=== PyInstaller (MSYS2, no collect-all hang) ==="
+          python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
+          echo "=== Dist ==="
+          ls -lh dist/windows/FragileNotes/FragileNotes.exe 2>&1 | head -n 5 || true
+          ls -R dist/windows/FragileNotes | head -n 30 || true
 
       - name: Compile C++ installer helper
         shell: msys2 {0}
