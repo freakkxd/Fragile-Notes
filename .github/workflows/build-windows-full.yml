@@ -37,10 +37,12 @@ jobs:
       - name: Install Python deps
         shell: msys2 {0}
         run: |
-          pacman -S --noconfirm mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-python-pip mingw-w64-ucrt-x86_64-python-pillow 2>/dev/null || true
+          pacman -S --noconfirm mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-python-pip mingw-w64-ucrt-x86_64-python-pillow mingw-w64-ucrt-x86_64-python-numpy mingw-w64-ucrt-x86_64-python-cairo 2>/dev/null || true
           python -m pip install --upgrade pip
+          pip install PyYAML cryptography Pillow numpy pycairo markdown markdown-it-py || true
           pip install -e . --no-deps
           pip install pyinstaller Pillow pefile pywin32-ctypes altgraph --no-deps 2>/dev/null || pip install pyinstaller Pillow pefile pywin32-ctypes altgraph
+          python -c "import gi, yaml, cryptography, numpy, PIL, cairo, markdown; print('deps OK')" 2>&1 | head -n 20 || echo "some deps missing but continue"
 
       - name: Build portable (PyInstaller)
         shell: msys2 {0}
@@ -55,10 +57,10 @@ jobs:
           echo "=== PyInstaller Full Offline (bundled GTK + gcc) ==="
           python -m PyInstaller --noconfirm --windowed --name="FragileNotes" \
             --hidden-import="gi" --hidden-import="gi.repository.Gtk" --hidden-import="gi.repository.Adw" --hidden-import="gi.repository.Gio" --hidden-import="gi.repository.GLib" --hidden-import="gi.repository.Gdk" --hidden-import="gi.repository.GdkPixbuf" --hidden-import="gi.repository.Gsk" --hidden-import="gi.repository.Pango" --hidden-import="gi.repository.PangoCairo" --hidden-import="gi.repository.Graphene" --hidden-import="gi.repository.cairo" --hidden-import="gi.repository.HarfBuzz" \
-            --hidden-import="yaml" --hidden-import="cryptography" \
-            --add-binary "$UCRT_ROOT/bin/libstdc++-6.dll;." --add-binary "$UCRT_ROOT/bin/libgcc_s_seh-1.dll;." --add-binary "$UCRT_ROOT/bin/libwinpthread-1.dll;." --add-binary "$UCRT_ROOT/bin/libcairo-2.dll;." --add-binary "$UCRT_ROOT/bin/libcairo-gobject-2.dll;." --add-binary "$UCRT_ROOT/bin/libgdk_pixbuf-2.0-0.dll;." \
+            --hidden-import="yaml" --hidden-import="cryptography" --hidden-import="PIL" --hidden-import="numpy" --hidden-import="markdown" --hidden-import="cairo" --hidden-import="markdown_it" \
+            --add-binary "$UCRT_ROOT/bin/libstdc++-6.dll;." --add-binary "$UCRT_ROOT/bin/libgcc_s_seh-1.dll;." --add-binary "$UCRT_ROOT/bin/libwinpthread-1.dll;." \
             --add-data "$UCRT_ROOT/lib/girepository-1.0/Gtk-4.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Gdk-4.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/GdkPixbuf-2.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Adw-1.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Gio-2.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/GLib-2.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Gsk-4.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Graphene-1.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/Pango-1.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/PangoCairo-1.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/cairo-1.0.typelib;gi/repository" --add-data "$UCRT_ROOT/lib/girepository-1.0/HarfBuzz-0.0.typelib;gi/repository" \
-            --collect-data gi \
+            --collect-data gi --collect-data PIL --collect-data markdown \
             --collect-all gobject-introspection --collect-all pycairo \
             main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
           echo "=== Dist ==="

@@ -7,6 +7,11 @@ dependencies = [
     "PyGObject>=3.46",
     "PyYAML>=6.0",
     "cryptography>=41.0",
+    "Pillow>=10.0",
+    "pycairo>=1.26",
+    "numpy>=1.26",
+    "markdown>=3.5",
+    "markdown-it-py>=3.0",
 ]
 
 [project.scripts]
