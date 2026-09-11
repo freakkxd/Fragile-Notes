@@ -1,6 +1,6 @@
 [project]
 name = "fragile-notes"
-version = "0.1.10"
+version = "0.1.18"
 description = "Fragile Notes — нативный аналог Obsidian: ядро = AO Runner + Fragilich Suite"
 requires-python = ">=3.11"
 dependencies = [
