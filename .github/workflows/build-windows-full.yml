@@ -59,9 +59,11 @@ jobs:
           echo 'set "GI_TYPELIB_PATH=%~dp0\lib\girepository-1.0"' >> dist/windows/FragileNotes/FragileNotes.bat
           echo 'set "GDK_BACKEND=win32"' >> dist/windows/FragileNotes/FragileNotes.bat
           echo '"%~dp0\bin\python.exe" "%~dp0\main.py" %*' >> dist/windows/FragileNotes/FragileNotes.bat
-          # also copy as exe for Inno
           cp dist/windows/FragileNotes/FragileNotes.bat dist/windows/FragileNotes/FragileNotes.exe 2>/dev/null || true
           echo "=== Portable dist (MSYS2) ==="
+          ls -R dist/windows/FragileNotes | head -n 50 || true
+          echo "=== check ==="
+          ls dist/windows/FragileNotes/bin/python* 2>&1 | head -n 5 || true
           ls -R dist/windows/FragileNotes | head -n 100
           echo "=== check gi typelib ==="
           ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5
