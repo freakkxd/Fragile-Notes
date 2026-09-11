@@ -1,14 +1,14 @@
-# Windows Installer — Fragile Notes v0.1.20
+# Windows Installer — Fragile Notes v0.1.21
 
 > **Подпись:** последние `e51bbae` `C++ helper` (`installer_helper.cpp` `g++` `lole32`) + `c18c611` `real exe not bat` + `a197ff2` `bundle libstdc++/Gtk typelib` (фикс `Namespace Gtk` + `libstdc++-6.dll`); в работе `Full Offline` один файл 33M (без `AllInOne`); цель — `PyInstaller` `collect-all gi` без висения `30 мин` (сейчас `timeout 300` + `GDK_BACKEND`).
 
-> **Актуально:** только **Full Offline 33M** `FragileNotes-Setup-v0.1.20.exe` (внутри `Python 3.11` + `GTK4` + `PyGObject` + все deps). `Portable ZIP` и `AllInOne 3.4M` (исходники + `pip` на машине) — **депрекейтед**, остались в истории `5beb7bb`, больше не собираются.
+> **Актуально:** только **Full Offline 33M** `FragileNotes-Setup-v0.1.21.exe` (внутри `Python 3.11` + `GTK4` + `PyGObject` + все deps). `Portable ZIP` и `AllInOne 3.4M` (исходники + `pip` на машине) — **депрекейтед**, остались в истории `5beb7bb`, больше не собираются.
 
 ## Варианты (актуально)
 
 | Файл | Что внутри | Требует | Где брать |
 |------|------------|---------|-----------|
-| `FragileNotes-Setup-v0.1.20.exe` **33M** | Python + GTK4/libadwaita + PyGObject + PyYAML + cryptography (PyInstaller `UCRT64` + `Inno Setup 6`) | Ничего, один exe | `Releases` → `v0.1.20` `https://github.com/freakkxd/Fragile-Notes/releases/latest` |
+| `FragileNotes-Setup-v0.1.21.exe` **33M** | Python + GTK4/libadwaita + PyGObject + PyYAML + cryptography (PyInstaller `UCRT64` + `Inno Setup 6`) | Ничего, один exe | `Releases` → `v0.1.21` `https://github.com/freakkxd/Fragile-Notes/releases/latest` |
 
 ## Сборка на Windows (для контрибьюторов)
 
@@ -20,7 +20,7 @@
 # 2. Сборка Full Offline (единственный)
 powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
 # → PyInstaller --collect-all gi + hidden-imports → dist/windows/FragileNotes/FragileNotes.exe
-# → Inno Setup → dist/FragileNotes-Setup-v0.1.20.exe 33M
+# → Inno Setup → dist/FragileNotes-Setup-v0.1.21.exe 33M
 
 # 3. Проверка (без установки)
 # dist/windows/FragileNotes/FragileNotes.exe --help
@@ -65,5 +65,5 @@ fragile-notes --help
 
 Для обхода SmartScreen подпиши exe (опционально):
 ```powershell
-signtool sign /fd SHA256 /a dist\FragileNotes-Setup-v0.1.20.exe
+signtool sign /fd SHA256 /a dist\FragileNotes-Setup-v0.1.21.exe
 ```
