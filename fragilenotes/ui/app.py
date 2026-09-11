@@ -111,16 +111,19 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             default_width=1280,
             default_height=820,
         )
-        # Исправление для Windows: явный HeaderBar с кнопками управления окном
-        try:
-            header = Adw.HeaderBar()
-            header.set_show_end_title_buttons(True)
-            header.set_show_start_title_buttons(True)
-            header.set_title_widget(Gtk.Label(label="Fragile Notes", css_classes=["title"]))
-            self.set_titlebar(header)
-            self.set_decorated(True)
-        except Exception:
-            pass
+        # HeaderBar: на Linux Adw.ApplicationWindow запрещает gtk_window_set_titlebar (фатальный g_error)
+        # Поэтому ставим заголовок только на Windows через Gtk.HeaderBar. На Linux — нативный декор.
+        import sys as _sys
+
+        if _sys.platform == "win32":
+            try:
+                header = Gtk.HeaderBar()
+                header.set_show_title_buttons(True)
+                header.set_title_widget(Gtk.Label(label="Fragile Notes", css_classes=["title"]))
+                self.set_titlebar(header)
+                self.set_decorated(True)
+            except Exception:
+                pass
         self.settings = load_settings()
         # Workspaces: гарантируем что vault_root в списке vaults (миграция для старых settings.json)
         try:
