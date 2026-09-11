@@ -71,10 +71,12 @@ jobs:
         shell: msys2 {0}
         run: |
           pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc 2>/dev/null || true
-          g++ -O2 -std=c++17 -static -static-libgcc -static-libstdc++ -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32 -lwinpthread
-          ls -lh packaging/windows/installer_helper.exe || echo "g++ failed, trying without static"
+          # Simple C helper (no libstdc++ needed) — fallback to C++ with static
+          gcc -O2 -o packaging/windows/installer_helper.exe packaging/windows/installer_helper_simple.c -lole32 -lshell32 2>&1 | head -n 20 && echo "C helper OK" || \
+          g++ -O2 -std=c++17 -static -static-libgcc -static-libstdc++ -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32 -lwinpthread 2>&1 | head -n 20 || \
           g++ -O2 -std=c++17 -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32 2>&1 | head -n 20 || true
           ls -lh packaging/windows/installer_helper.exe 2>&1 | head -n 5 || true
+          file packaging/windows/installer_helper.exe 2>&1 | head -n 5 || true
 
       - name: Install Inno Setup
         run: choco install innosetup -y
