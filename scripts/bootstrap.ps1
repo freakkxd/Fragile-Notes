@@ -19,8 +19,11 @@ try { python -c "import yaml, cryptography" 2>$null; ok "PyYAML, cryptography" }
 # Node
 if (Get-Command node -ErrorAction SilentlyContinue) { ok "Node $(node --version) (опционально)" } else { warn "Node не найден — AO Engine offline" }
 
-# Vault
-$Vault = "$env:USERPROFILE\desktop"
+# Vault — теперь в Documents\FragileNotesVault
+$Vault = "$env:USERPROFILE\Documents\FragileNotesVault"
+if (-not (Test-Path "$env:USERPROFILE\Documents")) { $Vault = "$env:USERPROFILE\FragileNotesVault" }
+# Миграция со старого
+if ((Test-Path "$env:USERPROFILE\desktop") -and -not (Test-Path $Vault)) { warn "Найден старый $env:USERPROFILE\desktop → $Vault"; if ($args -contains "-Fix"){ Copy-Item -Recurse -Force "$env:USERPROFILE\desktop" $Vault 2>$null; ok "Мигрирован $Vault" } }
 if (Test-Path $Vault) { ok "Vault $Vault" } else { warn "Vault $Vault нет — создастся при первом запуске (или .\scripts\bootstrap.ps1 -Fix)"; if ($args -contains "-Fix"){ New-Item -ItemType Directory -Force -Path "$Vault\01 Home","$Vault\02 Daily","$Vault\_System" | Out-Null; "# Home" | Out-File "$Vault\01 Home\Home.md" -Encoding utf8; ok "Создан $Vault" } }
 
 # AO

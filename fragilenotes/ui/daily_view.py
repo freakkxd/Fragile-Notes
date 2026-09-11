@@ -274,23 +274,33 @@ class DailyView(Gtk.Box):
             self.reload()
 
     def reload(self) -> None:
-        paths = resolve_paths(self.settings)
-        today = datetime.date.today()
-        full = paths.daily / f"{_daily_slug(today)}.md"
-        self._file = str(full)
-        self._today = today
+        try:
+            paths = resolve_paths(self.settings)
+            today = datetime.date.today()
+            full = paths.daily / f"{_daily_slug(today)}.md"
+            self._file = str(full)
+            self._today = today
 
-        weekday = calendar.day_name[today.weekday()]
-        base = f"Заметка: {today.isoformat()} ({weekday})"
+            weekday = calendar.day_name[today.weekday()]
+            base = f"Заметка: {today.isoformat()} ({weekday})"
 
-        if full.exists():
-            content = full.read_text(encoding="utf-8")
-        else:
-            tpl_path = str(
-                self.settings.get("daily_template") or paths.tm_templates / "Daily note.md"
-            )
-            tpl = _resolve_template(tpl_path)
-            content = _apply_template(tpl or "# {{date:YYYY-MM-DD}}\n", today)
+            if full.exists():
+                content = full.read_text(encoding="utf-8")
+            else:
+                try:
+                    tpl_path = str(
+                        self.settings.get("daily_template") or paths.tm_templates / "Daily note.md"
+                    )
+                    tpl = _resolve_template(tpl_path)
+                    content = _apply_template(tpl or "# {{date:YYYY-MM-DD}}\n", today)
+                except Exception:
+                    content = f"# {today.isoformat()}\n\n"
+        except Exception as e:
+            # Волт не найден или поврежден — показываем пустую daily без краша
+            self._file = None
+            self._today = datetime.date.today()
+            content = f"# Daily — {e}\n\nВолт не найден. Проверь Настройки → Волт.\n"
+            base = f"Заметка: {self._today.isoformat()} (ошибка)"
 
         self._loading = True
         self._text.get_buffer().set_text(content)

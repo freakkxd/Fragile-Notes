@@ -80,6 +80,16 @@ class WorkspaceMixin:
                 self._save_sidebar_width(cur)
         self.sidebar_revealer.set_reveal_child(vis)
         self._update_sidebar_chrome()
+        # Плавное схлопывание: side_column 44px ↔ 232px
+        try:
+            sc = getattr(self, "side_column", None)
+            if sc is not None:
+                if vis:
+                    sc.add_css_class("expanded")
+                else:
+                    sc.remove_css_class("expanded")
+        except Exception:
+            pass
         if hasattr(self, "top"):
             if vis:
                 pos = getattr(self, "_sidebar_width", _SIDEBAR_DEFAULT)

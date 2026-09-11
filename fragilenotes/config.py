@@ -70,7 +70,8 @@ DEFAULT_WORKSPACE: dict[str, Any] = {
 DEFAULT_SETTINGS: dict[str, Any] = {
     "version": SETTINGS_VERSION,
     # Vault — активный + список воркспейсов (несколько vault в одном окне)
-    "vault_root": str(Path.home() / "desktop"),
+    # Исправлено: не на рабочем столе, а в Documents/FragileNotes (Windows) / ~/FragileNotes (Linux)
+    "vault_root": str(Path.home() / "Documents" / "FragileNotesVault") if (Path.home() / "Documents").exists() else str(Path.home() / "FragileNotesVault"),
     "vaults": [],  # [{path, name}]
     "workspaces": [],  # алиас vaults для совместимости
     # AO Engine (Node CLI)

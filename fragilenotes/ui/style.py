@@ -137,6 +137,10 @@ window {
     background-color: rgba(10, 14, 22, 0.92);
     background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 150px);
     border-right: 1px solid var(--ao-border-subtle);
+    min-width: 44px;
+    transition: min-width 180ms ease;
+}
+.side-column.expanded {
     min-width: 232px;
 }
 

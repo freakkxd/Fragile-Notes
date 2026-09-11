@@ -16,9 +16,18 @@ int main(int argc, char* argv[]) {
     SetCurrentDirectoryA(appDir);
     printf("== Fragile Notes C installer ==\nAppDir: %s\n", appDir);
 
-    // Vault
+    // Vault — теперь в Documents/FragileNotesVault, не на рабочем столе
     char vault[MAX_PATH];
-    snprintf(vault, sizeof(vault), "%s\\desktop", getenv("USERPROFILE"));
+    snprintf(vault, sizeof(vault), "%s\\Documents\\FragileNotesVault", getenv("USERPROFILE"));
+    // Миграция со старого ~/desktop если новый пуст
+    char oldVault[MAX_PATH];
+    snprintf(oldVault, sizeof(oldVault), "%s\\desktop", getenv("USERPROFILE"));
+    DWORD oldAttr = GetFileAttributesA(oldVault);
+    DWORD newAttr = GetFileAttributesA(vault);
+    if (oldAttr != INVALID_FILE_ATTRIBUTES && newAttr == INVALID_FILE_ATTRIBUTES) {
+        // TODO: рекурсивно скопировать старый волт, пока просто создаем новый
+        printf("[INFO] Found old vault at %s, new vault at %s\n", oldVault, vault);
+    }
     DWORD attr = GetFileAttributesA(vault);
     if (attr == INVALID_FILE_ATTRIBUTES) {
         char path[MAX_PATH];

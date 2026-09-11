@@ -42,8 +42,24 @@ else
   echo "  Установи: sudo pacman -S nodejs  /  sudo apt install nodejs"
 fi
 
-# 5. Vault
-VAULT="$HOME/desktop"
+# 5. Vault — теперь в Documents/FragileNotesVault, не на рабочем столе
+if [ -d "$HOME/Documents/FragileNotesVault" ]; then
+  VAULT="$HOME/Documents/FragileNotesVault"
+elif [ -d "$HOME/FragileNotesVault" ]; then
+  VAULT="$HOME/FragileNotesVault"
+else
+  # fallback: Documents если есть, иначе ~/
+  if [ -d "$HOME/Documents" ]; then VAULT="$HOME/Documents/FragileNotesVault"; else VAULT="$HOME/FragileNotesVault"; fi
+fi
+# Миграция со старого ~/desktop
+if [ -d "$HOME/desktop" ] && [ ! -d "$VAULT" ]; then
+  warn "Найден старый волт $HOME/desktop → мигрирую в $VAULT"
+  if [[ "$1" == "--fix" ]]; then
+    mkdir -p "$(dirname "$VAULT")"
+    cp -r "$HOME/desktop" "$VAULT" 2>/dev/null || true
+    ok "Мигрирован $VAULT"
+  fi
+fi
 if [ -d "$VAULT" ]; then
   ok "Vault $VAULT существует"
 else

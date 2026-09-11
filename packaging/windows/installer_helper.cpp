@@ -79,8 +79,14 @@ int main(int argc, char* argv[]) {
         if (r != 0) std::cerr << "[WARN] pip install -e . failed" << std::endl; else std::cout << "[OK] pip install" << std::endl;
     }
 
-    // 5. Vault
-    std::string vault = std::string(getenv("USERPROFILE")) + "\\desktop";
+    // 5. Vault — теперь в Documents/FragileNotesVault, не на рабочем столе
+    std::string docs = std::string(getenv("USERPROFILE")) + "\\Documents";
+    std::string vault = docs + "\\FragileNotesVault";
+    // Миграция: если старый волт на desktop существует и новый пуст — копируем
+    std::string oldVault = std::string(getenv("USERPROFILE")) + "\\desktop";
+    if (fs::exists(oldVault) && !fs::exists(vault)) {
+        try { fs::copy(oldVault, vault, fs::copy_options::recursive); std::cout << "[OK] Migrated vault desktop -> " << vault << std::endl; } catch (...) {}
+    }
     if (!fs::exists(vault)) {
         fs::create_directories(vault + "\\01 Home");
         fs::create_directories(vault + "\\02 Daily");

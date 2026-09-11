@@ -111,6 +111,16 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             default_width=1280,
             default_height=820,
         )
+        # Исправление для Windows: явный HeaderBar с кнопками управления окном
+        try:
+            header = Adw.HeaderBar()
+            header.set_show_end_title_buttons(True)
+            header.set_show_start_title_buttons(True)
+            header.set_title_widget(Gtk.Label(label="Fragile Notes", css_classes=["title"]))
+            self.set_titlebar(header)
+            self.set_decorated(True)
+        except Exception:
+            pass
         self.settings = load_settings()
         # Workspaces: гарантируем что vault_root в списке vaults (миграция для старых settings.json)
         try:
@@ -302,6 +312,14 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.rail = self._build_ribbon()
         self.rail_scroller.set_child(self.rail)
         self.side_column.append(self.rail_scroller)
+        # Hover expand: при наведении на узкий rail (44px) показывать sidebar с подписями
+        try:
+            hover = Gtk.EventControllerMotion()
+            hover.connect("enter", lambda *_: self.sidebar_revealer.set_reveal_child(True) if not self.sidebar_revealer.get_reveal_child() else None)
+            hover.connect("leave", lambda *_: self.sidebar_revealer.set_reveal_child(False) if self.sidebar_revealer.get_reveal_child() else None)
+            self.rail_scroller.add_controller(hover)
+        except Exception:
+            pass
 
         # Sidebar с workspaces (несколько vault в одном окне)
         try:
