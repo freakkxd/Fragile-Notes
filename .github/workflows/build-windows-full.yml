@@ -64,9 +64,9 @@ jobs:
           ls -R dist/windows/FragileNotes | head -n 50 || true
           echo "=== check ==="
           ls dist/windows/FragileNotes/bin/python* 2>&1 | head -n 5 || true
-          ls -R dist/windows/FragileNotes | head -n 100
+          ls -R dist/windows/FragileNotes | head -n 100 || true
           echo "=== check gi typelib ==="
-          ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5
+          ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5 || true
           echo "=== test bundled exe (no display, just --help) ==="
           ./dist/windows/FragileNotes/FragileNotes.exe --help 2>&1 | head -n 20 || echo "exe help failed (expected without display)"
 
