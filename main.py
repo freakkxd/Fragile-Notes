@@ -28,8 +28,9 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     except Exception:
         pass
 
-# Для headless сборки (PyInstaller, CI) — не требовать дисплей
-os.environ.setdefault("GDK_BACKEND", "offscreen")
+# Для headless сборки (PyInstaller, CI) — не требовать дисплей (только на Linux headless, не на Windows)
+if sys.platform != "win32" and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+    os.environ.setdefault("GDK_BACKEND", "offscreen")
 
 import gi  # noqa: E402
 
