@@ -3,7 +3,7 @@
 > **Подпись v0.2.0 — почему отделили эту версию:**
 > - **Сделано в 0.1.0-0.1.21:** успешный **порт на ПК** — `Full Offline` `33-59M` `FragileNotes-Setup-v0.1.20.exe` (один файл, внутри `Python 3.11`+`GTK4`+`PyGObject`+`libstdc++`/`GdkPixbuf`/`Gsk`), фикс 6 топ-багов (окно `Adw.HeaderBar` с кнопками, волт `~/desktop`→`~/Documents/FragileNotesVault`, боковая панель `44↔232` + `hover`, `Daily/Заметки/Шаблоны` + `AI Чат`/`Магазин`/`Презентация` без обрезки), `CI` зеленый (`ruff`/`mypy`/`pytest` `xvfb`), `vault_guard` защита
 > - **Почему 0.2.0 отдельно:** первая **стабильная** после 3 дней порта — `ValueError: Namespace Gtk/Gsk/PangoCairo/GdkPixbuf` + `libstdc++-6.dll` закрыты, `Full` запускается по двойному клику (`PE32` 4.4M, не `bat`), `AllInOne` 3.4M депрекейтед и удален (`f447673`)
-> - **В работе теперь:** фокус на `Test-Works` (веб демо `Northstar v2` `5173/5174/8080`) и подготовка **порта на C++** (`Qt`/`gtkmm`) — вручную, без спешки, `0.2.x` без breaking changes
+> - **В работе теперь:** фокус на багах, которые были до порта и подготовка **порта на C++** (`Qt`/`gtkmm`) — вручную, без спешки, `0.2.x` без breaking changes
 > - **Цель 0.2:** стабильная база для `C++` порта, `Full Offline` 59M как `latest` на `https://github.com/freakkxd/Fragile-Notes/releases/latest`
 
 **Нативный аналог Obsidian для Linux/Windows.** Ядро = **AO Runner** (Node) + **Fragilich Suite** (Python) — всё в одном процессе, без Electron.
