@@ -46,9 +46,22 @@ jobs:
         shell: msys2 {0}
         run: |
           export GDK_BACKEND=offscreen
-          export GI_TYPELIB_PATH=/ucrt64/lib/girepository-1.0:$GI_TYPELIB_PATH
-          timeout 300 python -m PyInstaller --noconfirm --windowed --name="FragileNotes" --hidden-import="yaml" --hidden-import="cryptography" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN || python -m PyInstaller --noconfirm --windowed --name="FragileNotes" main.py --distpath="dist/windows" --workpath="build/windows" --log-level=WARN
-          echo "=== PyInstaller dist ==="
+          echo "=== Creating portable (MSYS2 + source, no PyInstaller hang) ==="
+          mkdir -p dist/windows/FragileNotes
+          cp -r fragilenotes main.py pyproject.toml README.md LICENSE dist/windows/FragileNotes/
+          mkdir -p dist/windows/FragileNotes/bin dist/windows/FragileNotes/lib/girepository-1.0
+          cp /ucrt64/bin/python*.exe dist/windows/FragileNotes/bin/ 2>/dev/null || true
+          cp /ucrt64/bin/*.dll dist/windows/FragileNotes/bin/ 2>/dev/null || true
+          cp -r /ucrt64/lib/girepository-1.0/*.typelib dist/windows/FragileNotes/lib/girepository-1.0/ 2>/dev/null || true
+          cp -r /ucrt64/share/icons dist/windows/FragileNotes/share/ 2>/dev/null || true
+          echo '@echo off' > dist/windows/FragileNotes/FragileNotes.bat
+          echo 'set "PATH=%~dp0\bin;%PATH%"' >> dist/windows/FragileNotes/FragileNotes.bat
+          echo 'set "GI_TYPELIB_PATH=%~dp0\lib\girepository-1.0"' >> dist/windows/FragileNotes/FragileNotes.bat
+          echo 'set "GDK_BACKEND=win32"' >> dist/windows/FragileNotes/FragileNotes.bat
+          echo '"%~dp0\bin\python.exe" "%~dp0\main.py" %*' >> dist/windows/FragileNotes/FragileNotes.bat
+          # also copy as exe for Inno
+          cp dist/windows/FragileNotes/FragileNotes.bat dist/windows/FragileNotes/FragileNotes.exe 2>/dev/null || true
+          echo "=== Portable dist (MSYS2) ==="
           ls -R dist/windows/FragileNotes | head -n 100
           echo "=== check gi typelib ==="
           ls -la /ucrt64/lib/girepository-1.0/Gtk-4.0.typelib 2>&1 | head -n 5
