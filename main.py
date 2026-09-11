@@ -38,9 +38,11 @@ try:
     gi.require_version("Adw", "1")
     gi.require_version("Gsk", "4.0")
     gi.require_version("Gdk", "4.0")
+    gi.require_version("Pango", "1.0")
+    gi.require_version("PangoCairo", "1.0")
 except (ValueError, ImportError) as e:
     # На CI без GTK — PyInstaller analysis не должен падать
-    print(f"Gtk/Adw/Gsk not available at build time: {e}", file=sys.stderr)
+    print(f"Gtk/Adw/Gsk/PangoCairo not available at build time: {e}", file=sys.stderr)
 
 from gi.repository import Adw  # noqa: E402
 
