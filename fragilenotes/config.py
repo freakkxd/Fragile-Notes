@@ -10,9 +10,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-APP_DIR: Path = Path(
-    os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
-) / "fragile-notes"
+APP_DIR: Path = (
+    Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "fragile-notes"
+)
 SETTINGS_FILE: Path = APP_DIR / "settings.json"
 
 # Версионирование настроек: текущая версия схемы.
@@ -71,7 +71,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "version": SETTINGS_VERSION,
     # Vault — активный + список воркспейсов (несколько vault в одном окне)
     # Исправлено: не на рабочем столе, а в Documents/FragileNotes (Windows) / ~/FragileNotes (Linux)
-    "vault_root": str(Path.home() / "Documents" / "FragileNotesVault") if (Path.home() / "Documents").exists() else str(Path.home() / "FragileNotesVault"),
+    "vault_root": str(Path.home() / "Documents" / "FragileNotesVault")
+    if (Path.home() / "Documents").exists()
+    else str(Path.home() / "FragileNotesVault"),
     "vaults": [],  # [{path, name}]
     "workspaces": [],  # алиас vaults для совместимости
     # AO Engine (Node CLI)
@@ -97,8 +99,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Token warnings
     "tokens_soft_warning_percent": 90,
     # Масштабирование
-    "ui_scale": 1.0,              # множитель масштаба интерфейса (0.75–2.0)
-    "editor_zoom": 1.0,           # зум текста редактора/просмотра (0.5–2.0)
+    "ui_scale": 1.0,  # множитель масштаба интерфейса (0.75–2.0)
+    "editor_zoom": 1.0,  # зум текста редактора/просмотра (0.5–2.0)
     "follow_system_scale": True,  # учитывать GNOME text-scaling-factor
     # Кастомизация рабочего пространства
     "workspace": DEFAULT_WORKSPACE,
@@ -125,6 +127,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 # ── Миграция ribbon ───────────────────────────────────────────
 
+
 def _is_ribbon_outdated(ribbon: list[Any]) -> bool:
     """Старый ribbon: без graph/voice/ai_chat/canvas/whiteboard/kanban/calendar/database/templates/review или без сепараторов ( <3 ).
 
@@ -138,20 +141,17 @@ def _is_ribbon_outdated(ribbon: list[Any]) -> bool:
     if len(ribbon) < 7:
         return False
     has_graph = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "graph"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "graph" for it in ribbon
     )
     if not has_graph:
         return True
     has_voice = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "voice"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "voice" for it in ribbon
     )
     if not has_voice:
         return True
     has_video = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "video"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "video" for it in ribbon
     )
     if not has_video:
         return True
@@ -162,14 +162,12 @@ def _is_ribbon_outdated(ribbon: list[Any]) -> bool:
     if not has_ai:
         return True
     has_canvas = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "canvas"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "canvas" for it in ribbon
     )
     if not has_canvas:
         return True
     has_kanban = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "kanban"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "kanban" for it in ribbon
     )
     if not has_kanban:
         return True
@@ -192,14 +190,12 @@ def _is_ribbon_outdated(ribbon: list[Any]) -> bool:
     if not has_templates:
         return True
     has_slides = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "slides"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "slides" for it in ribbon
     )
     if not has_slides:
         return True
     has_review = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "review"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "review" for it in ribbon
     )
     if not has_review:
         return True
@@ -210,14 +206,12 @@ def _is_ribbon_outdated(ribbon: list[Any]) -> bool:
     if not has_pomodoro:
         return True
     has_habits = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "habits"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "habits" for it in ribbon
     )
     if not has_habits:
         return True
     has_srs = any(
-        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "srs"
-        for it in ribbon
+        isinstance(it, dict) and it.get("t") == "view" and it.get("id") == "srs" for it in ribbon
     )
     if not has_srs:
         return True
@@ -276,13 +270,15 @@ def _migrate_ribbon(old_ribbon: list[Any]) -> list[dict[str, Any]]:
         path = str(it.get("path") or "").strip()
         if not path:
             continue
-        open_items.append({
-            "t": "open",
-            "id": it.get("id") or f"open-{len(open_items)}",
-            "icon": str(it.get("icon") or "📄")[:2],
-            "tip": str(it.get("tip") or path).strip() or path,
-            "path": path,
-        })
+        open_items.append(
+            {
+                "t": "open",
+                "id": it.get("id") or f"open-{len(open_items)}",
+                "icon": str(it.get("icon") or "📄")[:2],
+                "tip": str(it.get("tip") or path).strip() or path,
+                "path": path,
+            }
+        )
     base: list[dict[str, Any]] = [dict(it) for it in DEFAULT_WORKSPACE["ribbon"]]
     if not open_items:
         return base
@@ -363,6 +359,7 @@ def _migrate_settings(stored: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── Бэкап ─────────────────────────────────────────────────────
+
 
 def _prune_backups() -> None:
     """Оставить последние 3 бэкапа с таймстампом."""
@@ -459,7 +456,10 @@ def load_settings() -> dict[str, Any]:
                 norm = str(_P(vr).expanduser().resolve(strict=False))
             except Exception:
                 norm = vr
-            has = any(isinstance(e, dict) and str(e.get("path") or "").strip() == norm for e in merged["vaults"])
+            has = any(
+                isinstance(e, dict) and str(e.get("path") or "").strip() == norm
+                for e in merged["vaults"]
+            )
             if not has and norm:
                 base = _P(norm).name or norm
                 merged["vaults"].insert(0, {"path": norm, "name": base})
@@ -481,6 +481,4 @@ def save_settings(settings: dict[str, Any]) -> None:
         ws["sidebar_width"] = DEFAULT_WORKSPACE["sidebar_width"]
     APP_DIR.mkdir(parents=True, exist_ok=True)
     _backup_settings()
-    SETTINGS_FILE.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")

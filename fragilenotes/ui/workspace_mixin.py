@@ -56,12 +56,17 @@ class WorkspaceMixin:
             save_settings(self.settings)
 
     def _on_paned_position(self, paned: Gtk.Paned, _pspec) -> None:
-        if not getattr(self, "sidebar_revealer", None) or not self.sidebar_revealer.get_reveal_child():
+        if (
+            not getattr(self, "sidebar_revealer", None)
+            or not self.sidebar_revealer.get_reveal_child()
+        ):
             return
         pos = paned.get_position()
         clamped = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, pos))
         if pos != clamped and 0 < pos < 2000:
-            GLib.idle_add(lambda: paned.set_position(clamped) if paned.get_position() != clamped else False)
+            GLib.idle_add(
+                lambda: paned.set_position(clamped) if paned.get_position() != clamped else False
+            )
             pos = clamped
         if pos < _SIDEBAR_MIN or pos > _SIDEBAR_MAX:
             return

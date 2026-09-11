@@ -315,8 +315,18 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         # Hover expand: при наведении на узкий rail (44px) показывать sidebar с подписями
         try:
             hover = Gtk.EventControllerMotion()
-            hover.connect("enter", lambda *_: self.sidebar_revealer.set_reveal_child(True) if not self.sidebar_revealer.get_reveal_child() else None)
-            hover.connect("leave", lambda *_: self.sidebar_revealer.set_reveal_child(False) if self.sidebar_revealer.get_reveal_child() else None)
+            hover.connect(
+                "enter",
+                lambda *_: self.sidebar_revealer.set_reveal_child(True)
+                if not self.sidebar_revealer.get_reveal_child()
+                else None,
+            )
+            hover.connect(
+                "leave",
+                lambda *_: self.sidebar_revealer.set_reveal_child(False)
+                if self.sidebar_revealer.get_reveal_child()
+                else None,
+            )
             self.rail_scroller.add_controller(hover)
         except Exception:
             pass

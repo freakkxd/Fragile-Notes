@@ -2304,6 +2304,7 @@ def _scale_lengths(css: str, fit: float) -> str:
 
     return _DECL_PX.sub(_value, css)
 
+
 # Кэш CSS: (ui, zoom, fit) -> готовая строка. Перегенерация — дорогая
 # (2 re.sub по ~1600 строк, ~120 мс), поэтому храним результаты и не
 # инвалидируем при delta fit <= 0.05.
@@ -2353,9 +2354,7 @@ def build_css(ui_scale: float = 1.0, editor_zoom: float = 1.0, interior_fit: flo
 
     if abs(fit - 1.0) >= 0.005:
         css = _scale_lengths(css, fit)
-    css = _FONT_SIZE.sub(
-        lambda m: f"{m.group(1)}{_fmt_px(float(m.group(2)) * ui)}", css
-    )
+    css = _FONT_SIZE.sub(lambda m: f"{m.group(1)}{_fmt_px(float(m.group(2)) * ui)}", css)
     css = css.replace(_SENTINEL_MONO, _fmt_px(_EDITOR_MONO * ui * zoom))
     css = css.replace(_SENTINEL_PROSE, _fmt_px(_EDITOR_PROSE * ui * zoom))
 
