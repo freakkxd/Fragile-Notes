@@ -71,10 +71,10 @@ jobs:
         shell: msys2 {0}
         run: |
           pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc 2>/dev/null || true
-          g++ -O2 -std=c++17 -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32
-          ls -lh packaging/windows/installer_helper.exe || echo "g++ not found, trying system g++"
-          which g++ || echo "no g++"
-          g++ --version 2>&1 | head -n 5 || true
+          g++ -O2 -std=c++17 -static -static-libgcc -static-libstdc++ -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32 -lwinpthread
+          ls -lh packaging/windows/installer_helper.exe || echo "g++ failed, trying without static"
+          g++ -O2 -std=c++17 -o packaging/windows/installer_helper.exe packaging/windows/installer_helper.cpp -lole32 -lshell32 2>&1 | head -n 20 || true
+          ls -lh packaging/windows/installer_helper.exe 2>&1 | head -n 5 || true
 
       - name: Install Inno Setup
         run: choco install innosetup -y
