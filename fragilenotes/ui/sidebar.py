@@ -71,7 +71,47 @@ class Sidebar(Gtk.Box):
         self._ws_box = self._build_workspaces_box()
         self.append(self._ws_box)
 
-        # Список
+        sep_ws = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, css_classes=["sb-sep"])
+        self.append(sep_ws)
+
+        notes_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        notes_hdr.set_margin_start(8)
+        notes_hdr.set_margin_end(8)
+        notes_hdr.set_margin_top(4)
+        notes_hdr.append(Gtk.Label(label="ЗАМЕТКИ", css_classes=["sb-section"], halign=Gtk.Align.START, hexpand=True, xalign=0))
+        refresh_notes = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Обновить список заметок", css_classes=["flat", "sb-ws-add"])
+        refresh_notes.set_can_focus(False)
+        refresh_notes.connect("clicked", lambda *_: self._refresh_notes())
+        notes_hdr.append(refresh_notes)
+        self.append(notes_hdr)
+
+        self._notes_scroller = Gtk.ScrolledWindow(vexpand=True, max_content_height=260)
+        self._notes_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._notes_list = Gtk.ListBox(css_classes=["sb-notes-list"])
+        self._notes_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._notes_list.connect("row-activated", self._on_note_activated)
+        self._notes_scroller.set_child(self._notes_list)
+        self.append(self._notes_scroller)
+        self._refresh_notes()
+
+        tabs_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tabs_hdr.set_margin_start(8)
+        tabs_hdr.set_margin_end(8)
+        tabs_hdr.set_margin_top(6)
+        tabs_hdr.append(Gtk.Label(label="ВКЛАДКИ", css_classes=["sb-section"], halign=Gtk.Align.START, hexpand=True, xalign=0))
+        self._tabs_toggle = Gtk.ToggleButton(label="☰", tooltip_text="Развернуть все смайлики + названия", css_classes=["flat", "sb-ws-add"])
+        self._tabs_toggle.set_active(False)
+        self._tabs_toggle.connect("toggled", self._on_tabs_toggle)
+        tabs_hdr.append(self._tabs_toggle)
+        self.append(tabs_hdr)
+
+        self._tabs_revealer = Gtk.Revealer()
+        self._tabs_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._tabs_revealer.set_transition_duration(180)
+        self._tabs_revealer.set_reveal_child(False)
+        self.append(self._tabs_revealer)
+
+        # Список вкладок — внутри revealer, по кнопке раскрываются смайлики + названия + настройки
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.list = Gtk.ListBox(css_classes=["nav-list"])
@@ -112,7 +152,7 @@ class Sidebar(Gtk.Box):
                 self.list.append(row)
         self.list.connect("row-selected", self._on_selected)
         scroller.set_child(self.list)
-        self.append(scroller)
+        self._tabs_revealer.set_child(scroller)
 
         # Низ: подсказка
         footer = Gtk.Label(
@@ -258,6 +298,77 @@ class Sidebar(Gtk.Box):
                 pass
         elif self._on_ws_switch is not None:
             # если нет add-хендлера, хотя бы откроем переключение на текущий
+            pass
+
+    def _on_tabs_toggle(self, btn: Gtk.ToggleButton) -> None:
+        try:
+            self._tabs_revealer.set_reveal_child(bool(btn.get_active()))
+        except Exception:
+            pass
+        try:
+            btn.set_label("✕" if btn.get_active() else "☰")
+        except Exception:
+            pass
+
+    def _refresh_notes(self) -> None:
+        lb = getattr(self, "_notes_list", None)
+        if lb is None:
+            return
+        while (child := lb.get_first_child()) is not None:
+            lb.remove(child)
+        try:
+            from pathlib import Path as _P
+
+            from ..services.vault import ensure_file_tree
+
+            from ..config import load_settings
+
+            s = load_settings()
+            root = _P(s.get("vault_root") or self._current_vault or ".")
+            node = ensure_file_tree(s, force=False)
+            def walk(n, prefix=""):
+                for fname, fpath in n.files:
+                    row = Gtk.ListBoxRow(css_classes=["sb-note-row"], activatable=True)
+                    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                    box.set_margin_start(6)
+                    box.set_margin_end(6)
+                    box.set_margin_top(2)
+                    box.set_margin_bottom(2)
+                    try:
+                        from ..vault import FILE_EMOJI as _EM
+
+                        emo = _EM.get(_P(fpath).suffix.lower(), "📄")
+                    except Exception:
+                        emo = "📄"
+                    box.append(Gtk.Label(label=emo, css_classes=["sb-note-emoji"]))
+                    box.append(Gtk.Label(label=fname, css_classes=["sb-note-name"], halign=Gtk.Align.START, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE))
+                    row.set_child(box)
+                    row._note_path = fpath  # type: ignore[attr-defined]
+                    lb.append(row)
+                for d in n.dirs:
+                    walk(d, prefix + d.name + "/")
+            walk(node)
+            if lb.get_first_child() is None:
+                row = Gtk.ListBoxRow(activatable=False, selectable=False)
+                row.set_child(Gtk.Label(label="нет заметок", css_classes=["dim-label"], halign=Gtk.Align.START))
+                lb.append(row)
+        except Exception:
+            pass
+
+    def _on_note_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
+        if row is None:
+            return
+        path = getattr(row, "_note_path", None)
+        if not path:
+            return
+        try:
+            parent = self.get_ancestor(Gtk.Window)
+            if parent and hasattr(parent, "_open_note"):
+                parent._open_note(str(path))
+            else:
+                self.on_select("files")
+                GLib.idle_add(lambda: getattr(parent, "_open_note", lambda *_: None)(str(path)) or False)
+        except Exception:
             pass
 
     def set_vaults(self, vaults: list[dict], current_path: str | None = None) -> None:
