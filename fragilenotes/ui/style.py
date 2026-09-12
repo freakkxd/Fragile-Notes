@@ -2492,7 +2492,28 @@ RIGHT_PANEL_CSS = """
 .right-panel-btn-active { background: rgba(var(--ao-accent-focus), 0.15); border: 1px solid rgba(var(--ao-accent-focus), 0.3); }
 .right-panel-close { margin: 8px; }
 """
+
+SIDEBAR_AUDIT_CSS = """
+.side-column { background: var(--ao-bg-pane); }
+.sidebar { background: var(--ao-bg-pane); }
+.sb-notes-list row.sb-note-row { border-radius: 6px; margin: 1px 4px; }
+.sb-notes-list row.sb-note-row:hover { background: var(--ao-surface-row-hover); }
+.sb-notes-list row.sb-note-row:active { background: rgba(var(--ao-accent-focus), 0.15); }
+.sb-folder-row { opacity: 0.7; padding: 6px 0 2px 0; }
+.sb-folder-name { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; }
+.sb-note-emoji { min-width: 16px; }
+.sb-note-name { font-size: 13px; }
+.nav-list row.nav-item:hover { background: var(--ao-surface-row-hover); }
+.nav-list row.nav-item:selected { background: rgba(var(--ao-accent-focus), 0.15); }
+.workspace-paned > separator { background: var(--ao-border-subtle); min-width: 1px; }
+.workspace-paned > separator:hover { background: rgba(var(--ao-accent-focus), 0.4); }
+.rail-scroller { background: var(--ao-bg-deep); }
+.workspace-ribbon { padding: 6px 2px; }
+.ribbon-btn { border-radius: 8px; }
+.ribbon-btn:hover { background: var(--ao-surface-control-hover); }
+.ribbon-btn:checked { background: rgba(var(--ao-accent-focus), 0.2); }
+"""
 try:
-    CSS += RIGHT_PANEL_CSS
+    CSS += RIGHT_PANEL_CSS + SIDEBAR_AUDIT_CSS
 except Exception:
     pass

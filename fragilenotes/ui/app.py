@@ -328,6 +328,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                         self.top.set_position(pos)
                     except Exception:
                         pass
+                    self._update_sidebar_chrome()
                 return None
             def _hover_leave(*_):
                 if getattr(self, "_sidebar_pinned", False):
@@ -338,10 +339,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                         self.top.set_position(_SIDEBAR_COLLAPSED)
                     except Exception:
                         pass
+                    self._update_sidebar_chrome()
                 return None
             hover.connect("enter", _hover_enter)
             hover.connect("leave", _hover_leave)
-            self.rail_scroller.add_controller(hover)
+            self.side_column.add_controller(hover)
         except Exception:
             pass
 
@@ -1070,7 +1072,15 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 and self.sidebar_revealer.get_reveal_child()
             ):
                 self.sidebar_revealer.set_reveal_child(False)
+                try:
+                    self._sidebar_pinned = False
+                except Exception:
+                    pass
                 self._update_sidebar_chrome()
+                try:
+                    self.top.set_position(_SIDEBAR_COLLAPSED)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1080,6 +1090,23 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         try:
             if hasattr(self, "mobile_bottom_bar"):
                 self.mobile_bottom_bar.set_visible(False)
+        except Exception:
+            pass
+        try:
+            vis = self._visible_name() if hasattr(self, "_visible_name") else ""
+            if vis == "files" and hasattr(self, "sidebar_revealer"):
+                if not self.sidebar_revealer.get_reveal_child():
+                    self.sidebar_revealer.set_reveal_child(True)
+                    try:
+                        self._sidebar_pinned = True
+                    except Exception:
+                        pass
+                    try:
+                        pos = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
+                        self.top.set_position(pos)
+                    except Exception:
+                        pass
+                    self._update_sidebar_chrome()
         except Exception:
             pass
 
@@ -2587,6 +2614,11 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 _vault.invalidate_vault_cache()
             except Exception:
                 pass
+        try:
+            if hasattr(self, "sidebar") and hasattr(self.sidebar, "_refresh_notes"):
+                GLib.idle_add(lambda: (self.sidebar._refresh_notes(), False)[1])
+        except Exception:
+            pass
         # обновить дерево если вьюха файлов видима
         try:
             fv = self._views.get("files")

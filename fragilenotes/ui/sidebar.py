@@ -85,8 +85,10 @@ class Sidebar(Gtk.Box):
         notes_hdr.append(refresh_notes)
         self.append(notes_hdr)
 
-        self._notes_scroller = Gtk.ScrolledWindow(vexpand=True, max_content_height=260)
+        self._notes_scroller = Gtk.ScrolledWindow(vexpand=True)
         self._notes_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._notes_scroller.set_min_content_height(160)
+        self._notes_scroller.set_max_content_height(380)
         self._notes_list = Gtk.ListBox(css_classes=["sb-notes-list"])
         self._notes_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._notes_list.connect("row-activated", self._on_note_activated)
@@ -324,13 +326,18 @@ class Sidebar(Gtk.Box):
             from ..config import load_settings
 
             s = load_settings()
-            root = _P(s.get("vault_root") or self._current_vault or ".")
             node = ensure_file_tree(s, force=False)
             def walk(n, prefix=""):
+                if prefix:
+                    hdr = Gtk.ListBoxRow(activatable=False, selectable=False, css_classes=["sb-folder-row"])
+                    lbl = Gtk.Label(label=prefix.rstrip("/"), css_classes=["sb-folder-name"], halign=Gtk.Align.START, xalign=0)
+                    lbl.set_margin_start(4)
+                    hdr.set_child(lbl)
+                    lb.append(hdr)
                 for fname, fpath in n.files:
                     row = Gtk.ListBoxRow(css_classes=["sb-note-row"], activatable=True)
                     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                    box.set_margin_start(6)
+                    box.set_margin_start(10 if prefix else 6)
                     box.set_margin_end(6)
                     box.set_margin_top(2)
                     box.set_margin_bottom(2)
@@ -340,13 +347,13 @@ class Sidebar(Gtk.Box):
                         emo = _EM.get(_P(fpath).suffix.lower(), "📄")
                     except Exception:
                         emo = "📄"
-                    box.append(Gtk.Label(label=emo, css_classes=["sb-note-emoji"]))
+                    box.append(Gtk.Label(label=emo, css_classes=["sb-note-emoji"], valign=Gtk.Align.CENTER))
                     box.append(Gtk.Label(label=fname, css_classes=["sb-note-name"], halign=Gtk.Align.START, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE))
                     row.set_child(box)
                     row._note_path = fpath  # type: ignore[attr-defined]
                     lb.append(row)
                 for d in n.dirs:
-                    walk(d, prefix + d.name + "/")
+                    walk(d, prefix + d.name + "/" if not prefix else prefix + d.name + "/")
             walk(node)
             if lb.get_first_child() is None:
                 row = Gtk.ListBoxRow(activatable=False, selectable=False)
@@ -377,6 +384,10 @@ class Sidebar(Gtk.Box):
             self._current_vault = str(current_path)
             self._vault_lbl.set_text(str(current_path) or "vault")
         self._refresh_workspaces()
+        try:
+            self._refresh_notes()
+        except Exception:
+            pass
 
     def set_workspace_callbacks(self, on_switch=None, on_add=None) -> None:
         if on_switch is not None:
