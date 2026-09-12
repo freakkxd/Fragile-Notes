@@ -2,14 +2,43 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gi
+
+gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
 
-try:
-    from gi.repository import WebKit
-    HAS_WEBKIT = True
-except Exception:
-    HAS_WEBKIT = False
-    WebKit = None  # type: ignore
+HAS_WEBKIT = False
+WebKit = None  # type: ignore
+for _ns, _ver in (("WebKit", "6.0"), ("WebKit2", "4.1"), ("WebKit2", "4.0")):
+    try:
+        gi.require_version(_ns, _ver)
+        if _ns == "WebKit2":
+            from gi.repository import WebKit2 as _WK  # type: ignore
+
+            WebKit = _WK  # type: ignore
+        else:
+            from gi.repository import WebKit as _WK  # type: ignore
+
+            WebKit = _WK
+        HAS_WEBKIT = True
+        break
+    except Exception:
+        continue
+if not HAS_WEBKIT:
+    try:
+        from gi.repository import WebKit2 as _WK2  # type: ignore
+
+        WebKit = _WK2  # type: ignore
+        HAS_WEBKIT = True
+    except Exception:
+        try:
+            from gi.repository import WebKit as _WK2b  # type: ignore
+
+            WebKit = _WK2b  # type: ignore
+            HAS_WEBKIT = True
+        except Exception:
+            HAS_WEBKIT = False
+            WebKit = None  # type: ignore
 
 try:
     import markdown as _md
@@ -70,19 +99,36 @@ class HtmlPreview(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, vexpand=True, hexpand=True)
         self._custom_css: str | None = None
         self._load_custom()
+        self._fallback = None
         if HAS_WEBKIT:
-            self.webview = WebKit.WebView()
-            self.webview.set_vexpand(True)
-            self.webview.set_hexpand(True)
-            scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
-            scroller.set_child(self.webview)
-            self.append(scroller)
-            self._has_wv = True
+            try:
+                self.webview = WebKit.WebView()
+                self.webview.set_vexpand(True)
+                self.webview.set_hexpand(True)
+                scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+                scroller.set_child(self.webview)
+                self.append(scroller)
+                self._has_wv = True
+            except Exception:
+                self._has_wv = False
+                self._init_fallback()
         else:
-            self._label = Gtk.Label(label="WebKitGTK не найден — установите webkitgtk-6.0 для HTML preview", wrap=True, css_classes=["dim-label"], vexpand=True)
-            self.append(self._label)
             self._has_wv = False
+            self._init_fallback()
         self._html: str = ""
+
+    def _init_fallback(self) -> None:
+        try:
+            from .markdown import MarkdownView as _MV
+
+            self._fallback = _MV()
+            scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True, css_classes=["editor-frame", "md-read"])
+            scroller.set_child(self._fallback)
+            self.append(scroller)
+        except Exception:
+            self._label = Gtk.Label(label="WebKitGTK не найден — fallback MarkdownView", wrap=True, css_classes=["dim-label"], vexpand=True)
+            self.append(self._label)
+            self._fallback = None
 
     def _load_custom(self) -> None:
         try:
@@ -102,6 +148,12 @@ class HtmlPreview(Gtk.Box):
         if self._has_wv:
             try:
                 self.webview.load_html(html, None)
+                return
+            except Exception:
+                pass
+        if self._fallback is not None:
+            try:
+                self._fallback.set_markdown(text or "", highlight)
             except Exception:
                 pass
 
@@ -109,6 +161,12 @@ class HtmlPreview(Gtk.Box):
         if self._has_wv:
             try:
                 self.webview.load_html(html, None)
+                return
+            except Exception:
+                pass
+        if self._fallback is not None:
+            try:
+                self._fallback.set_markdown(html, None)
             except Exception:
                 pass
 
