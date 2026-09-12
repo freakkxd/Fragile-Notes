@@ -1,9 +1,9 @@
-; installer.iss — Inno Setup 6 для Fragile Notes v0.3.8
+; installer.iss — Inno Setup 6 для Fragile Notes v0.3.9
 ; Собирается: iscc packaging/windows/installer.iss
 ; Требует: dist/windows/FragileNotes/FragileNotes.exe (после build.ps1)
 
 #define MyAppName "Fragile Notes"
-#define MyAppVersion "0.3.8"
+#define MyAppVersion "0.3.9"
 #define MyAppPublisher "fragilich"
 #define MyAppURL "https://github.com/freakkxd/Fragile-Notes"
 #define MyAppExeName "FragileNotes.exe"
@@ -50,8 +50,8 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\installer_helper.exe"; Parameters: "/install"; StatusMsg: "Настраиваю vault и зависимости..."; Flags: runhidden waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\installer_helper.exe"; Parameters: "/install"; StatusMsg: "Настраиваю vault и зависимости..."; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent skipifdoesntexist
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\__pycache__"
