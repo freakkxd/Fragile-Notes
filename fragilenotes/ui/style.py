@@ -2481,3 +2481,18 @@ def reload_custom_css(settings: dict) -> bool:
     """Перезагрузить кастом CSS."""
     clear_custom_css()
     return apply_custom_css(settings)
+
+
+# 0.3.0 — стили для dual sidebar (notes как корень)
+RIGHT_PANEL_CSS = """
+.right-panel { background: var(--ao-bg-pane); border-left: 1px solid var(--ao-border-subtle); }
+.right-panel-header { font-weight: 600; font-size: 13px; opacity: 0.9; }
+.right-panel-btn { padding: 8px 10px; border-radius: 6px; }
+.right-panel-btn:hover { background: var(--ao-surface-row-hover); }
+.right-panel-btn-active { background: rgba(var(--ao-accent-focus), 0.15); border: 1px solid rgba(var(--ao-accent-focus), 0.3); }
+.right-panel-close { margin: 8px; }
+"""
+try:
+    CSS += RIGHT_PANEL_CSS
+except Exception:
+    pass

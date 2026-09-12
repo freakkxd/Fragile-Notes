@@ -12,14 +12,69 @@ import yaml
 FILE_EMOJI = {
     ".md": "📄",
     ".txt": "📝",
+    ".html": "🌐",
+    ".htm": "🌐",
+    ".css": "🎨",
+    ".js": "📜",
+    ".ts": "📜",
     ".json": "🧩",
     ".yaml": "🧩",
     ".yml": "🧩",
+    ".toml": "🧩",
+    ".ini": "🧩",
+    ".cfg": "🧩",
+    ".py": "🐍",
+    ".cpp": "⚙️",
+    ".h": "⚙️",
+    ".hpp": "⚙️",
+    ".c": "⚙️",
+    ".rs": "🦀",
+    ".go": "🐹",
+    ".java": "☕",
+    ".sh": "💻",
+    ".xml": "🗂️",
+    ".svg": "🖼️",
+    ".csv": "📊",
+    ".log": "📝",
     ".enc": "🔒",
     ".pdf": "📕",
 }
 
-ALLOWED_EXTS = {".md", ".txt", ".json", ".yaml", ".yml", ".enc", ".pdf"}
+ALLOWED_EXTS = {".md", ".txt", ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".py", ".cpp", ".h", ".hpp", ".c", ".rs", ".go", ".java", ".sh", ".xml", ".svg", ".csv", ".log", ".enc", ".pdf", ".mdx"}
+
+TEXT_FALLBACK_EXTS = {".env", ".gitignore", ".prettierrc", ".eslintrc"}
+
+
+BINARY_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".mp4", ".mkv", ".webm", ".mp3", ".wav", ".flac", ".zip", ".tar", ".gz", ".rar", ".7z", ".exe", ".dll", ".so", ".dylib"}
+
+
+def is_text_file(path: Path) -> bool:
+    ext = path.suffix.lower()
+    if ext in ALLOWED_EXTS:
+        return True
+    if ext in BINARY_EXTS:
+        return False
+    if path.name in TEXT_FALLBACK_EXTS or path.name.startswith("."):
+        try:
+            with open(path, "rb") as f:
+                chunk = f.read(2048)
+            if b"\x00" in chunk:
+                return False
+            chunk.decode("utf-8")
+            return True
+        except Exception:
+            return False
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(1024)
+        if not chunk:
+            return True
+        if b"\x00" in chunk:
+            return False
+        chunk.decode("utf-8")
+        return True
+    except Exception:
+        return False
 
 HEAVY_DIRS = {
     "node_modules", ".git", "dist", "build", "target", ".venv", "venv",

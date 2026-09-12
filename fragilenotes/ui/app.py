@@ -58,34 +58,34 @@ BG_SCAN_MS = 15000
 VIEW_TITLES = ws.VIEW_TITLES
 
 VIEWS = (
-    "home",
-    "runner",
+    "files",
+    "daily",
     "tasks",
+    "graph",
+    "canvas",
+    "kanban",
+    "database",
+    "whiteboard",
+    "mindmap",
+    "ai_chat",
+    "runner",
+    "calendar",
+    "srs",
     "habits",
     "pomodoro",
-    "daily",
-    "calendar",
     "review",
-    "srs",
     "media",
     "voice",
     "video",
-    "files",
     "templates",
-    "graph",
-    "canvas",
-    "whiteboard",
-    "kanban",
-    "database",
     "slides",
-    "mindmap",
     "mermaid_live",
     "latex_live",
-    "tags",
-    "ai_chat",
     "analytics",
     "plugin_store",
     "theme_editor",
+    "home",
+    "tags",
     "settings",
 )
 
@@ -100,7 +100,7 @@ _SIDEBAR_COLLAPSED = ws.SIDEBAR_COLLAPSED_WIDTH
 
 # Mobile breakpoint: узкие окна <700px — скрывать сайдбар, показывать bottom bar
 MOBILE_BREAKPOINT_PX = 700
-MOBILE_VIEWS = ("home", "tasks", "daily", "files", "calendar", "settings")
+MOBILE_VIEWS = ("files", "tasks", "daily", "ai_chat", "calendar", "settings")
 
 
 class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
@@ -369,6 +369,13 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.stack = Gtk.Stack(vexpand=True, hexpand=True)
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         body.append(self.stack)
+        self.right_revealer = Gtk.Revealer()
+        self.right_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_LEFT)
+        self.right_revealer.set_transition_duration(180)
+        self.right_revealer.set_reveal_child(False)
+        self.right_panel = self._build_right_panel()
+        self.right_revealer.set_child(self.right_panel)
+        body.append(self.right_revealer)
 
         self.top.set_start_child(self.side_column)
         self.top.set_end_child(body)
@@ -737,6 +744,25 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self._ensure_view(key)
         self.stack.set_visible_child_name(key)
         self._sync_chrome(key)
+        try:
+            if key == "files":
+                if hasattr(self, "sidebar_revealer"):
+                    self.sidebar_revealer.set_reveal_child(True)
+                    try:
+                        pos = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
+                        self.top.set_position(pos)
+                    except Exception:
+                        pass
+                if hasattr(self, "right_revealer"):
+                    self.right_revealer.set_reveal_child(False)
+            elif key in ("home", "settings"):
+                if hasattr(self, "right_revealer"):
+                    self.right_revealer.set_reveal_child(False)
+            else:
+                if hasattr(self, "right_revealer"):
+                    self.right_revealer.set_reveal_child(True)
+        except Exception:
+            pass
         if key == "graph":
             self._sync_graph_current()
         if key == "mindmap":
@@ -751,6 +777,15 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         for k, b in getattr(self, "_mobile_btns", {}).items():
             try:
                 b.set_active(k == key)
+            except Exception:
+                pass
+        for k, b in getattr(self, "_right_btns", {}).items():
+            try:
+                if hasattr(b, "set_css_classes"):
+                    base = ["right-panel-btn"]
+                    if k == key:
+                        base.append("right-panel-btn-active")
+                    b.set_css_classes(base)
             except Exception:
                 pass
 
@@ -910,6 +945,37 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         bar.append(menu_btn)
         self._mobile_menu_btn = menu_btn
         return bar
+
+    def _build_right_panel(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, css_classes=["right-panel"])
+        box.set_size_request(220, -1)
+        header = Gtk.Label(label="Фичи", css_classes=["right-panel-header"], halign=Gtk.Align.START)
+        header.set_margin_top(8)
+        header.set_margin_start(10)
+        box.append(header)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        box.append(sep)
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        list_box.set_margin_start(6)
+        list_box.set_margin_end(6)
+        RIGHT_FEATURES = ["graph", "canvas", "kanban", "database", "whiteboard", "mindmap", "ai_chat", "runner", "calendar", "srs", "analytics", "plugin_store", "settings"]
+        self._right_btns: dict[str, Gtk.Button] = {}
+        for key in RIGHT_FEATURES:
+            icon = RIB_ICONS.get(key, "?")
+            tip = VIEW_TITLES.get(key, key)
+            btn = Gtk.Button(label=f"{icon}  {tip}", halign=Gtk.Align.FILL, css_classes=["right-panel-btn"])
+            btn.set_has_frame(False)
+            btn.connect("clicked", lambda _b, k=key: self._on_nav(k))
+            self._right_btns[key] = btn
+            list_box.append(btn)
+        scroller.set_child(list_box)
+        box.append(scroller)
+        close_btn = Gtk.Button(label="Скрыть ▶", css_classes=["right-panel-close"])
+        close_btn.connect("clicked", lambda *_: self.right_revealer.set_reveal_child(False))
+        box.append(close_btn)
+        return box
 
     def _on_mobile_nav(self, btn: Gtk.ToggleButton, key: str) -> None:
         if not btn.get_active():
@@ -1973,7 +2039,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
 
     def _restore_state(self) -> None:
         ui_state = self.settings.get("ui_state") or {}
-        view = ui_state.get("view", "home")
+        view = ui_state.get("view", "files")
         if ui_state.get("maximized"):
             self.maximize()
         else:
@@ -1983,7 +2049,7 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 self.set_default_size(int(w), int(h))
             else:
                 self._default_size_percent()
-        view = view if view in VIEWS else "home"
+        view = view if view in VIEWS else "files"
         self._show_view(view)
         # Восстановить ширину сайдбара в Paned (отложенно — после realize)
         if hasattr(self, "top") and hasattr(self, "_sidebar_width"):

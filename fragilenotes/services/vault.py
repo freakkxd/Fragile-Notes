@@ -55,7 +55,6 @@ class FileTreeNode:
 
 
 def _scan_dir(path: Path) -> FileTreeNode:
-    """Рекурсивный os.scandir без повторных stat(): DirEntry кэширует флаги."""
     dirs: list[FileTreeNode] = []
     files: list[tuple[str, str]] = []
     try:
@@ -67,8 +66,18 @@ def _scan_dir(path: Path) -> FileTreeNode:
                 try:
                     if e.is_dir(follow_symlinks=False):
                         dirs.append(_scan_dir(Path(e.path)))
-                    elif e.is_file(follow_symlinks=False) and e.name.lower().endswith(tuple(ALLOWED_EXTS)):
-                        files.append((name, e.path))
+                    elif e.is_file(follow_symlinks=False):
+                        low = e.name.lower()
+                        if low.endswith(tuple(ALLOWED_EXTS)):
+                            files.append((name, e.path))
+                        else:
+                            try:
+                                from ..vault import is_text_file as _is_text
+
+                                if _is_text(Path(e.path)):
+                                    files.append((name, e.path))
+                            except Exception:
+                                pass
                 except OSError:
                     continue
     except OSError:
