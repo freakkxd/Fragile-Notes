@@ -84,6 +84,10 @@ class WorkspaceMixin:
             if _SIDEBAR_MIN <= cur <= _SIDEBAR_MAX:
                 self._save_sidebar_width(cur)
         self.sidebar_revealer.set_reveal_child(vis)
+        try:
+            self._sidebar_pinned = bool(vis)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         self._update_sidebar_chrome()
         # Плавное схлопывание: side_column 44px ↔ 232px
         try:

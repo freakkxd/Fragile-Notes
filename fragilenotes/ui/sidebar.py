@@ -27,7 +27,7 @@ except Exception:
 
 SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
     ("Ядро", [("home", "🧬", "Рабочий стол"), ("runner", "🔧", "AO Tasks"), ("tasks", "✅", "Сегодня"), ("habits", "🌱", "Привычки")]),
-    ("Vault", [("daily", "📅", "Daily"), ("calendar", "🗓", "Календарь"), ("review", "🔍", "Обзор"), ("srs", "🧠", "Повторение"), ("media", "🎬", "Media"), ("voice", "🎙️", "Голосовые"), ("video", "📹", "Видео"), ("files", "📁", "Заметки"), ("templates", "📑", "Шаблоны"), ("graph", "🕸", "Граф"), ("canvas", "🎨", "Canvas"), ("whiteboard", "🧊", "Whiteboard"), ("kanban", "📋", "Kanban"), ("database", "🗄️", "База данных"), ("slides", "🎞️", "Презентация"), ("mindmap", "🗺", "Mind Map"), ("mermaid_live", "🧜", "Mermaid Live"), ("latex_live", "∑", "LaTeX Live"), ("tags", "#", "Теги")]),
+    ("Vault", [("daily", "📅", "Daily"), ("calendar", "🗓", "Календарь"), ("review", "🔍", "Обзор"), ("srs", "🧠", "Повторение"), ("media", "🎬", "Media"), ("voice", "🎙️", "Голосовые"), ("video", "📹", "Видео"), ("templates", "📑", "Шаблоны"), ("graph", "🕸", "Граф"), ("canvas", "🎨", "Canvas"), ("whiteboard", "🧊", "Whiteboard"), ("kanban", "📋", "Kanban"), ("database", "🗄️", "База данных"), ("slides", "🎞️", "Презентация"), ("mindmap", "🗺", "Mind Map"), ("mermaid_live", "🧜", "Mermaid Live"), ("latex_live", "∑", "LaTeX Live"), ("tags", "#", "Теги")]),
     ("AI", [("ai_chat", "🤖", "AI Чат")]),
     ("Аналитика", [("analytics", "📊", "Аналитика")]),
     ("Система", [("plugin_store", "🧩", "Магазин плагинов"), ("theme_editor", "🎨", "Редактор темы"), ("settings", "⚙️", "Настройки")]),

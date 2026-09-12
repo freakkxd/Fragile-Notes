@@ -1,9 +1,9 @@
-; installer.iss — Inno Setup 6 для Fragile Notes v0.3.1
+; installer.iss — Inno Setup 6 для Fragile Notes v0.3.2
 ; Собирается: iscc packaging/windows/installer.iss
 ; Требует: dist/windows/FragileNotes/FragileNotes.exe (после build.ps1)
 
 #define MyAppName "Fragile Notes"
-#define MyAppVersion "0.3.1"
+#define MyAppVersion "0.3.2"
 #define MyAppPublisher "fragilich"
 #define MyAppURL "https://github.com/freakkxd/Fragile-Notes"
 #define MyAppExeName "FragileNotes.exe"

@@ -315,21 +315,32 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.rail = self._build_ribbon()
         self.rail_scroller.set_child(self.rail)
         self.side_column.append(self.rail_scroller)
-        # Hover expand: при наведении на узкий rail (44px) показывать sidebar с подписями
+        self._sidebar_pinned = False
         try:
             hover = Gtk.EventControllerMotion()
-            hover.connect(
-                "enter",
-                lambda *_: self.sidebar_revealer.set_reveal_child(True)
-                if not self.sidebar_revealer.get_reveal_child()
-                else None,
-            )
-            hover.connect(
-                "leave",
-                lambda *_: self.sidebar_revealer.set_reveal_child(False)
-                if self.sidebar_revealer.get_reveal_child()
-                else None,
-            )
+            def _hover_enter(*_):
+                if getattr(self, "_sidebar_pinned", False):
+                    return None
+                if not self.sidebar_revealer.get_reveal_child():
+                    self.sidebar_revealer.set_reveal_child(True)
+                    try:
+                        pos = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
+                        self.top.set_position(pos)
+                    except Exception:
+                        pass
+                return None
+            def _hover_leave(*_):
+                if getattr(self, "_sidebar_pinned", False):
+                    return None
+                if self.sidebar_revealer.get_reveal_child():
+                    self.sidebar_revealer.set_reveal_child(False)
+                    try:
+                        self.top.set_position(_SIDEBAR_COLLAPSED)
+                    except Exception:
+                        pass
+                return None
+            hover.connect("enter", _hover_enter)
+            hover.connect("leave", _hover_leave)
             self.rail_scroller.add_controller(hover)
         except Exception:
             pass
@@ -748,6 +759,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             if key == "files":
                 if hasattr(self, "sidebar_revealer"):
                     self.sidebar_revealer.set_reveal_child(True)
+                    try:
+                        self._sidebar_pinned = True
+                    except Exception:
+                        pass
                     try:
                         pos = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
                         self.top.set_position(pos)
