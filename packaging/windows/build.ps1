@@ -11,6 +11,9 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path "$PSScriptRoot/../..").Path
 Set-Location $Root
+$Ver = (Get-Content "$Root/fragilenotes/__init__.py" | Select-String '__version__' | ForEach-Object { if ($_ -match '"([^"]+)"') { $matches[1] } } | Select-Object -First 1)
+if (-not $Ver) { $Ver = "0.3.8" }
+Write-Host "Version: $Ver" -ForegroundColor Green
 
 Write-Host "== Fragile Notes — Windows build ==" -ForegroundColor Cyan
 Write-Host "Root: $Root"
@@ -80,7 +83,7 @@ if (Test-Path "dist/windows/FragileNotes/FragileNotes.exe") {
 }
 
 # 6. Portable ZIP
-$Zip = "dist/FragileNotes-Portable-v0.1.1.zip"
+$Zip = "dist/FragileNotes-Portable-v$Ver.zip"
 if (Test-Path $Zip) { Remove-Item $Zip -Force }
 Compress-Archive -Path "dist/windows/FragileNotes/*" -DestinationPath $Zip -Force
 Write-Host "✓ ZIP: $Zip" -ForegroundColor Green
@@ -94,8 +97,8 @@ if (-not $Iscc) { $Iscc = Get-Command iscc -ErrorAction SilentlyContinue | Selec
 if ($Iscc) {
   Write-Host "`n→ Inno Setup: $Iscc" -ForegroundColor Cyan
   & $Iscc "packaging/windows/installer.iss"
-  if ($LASTEXITCODE -eq 0 -and (Test-Path "dist/FragileNotes-Setup-v0.1.1.exe")) {
-    Write-Host "✓ Installer: dist/FragileNotes-Setup-v0.1.1.exe" -ForegroundColor Green
+  if ($LASTEXITCODE -eq 0 -and (Test-Path "dist/FragileNotes-Setup-v$Ver.exe")) {
+    Write-Host "✓ Installer: dist/FragileNotes-Setup-v$Ver.exe (Full Offline, всё внутри)" -ForegroundColor Green
   } else {
     Write-Host "⚠ Inno Setup завершился с кодом $LASTEXITCODE" -ForegroundColor Yellow
   }
