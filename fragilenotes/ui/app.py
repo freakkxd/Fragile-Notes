@@ -316,36 +316,6 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.rail_scroller.set_child(self.rail)
         self.side_column.append(self.rail_scroller)
         self._sidebar_pinned = False
-        try:
-            hover = Gtk.EventControllerMotion()
-            def _hover_enter(*_):
-                if getattr(self, "_sidebar_pinned", False):
-                    return None
-                if not self.sidebar_revealer.get_reveal_child():
-                    self.sidebar_revealer.set_reveal_child(True)
-                    try:
-                        pos = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
-                        self.top.set_position(pos)
-                    except Exception:
-                        pass
-                    self._update_sidebar_chrome()
-                return None
-            def _hover_leave(*_):
-                if getattr(self, "_sidebar_pinned", False):
-                    return None
-                if self.sidebar_revealer.get_reveal_child():
-                    self.sidebar_revealer.set_reveal_child(False)
-                    try:
-                        self.top.set_position(_SIDEBAR_COLLAPSED)
-                    except Exception:
-                        pass
-                    self._update_sidebar_chrome()
-                return None
-            hover.connect("enter", _hover_enter)
-            hover.connect("leave", _hover_leave)
-            self.side_column.add_controller(hover)
-        except Exception:
-            pass
 
         # Sidebar с workspaces (несколько vault в одном окне)
         try:

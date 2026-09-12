@@ -1,4 +1,4 @@
-# Fragile Notes — v0.3.3
+# Fragile Notes — v0.3.4
 
 > **Подпись v0.2.0 — почему отделили эту версию:**
 > - **Сделано в 0.1.0-0.1.21:** успешный **порт на ПК** — `Full Offline` `33-59M` `FragileNotes-Setup-v0.1.20.exe` (один файл, внутри `Python 3.11`+`GTK4`+`PyGObject`+`libstdc++`/`GdkPixbuf`/`Gsk`), фикс 6 топ-багов (окно `Adw.HeaderBar` с кнопками, волт `~/desktop`→`~/Documents/FragileNotesVault`, боковая панель `44↔232` + `hover`, `Daily/Заметки/Шаблоны` + `AI Чат`/`Магазин`/`Презентация` без обрезки), `CI` зеленый (`ruff`/`mypy`/`pytest` `xvfb`), `vault_guard` защита
