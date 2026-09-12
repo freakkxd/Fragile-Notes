@@ -17,6 +17,7 @@ from __future__ import annotations
 from gi.repository import GLib, Gtk
 
 from ..config import save_settings
+from ..core.ui_state import load_vault_state, save_vault_state
 from . import workspace as ws
 
 _SIDEBAR_MIN = ws.SIDEBAR_WIDTH_MIN
@@ -54,6 +55,16 @@ class WorkspaceMixin:
             wsd["sidebar_width"] = width
             self.settings["workspace"] = wsd
             save_settings(self.settings)
+        try:
+            vault_root = self.settings.get("vault_root") or ""
+            st = load_vault_state(vault_root)
+            st = dict(st)
+            p = dict(st.get("panels", {}))
+            p["left_width"] = width
+            st["panels"] = p
+            save_vault_state(vault_root, st)
+        except Exception:
+            pass
 
     def _on_paned_position(self, paned: Gtk.Paned, _pspec) -> None:
         if (
@@ -86,6 +97,18 @@ class WorkspaceMixin:
         self.sidebar_revealer.set_reveal_child(vis)
         try:
             self._sidebar_pinned = bool(vis)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            vault_root = self.settings.get("vault_root") or ""
+            st = load_vault_state(vault_root)
+            st = dict(st)
+            p = dict(st.get("panels", {}))
+            p["left_pinned"] = bool(vis)
+            if vis:
+                p["left_width"] = getattr(self, "_sidebar_width", _SIDEBAR_DEFAULT)
+            st["panels"] = p
+            save_vault_state(vault_root, st)
         except Exception:
             pass
         self._update_sidebar_chrome()

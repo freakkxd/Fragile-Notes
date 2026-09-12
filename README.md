@@ -1,8 +1,8 @@
-# Fragile Notes — v0.3.6
+# Fragile Notes — v0.3.7
 
 > **Подпись v0.2.0 — почему отделили эту версию:**
 > - **Сделано в 0.1.0-0.1.21:** успешный **порт на ПК** — `Full Offline` `33-59M` `FragileNotes-Setup-v0.1.20.exe` (один файл, внутри `Python 3.11`+`GTK4`+`PyGObject`+`libstdc++`/`GdkPixbuf`/`Gsk`), фикс 6 топ-багов (окно `Adw.HeaderBar` с кнопками, волт `~/desktop`→`~/Documents/FragileNotesVault`, боковая панель `44↔232` + `hover`, `Daily/Заметки/Шаблоны` + `AI Чат`/`Магазин`/`Презентация` без обрезки), `CI` зеленый (`ruff`/`mypy`/`pytest` `xvfb`), `vault_guard` защита
-> - **Почему 0.2.0 отдельно:** первая **стабильная** после 3 дней порта — `ValueError: Namespace Gtk/Gsk/PangoCairo/GdkPixbuf` + `libstdc++-6.dll` закрыты, `Full` запускается по двойному клику (`PE32` 4.4M, не `bat`), `AllInOne` 3.4M депрекейтед и удален (`f447673`)
+> - **Почему 0.2.0 отдельно:** первая **стабильная** после 3 дней порта — `ValueError: Namespace Gtk/Gsk/PangoCairo/GdkPixbuf` + `libstdc++-6.dll` закрыты, `Full` запускается по двойному клику (`PE32` 4.4M, не `bat`), Full Offline на C (`installer_helper_simple.c`)
 > - **В работе теперь:** фокус на багах, которые были до порта и подготовка **порта на C++** (`Qt`/`gtkmm`) — вручную, без спешки, `0.2.x` без breaking changes
 > - **Цель 0.2:** стабильная база для `C++` порта, `Full Offline` 59M как `latest` на `https://github.com/freakkxd/Fragile-Notes/releases/latest`
 
@@ -38,7 +38,7 @@
 
 Двойной клик → Далее → Установить → Запустить. **Внутри уже** `Python 3.11` + `GTK4` + `PyGObject` + `PyYAML` + `cryptography` — интернет и `MSYS2` не нужны. Волт `~/desktop` (`%USERPROFILE%\desktop`) создастся сам.
 
-> `AllInOne 3.4M` (исходники + `pip install` на машине) — **депрекейтед**, оставлен в git истории (`5beb7bb`), больше не собирается.
+> Full Offline на C — единственный инсталлер (`FragileNotes-Setup-v0.3.x.exe`, 33-59M, Python+GTK внутри).
 
 ### Linux / macOS (из исходников)
 
@@ -93,7 +93,7 @@ node --version  # опционально
 | **Волт** | `~/desktop` | Создается автоматически (`01 Home/Home.md` и т.д.) |
 | **AO Engine** | `~/desktop/_System/ArchiveOrganism/ao-engine/dist/cli/cli.js` | UI `offline`, кнопки `Enrich` неактивны, редактор/задачи работают (`engine.py:98` `except OSError → ok:False`) |
 | **LLM** | `~/LLM/models/*.gguf` + `manage-llm.sh` | `LlmService` `online: False`, чат `LLM offline` (`llm.py:65`) |
-| **GTK** | `PyGObject` + `libadwaita` | Full Offline exe уже внутри, AllInOne ставит `MSYS2` автоматом (`install-helper.ps1:38`) |
+| **GTK** | `PyGObject` + `libadwaita` | Full Offline exe уже внутри (C installer `installer_helper_simple.c`) |
 
 ## Безопасность волта
 
@@ -136,7 +136,7 @@ scripts/
 
 - `v0.1.0` — initial core
 - `v0.1.1` — out-of-box (`bootstrap.sh`, `Exec=fragile-notes`, `LICENSE`)
-- `v0.1.2` — Windows AllInOne 3.4M (депрекейтед)
+- `v0.1.2` — Windows Full Offline (C installer)
 - `v0.1.6` — Full Offline 33M (PyInstaller + GTK, один exe)
 - `v0.1.7` — Windows - only Full
 - `v0.1.8` — Full Offline fix `collect-all gi`
@@ -153,7 +153,7 @@ MIT — `LICENSE:1`
 ## FAQ
 
 **Q: `Namespace Gtk not available` на Windows?**  
-A: Старая AllInOne 3.4M требовала `MSYS2` — скачай **Full 33M** из `Releases → v0.2.0` (внутри GTK). Или запусти `AllInOne` с интернетом — он сам скачает `MSYS2` (70M).
+A: Full Offline 33M уже содержит GTK — скачай `FragileNotes-Setup-v0.3.x.exe` из Releases, интернет не нужен.
 
 **Q: Где волт?**  
 A: `~/desktop` — можно поменять в `Настройки → Волт` (`settings.json` `vault_root`).

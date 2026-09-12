@@ -12,6 +12,8 @@ from ..config import load_settings, save_settings
 from ..core import runner as model
 from ..core import workspaces as workspaces_core
 from ..core.plugins import PluginManager
+from ..core.ui_state import apply_preset as _apply_preset
+from ..core.ui_state import load_vault_state, save_vault_state
 from ..core.runner_controller import RunnerController
 from ..services.engine import EngineBridge
 from ..services.enrich import EnrichStatus, fetch_enrich_status
@@ -348,17 +350,33 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
         self.sidebar_revealer.set_reveal_child(False)
         self.side_column.append(self.sidebar_revealer)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True, hexpand=True)
         self.stack = Gtk.Stack(vexpand=True, hexpand=True)
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        body.append(self.stack)
         self.right_revealer = Gtk.Revealer()
         self.right_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_LEFT)
         self.right_revealer.set_transition_duration(180)
         self.right_revealer.set_reveal_child(False)
         self.right_panel = self._build_right_panel()
         self.right_revealer.set_child(self.right_panel)
-        body.append(self.right_revealer)
+        body = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True, hexpand=True)
+        try:
+            body.set_wide_handle(True)
+        except Exception:
+            pass
+        body.set_start_child(self.stack)
+        body.set_end_child(self.right_revealer)
+        body.set_shrink_start_child(False)
+        body.set_shrink_end_child(False)
+        body.set_resize_start_child(True)
+        body.set_resize_end_child(False)
+        self.body_paned = body
+        try:
+            vault_right = self._vault_state().get("panels", {}).get("right_width", 220)
+            body.set_position(9999)
+            GLib.idle_add(lambda: body.set_position(max(600, body.get_width() - int(vault_right)) if body.get_width() > 0 else False) or False)
+        except Exception:
+            pass
+        body.connect("notify::position", self._on_body_paned_position)
 
         self.top.set_start_child(self.side_column)
         self.top.set_end_child(body)
@@ -828,11 +846,14 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                         GLib.idle_add(lambda: fv.focus_filter() or False)
                 except Exception:
                     pass
-            # сохраняем ui_state как tags
             ui_state = {**self.settings.get("ui_state", {}), "view": key}
             if ui_state != self.settings.get("ui_state"):
                 self.settings["ui_state"] = ui_state
                 save_settings(self.settings)
+            try:
+                self._save_vault_state({"active_view": key})
+            except Exception:
+                pass
             self._sync_chrome("tags")
             return
         if key not in VIEWS:
@@ -844,6 +865,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             if ui_state != self.settings.get("ui_state"):
                 self.settings["ui_state"] = ui_state
                 save_settings(self.settings)
+            try:
+                self._save_vault_state({"active_view": key})
+            except Exception:
+                pass
 
     def _run_command(self, cmd_id: str) -> None:
         actions = {
@@ -1293,14 +1318,72 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 except Exception:
                     pass
                 return True
-            # Ctrl+Shift+O — Workspaces: быстрый свитч vault
             if shift and keyval in (Gdk.KEY_o, Gdk.KEY_O):
                 try:
                     self._show_workspace_switcher()
                 except Exception:
                     pass
                 return True
+            if not shift and keyval == Gdk.KEY_0:
+                try:
+                    self._reset_layout()
+                except Exception:
+                    pass
+                return True
+            if shift and keyval in (Gdk.KEY_l, Gdk.KEY_L):
+                try:
+                    self._export_layout_dialog()
+                except Exception:
+                    pass
+                return True
         return False
+
+    def _reset_layout(self) -> None:
+        try:
+            st = self._vault_state()
+            st = _apply_preset(st, "obsidian")
+            st["window"] = {"width": 1280, "height": 820, "maximized": False}
+            save_vault_state(self.settings.get("vault_root") or "", st)
+            self._cached_vault_state = st
+            self._sidebar_width = st["panels"]["left_width"]
+            self._sidebar_pinned = st["panels"]["left_pinned"]
+            self.sidebar_revealer.set_reveal_child(self._sidebar_pinned)
+            self.top.set_position(self._sidebar_width if self._sidebar_pinned else _SIDEBAR_COLLAPSED)
+            if hasattr(self, "body_paned"):
+                try:
+                    self.body_paned.set_position(self.get_width() - st["panels"]["right_width"] if st["panels"]["right_visible"] else 9999)
+                except Exception:
+                    pass
+            self._update_sidebar_chrome()
+            self._notify_toast("Рабочая среда сброшена → Obsidian, в волте сохранено")
+        except Exception:
+            pass
+
+    def _export_layout_dialog(self) -> None:
+        try:
+            st = self._vault_state()
+            import json as _j
+            txt = _j.dumps(st, ensure_ascii=False, indent=2)
+            dialog = Adw.Dialog(title="Экспорт рабочей среды")
+            dialog.set_content_width(560)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.set_margin_top(12)
+            box.set_margin_bottom(12)
+            box.set_margin_start(12)
+            box.set_margin_end(12)
+            box.append(Gtk.Label(label=f"Сохранено в {self.settings.get('vault_root')}/.fragilenotes/ui_state.json — перенос волта = перенос раскладки. Скопируй:", halign=Gtk.Align.START, wrap=True, css_classes=["dim-label"]))
+            view = Gtk.TextView(editable=False, wrap_mode=Gtk.WrapMode.WORD, vexpand=True)
+            view.get_buffer().set_text(txt[:4000])
+            scroller = Gtk.ScrolledWindow(vexpand=True, min_content_height=260)
+            scroller.set_child(view)
+            box.append(scroller)
+            close = Gtk.Button(label="Закрыть", css_classes=["suggested-action"])
+            close.connect("clicked", lambda *_: dialog.close())
+            box.append(close)
+            dialog.set_child(box)
+            dialog.present(self)
+        except Exception:
+            pass
 
     # ── Workspaces — несколько vault в одном окне ─────────────
     def _on_workspace_switch(self, path_str: str) -> None:
@@ -2042,28 +2125,86 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                     gv.set_current_file(p)
                 except Exception:
                     pass
-        # plugin hook on_open
+        try:
+            st = self._vault_state()
+            tabs = list(st.get("open_tabs") or [])
+            s = str(p)
+            if s in tabs:
+                tabs.remove(s)
+            tabs.insert(0, s)
+            tabs = tabs[:20]
+            self._save_vault_state({"open_tabs": tabs, "current_tab": s, "file_state": {**st.get("file_state", {}), s: {"last_open": int(__import__("time").time())}}})
+        except Exception:
+            pass
         try:
             if hasattr(self, "plugin_manager"):
                 self.plugin_manager.trigger("on_open", p)
         except Exception:
             pass
 
+    def _vault_state(self) -> dict:
+        try:
+            return load_vault_state(self.settings.get("vault_root") or "")
+        except Exception:
+            return {}
+
+    def _save_vault_state(self, patch: dict | None = None) -> None:
+        try:
+            st = self._vault_state() if not hasattr(self, "_cached_vault_state") else getattr(self, "_cached_vault_state")
+        except Exception:
+            st = {}
+        try:
+            cur = load_vault_state(self.settings.get("vault_root") or "")
+            cur.update(st)
+            if patch:
+                for k, v in patch.items():
+                    if isinstance(v, dict) and isinstance(cur.get(k), dict):
+                        cur[k].update(v)
+                    else:
+                        cur[k] = v
+            save_vault_state(self.settings.get("vault_root") or "", cur)
+            self._cached_vault_state = cur
+        except Exception:
+            pass
+
+    def _on_body_paned_position(self, paned: Gtk.Paned, _pspec) -> None:
+        if not getattr(self, "right_revealer", None) or not self.right_revealer.get_reveal_child():
+            return
+        try:
+            total = paned.get_width()
+            pos = paned.get_position()
+            if total > 0 and pos > 0:
+                right_w = total - pos
+                right_w = max(0, min(400, int(right_w)))
+                self._save_vault_state({"panels": {"right_width": right_w}})
+        except Exception:
+            pass
+
     def _restore_state(self) -> None:
+        vault_st = self._vault_state()
+        self._cached_vault_state = vault_st
         ui_state = self.settings.get("ui_state") or {}
-        view = ui_state.get("view", "files")
-        if ui_state.get("maximized"):
+        view = vault_st.get("active_view") or ui_state.get("view", "files")
+        win = vault_st.get("window", {})
+        if win.get("maximized") or ui_state.get("maximized"):
             self.maximize()
         else:
-            w = ui_state.get("width")
-            h = ui_state.get("height")
+            w = win.get("width") or ui_state.get("width")
+            h = win.get("height") or ui_state.get("height")
             if w and h:
                 self.set_default_size(int(w), int(h))
             else:
                 self._default_size_percent()
         view = view if view in VIEWS else "files"
+        try:
+            panels = vault_st.get("panels", {})
+            if panels.get("left_width"):
+                self._sidebar_width = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(panels["left_width"])))
+            if "left_pinned" in panels:
+                self._sidebar_pinned = bool(panels["left_pinned"])
+        except Exception:
+            pass
         self._show_view(view)
-        # Восстановить ширину сайдбара в Paned (отложенно — после realize)
         if hasattr(self, "top") and hasattr(self, "_sidebar_width"):
             w = max(_SIDEBAR_MIN, min(_SIDEBAR_MAX, int(self._sidebar_width)))
             is_open = (
@@ -2104,6 +2245,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
                 }
                 try:
                     save_settings(self.settings)
+                except Exception:
+                    pass
+                try:
+                    self._save_vault_state({"window": {"width": self.get_width() if not self.is_maximized() else 1280, "height": self.get_height() if not self.is_maximized() else 820, "maximized": self.is_maximized()}, "active_view": self._visible_name() if hasattr(self, "_visible_name") else "files", "panels": {"left_width": getattr(self, "_sidebar_width", 276), "left_pinned": getattr(self, "_sidebar_pinned", False), "right_visible": self.right_revealer.get_reveal_child() if hasattr(self, "right_revealer") else False, "right_width": 220}})
                 except Exception:
                     pass
                 try:
@@ -2149,6 +2294,10 @@ class FragileWindow(WorkspaceMixin, Adw.ApplicationWindow):
             "height": self.get_height() if not self.is_maximized() else 820,
         }
         save_settings(self.settings)
+        try:
+            self._save_vault_state({"window": {"width": self.get_width() if not self.is_maximized() else 1280, "height": self.get_height() if not self.is_maximized() else 820, "maximized": self.is_maximized()}, "active_view": self._visible_name() if hasattr(self, "_visible_name") else "files", "panels": {"left_width": getattr(self, "_sidebar_width", 276), "left_pinned": getattr(self, "_sidebar_pinned", False), "right_visible": self.right_revealer.get_reveal_child() if hasattr(self, "right_revealer") else False}})
+        except Exception:
+            pass
         return False
 
     def _flush_dirty(self) -> None:

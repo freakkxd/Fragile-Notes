@@ -25,7 +25,7 @@ main.py -> fragilenotes/__init__.py (APP_ID, __version__)
 ## Что сделано для портирования
 1. Фикс фатального `Adw.HeaderBar` -> только на win32 (`ui/app.py:114`), Linux — нативный декор.
 2. Версионирование единое: `pyproject.toml` + `fragilenotes/__init__.py` + `installer.iss` -> `0.2.1`.
-3. Artefact: `dist/FragileNotes-Setup-v0.2.1.exe` (+ AllInOne alias).
+3. Artefact: `dist/FragileNotes-Setup-v0.2.1.exe` (Full Offline на C).
 4. Этот документ + `portability_check.py` для CI.
 
 ## Порт-стратегия по языкам
