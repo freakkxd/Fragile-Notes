@@ -52,3 +52,12 @@ settings.json.bak.*
 fragilenotes/data/*.db
 fragilenotes/data/*.sqlite
 enrichment.jsonl
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Frontend
+frontend/node_modules/
+# react_dist кешируется для WebView fallback, но не коммитим артефакты сборки
+fragilenotes/ui/react_dist/

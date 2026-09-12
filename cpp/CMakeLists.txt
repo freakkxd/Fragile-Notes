@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(FragileNotes VERSION 0.3.10 LANGUAGES CXX)
+project(FragileNotes VERSION 0.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,7 @@ add_library(fragile_core STATIC
     src/core/dataview.cpp
     src/core/templates.cpp
     src/core/media.cpp
+    src/core/link_index.cpp
     src/services/fts.cpp
     src/services/vault_service.cpp
 )

@@ -1,7 +1,7 @@
 [project]
 name = "fragile-notes"
-version = "0.3.10"
-description = "Fragile Notes — нативный аналог Obsidian: ядро = AO Runner + Fragilich Suite"
+version = "0.4.1"
+description = "Fragile Notes — Obsidian-like vault, C++ core + Tauri + React (Python legacy deprecated)"
 requires-python = ">=3.11"
 dependencies = [
     "PyGObject>=3.46",

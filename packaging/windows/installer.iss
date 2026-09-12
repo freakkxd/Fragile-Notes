@@ -1,9 +1,9 @@
-; installer.iss — Inno Setup 6 для Fragile Notes v0.3.10
-; Собирается: iscc packaging/windows/installer.iss
-; Требует: dist/windows/FragileNotes/FragileNotes.exe (после build.ps1)
+; installer.iss — Inno Setup 6 для Fragile Notes v0.4.1 (Tauri)
+; Собирается: cargo tauri build && iscc packaging/windows/installer.iss
+; Требует: src-tauri/target/release/bundle/ (после cargo tauri build)
 
 #define MyAppName "Fragile Notes"
-#define MyAppVersion "0.3.10"
+#define MyAppVersion "0.4.1"
 #define MyAppPublisher "fragilich"
 #define MyAppURL "https://github.com/freakkxd/Fragile-Notes"
 #define MyAppExeName "FragileNotes.exe"
