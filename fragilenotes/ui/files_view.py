@@ -74,6 +74,7 @@ class _NoteItem(GObject.Object):
 
 
 from ..services.vault_service import VaultService, collect_notes, count_nodes, index_nodes
+from .html_preview import HtmlPreview
 from .markdown import MarkdownView
 from .scale import attach_zoom_keys
 from .widgets import empty_state, view_header
@@ -391,6 +392,7 @@ class FilesView(Gtk.Box):
         )
         self._filter_empty.set_visible(False)
         left.append(self._filter_empty)
+        left.set_visible(False)
         split.append(left)
 
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True)
@@ -586,14 +588,13 @@ class FilesView(Gtk.Box):
         self.buffer.connect("changed", self._on_changed)
         ed_scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True, css_classes=["editor-frame"])
         ed_scroller.set_child(self.editor)
-        self.preview = MarkdownView()
-        self.preview.on_wikilink = self._on_wikilink
-        pv_scroller = Gtk.ScrolledWindow(
-            hexpand=True, vexpand=True, css_classes=["editor-frame", "md-read"]
-        )
-        pv_scroller.set_child(self.preview)
+        self.preview = HtmlPreview()
+        try:
+            self.preview_html = self.preview
+        except Exception:
+            pass
         ed_clamp = _content_clamp(ed_scroller)
-        pv_clamp = _content_clamp(pv_scroller)
+        pv_clamp = _content_clamp(self.preview)
         self.stack.add_named(ed_clamp, "Редактор")
         self.stack.add_named(pv_clamp, "Просмотр")
         self.stack.set_visible_child_name("Редактор")
@@ -604,17 +605,31 @@ class FilesView(Gtk.Box):
         )
         editor_area.append(self.stack)
         self._build_outline_panel(editor_area)
-        # ── Комментарии к строкам (gutter справа) ──────────────────
+        try:
+            self.outline_panel.set_visible(False)
+        except Exception:
+            pass
         self._build_comments_gutter(editor_area)
+        try:
+            if getattr(self, "comments_gutter", None) is not None:
+                self.comments_gutter.set_visible(False)
+        except Exception:
+            pass
         right.append(editor_area)
         # ── Авто-теги LLM (accept/reject бар) ────────────────
         self._build_auto_tag_bar(right)
-        # ── Связи (wikilink) ──────────────────────────────────
         self._build_links_panel(right)
-        # ── Теги # ─────────────────────────────────────────────
         self._build_tags_panel(right)
-        # ── История версий (git history UI) ────────────────────
+        try:
+            self._tags_panel.set_visible(False)
+        except Exception:
+            pass
         self._build_history_panel(right)
+        try:
+            if hasattr(self, "_history_panel"):
+                self._history_panel.set_visible(False)
+        except Exception:
+            pass
         split.append(right)
         self.append(split)
         attach_zoom_keys(self)

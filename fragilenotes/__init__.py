@@ -4,6 +4,6 @@
 интегрированная на уровне кода, а не как сторонние аддоны.
 """
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 APP_NAME = "Fragile Notes"
 APP_ID = "dev.fragilich.fragile-notes"
