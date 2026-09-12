@@ -465,6 +465,37 @@ def load_settings() -> dict[str, Any]:
                 base = _P(norm).name or norm
                 merged["vaults"].insert(0, {"path": norm, "name": base})
                 merged["workspaces"] = list(merged["vaults"])
+    # Миграция: системные папки не на рабочем столе — переносим vault_root с ~/desktop на ~/Documents/FragileNotesVault
+    try:
+        from pathlib import Path as _P2
+
+        vr = str(merged.get("vault_root") or "").strip()
+        desktop = str(_P2.home() / "desktop")
+        desktop_cap = str(_P2.home() / "Desktop")
+        if vr in (desktop, desktop_cap):
+            new_root = str(_P2.home() / "Documents" / "FragileNotesVault")
+            if not new_root or new_root == vr:
+                new_root = str(_P2.home() / "FragileNotesVault")
+            merged["vault_root"] = new_root
+            try:
+                _P2(new_root).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            norm_new = str(_P2(new_root).expanduser().resolve(strict=False))
+            has_new = any(isinstance(e, dict) and str(e.get("path") or "").strip() == norm_new for e in merged["vaults"])
+            if not has_new:
+                base_new = _P2(new_root).name or norm_new
+                merged["vaults"].insert(0, {"path": norm_new, "name": base_new})
+                merged["workspaces"] = list(merged["vaults"])
+            # убрать старый desktop из vaults если остался
+            merged["vaults"] = [e for e in merged["vaults"] if str(e.get("path") or "").strip() not in (desktop, desktop_cap)]
+            merged["workspaces"] = list(merged["vaults"])
+            try:
+                save_settings(merged)
+            except Exception:
+                pass
+    except Exception:
+        pass
     return merged
 
 

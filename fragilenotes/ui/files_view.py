@@ -2280,7 +2280,7 @@ class FilesView(Gtk.Box):
 
     def _update_tree_counts(self) -> None:
         if self._node is not None:
-            dirs, files = self._vault.count_nodes(self._node)
+            dirs, files = count_nodes(self._node)
             self.count_label.set_text(f"{dirs} папок · {files} заметок")
 
     def _sync_empty_state(self) -> None:
