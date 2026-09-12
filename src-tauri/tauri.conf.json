@@ -1,0 +1,33 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev --prefix ../frontend",
+    "beforeBuildCommand": "npm run build --prefix ../frontend",
+    "devPath": "http://localhost:5173",
+    "distDir": "../fragilenotes/ui/react_dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "Fragile Notes",
+    "version": "0.4.1"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "fs": {
+        "all": true,
+        "scope": ["$HOME/**", "$DOCUMENT/**", "$RESOURCE/**"]
+      },
+      "path": { "all": true },
+      "dialog": { "all": true, "open": true, "save": true },
+      "shell": { "open": true }
+    },
+    "bundle": {
+      "active": true,
+      "identifier": "com.fragilich.notes",
+      "icon": ["icons/icon.png"],
+      "targets": "all"
+    },
+    "security": { "csp": null },
+    "windows": [{ "title": "Fragile Notes — Obsidian-like", "width": 1200, "height": 800, "resizable": true }]
+  }
+}
