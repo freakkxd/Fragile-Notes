@@ -5,5 +5,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   build: { outDir: '../fragilenotes/ui/react_dist', emptyOutDir: true },
-  server: { port: 5173 }
+  server: { port: 5173, strictPort: true },
+  clearScreen: false,
+  envPrefix: ['VITE_', 'TAURI_'],
 })
