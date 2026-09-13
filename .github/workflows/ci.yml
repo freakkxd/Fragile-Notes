@@ -53,13 +53,20 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq pkg-config libgtk-3-dev librsvg2-dev patchelf libssl-dev libsqlite3-dev 2>&1 | tail -10 || true
-          # webkit 4.1 (24.04) or 4.0 (22.04) — ставим оба варианта
           sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev 2>&1 | tail -10 || sudo apt-get install -y -qq libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev 2>&1 | tail -10 || true
-          # Tauri 1.x тянет soup2-sys (2.4) даже на 24.04, поэтому ставим ОБЕ версии soup
           sudo apt-get install -y -qq libsoup-3.0-dev libsoup2.4-dev 2>&1 | tail -10 || sudo apt-get install -y -qq libsoup2.4-dev 2>&1 | tail -10 || sudo apt-get install -y -qq libsoup-3.0-dev 2>&1 | tail -10 || true
           sudo apt-get install -y -qq libayatana-appindicator3-dev 2>&1 | tail -10 || sudo apt-get install -y -qq libappindicator3-dev 2>&1 | tail -10 || true
+          # Compat: Tauri 1.x ищет javascriptcoregtk-4.0 / webkit2gtk-4.0, а на 24.04 есть только 4.1 — делаем симлинки .pc
+          for p in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/pkgconfig /usr/share/pkgconfig; do
+            [ -d "$p" ] || continue
+            if [ -f "$p/javascriptcoregtk-4.1.pc" ] && [ ! -f "$p/javascriptcoregtk-4.0.pc" ]; then sudo ln -sf javascriptcoregtk-4.1.pc "$p/javascriptcoregtk-4.0.pc"; echo "linked jsc 4.1->4.0 in $p"; fi
+            if [ -f "$p/webkit2gtk-4.1.pc" ] && [ ! -f "$p/webkit2gtk-4.0.pc" ]; then sudo ln -sf webkit2gtk-4.1.pc "$p/webkit2gtk-4.0.pc"; echo "linked webkit 4.1->4.0 in $p"; fi
+            if [ -f "$p/webkit2gtk-web-extension-4.1.pc" ] && [ ! -f "$p/webkit2gtk-web-extension-4.0.pc" ]; then sudo ln -sf webkit2gtk-web-extension-4.1.pc "$p/webkit2gtk-web-extension-4.0.pc"; echo "linked webext 4.1->4.0 in $p"; fi
+          done
           pkg-config --modversion webkit2gtk-4.1 2>&1 | head -1 || pkg-config --modversion webkit2gtk-4.0 2>&1 | head -1 || echo "webkit not found"
+          pkg-config --modversion javascriptcoregtk-4.1 2>&1 | head -1 || pkg-config --modversion javascriptcoregtk-4.0 2>&1 | head -1 || echo "jsc not found"
           pkg-config --modversion libsoup-2.4 2>&1 | head -1 || pkg-config --modversion libsoup-3.0 2>&1 | head -1 || echo "soup not found"
+          ls -l /usr/lib/x86_64-linux-gnu/pkgconfig/*webkit* /usr/lib/x86_64-linux-gnu/pkgconfig/*javascript* 2>&1 | head -10 || true
       - name: Build frontend first (required for Tauri distDir)
         run: |
           npm --prefix frontend ci
