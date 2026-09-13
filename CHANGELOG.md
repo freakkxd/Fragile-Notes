@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.5 — полноценный Windows инсталлер с автоустановкой (2026-09-13)
+> **Почему отдельная версия от v0.4.4:** v0.4.4 починил `CI` (webkit/jsc/soup симлинки + `Cargo` features + `move` closure + иконка RGBA), но `exe` инсталлер пропал — `packaging/` и `build-windows.yml` были удалены в v0.4.2. v0.4.5 — возвращает **полноценный NSIS инсталлер** который ставит всё сам без действий юзера.
+
+**Сделано:**
+- `src-tauri/tauri.conf.json` → `0.4.5`, `bundle.targets ["nsis","msi"]`, `bundle.windows.nsis {installMode:both, displayLanguageSelector:false, languages:[Russian,English], installerIcon}` + `wix {ru-RU,en-US}`, `category Productivity`, `copyright`
+- `.github/workflows/build-tauri-windows.yml` — новый `windows-latest` job: `setup-node` + `setup-rust` + `rust-cache` + `frontend ci/build/typecheck` + `cpp ctest` + `cargo install tauri-cli` + `cargo tauri build` → `bundle/nsis/*.exe` + `msi`, `upload-artifact` + `softprops/action-gh-release` на `tags v*` (как было в v0.4.1, но теперь Tauri)
+- `frontend/vite.config.ts` уже `dist` (`frontend/dist`), `src-tauri/icons/icon.png` 512x512 RGBA — готово для бандла
+- Инсталлер: `NSIS` `perMachine+perUser` (`both`), `Russian/English`, `startMenuFolder`, один клик `Далее → Установить` — vault `~/Documents/FragileNotesVault` создаётся при первом запуске `main.rs` (`create_dir_all`)
+- Версии → `0.4.5` (`cpp/CMake`, `src-tauri/Cargo`, `frontend/package`)
+
+**Скачать:** `FragileNotes-Setup-v0.4.5.exe` (~10-15M, Tauri NSIS) + `*.msi` из `Releases` → https://github.com/freakkxd/Fragile-Notes/releases/latest — двойной клик, всё ставится само.
+
+---
+
 ## v0.4.4 — CI зелёный (фикс линковки webkit/jsc) (2026-09-13)
 > **Почему отдельная версия от v0.4.3:** v0.4.3 починил окно (`distDir` + иконка + `main.rs`), но `CI` всё ещё падал — `javascriptcore-rs-sys` искал `4.0.pc` + линкер ` -lwebkit2gtk-4.0` на `Ubuntu 24.04` где только `4.1`. v0.4.4 — финальный фикс `CI`: симлинки `.pc` + `.so` + `ldconfig` и `Cargo` `fs-all/dialog-all/path-all`.
 
@@ -12,7 +26,7 @@
 
 ---
 
-## v0.4.3 — фикс вылета окна + CI зелёный (2026-09-13)
+## v0.4.3 — фикс вылета окна + CI частично (2026-09-13)
 > **Почему отдельная версия от v0.4.2:** v0.4.2 полностью вырезал Python, но оставил 2 критичных бага: окно закрывалось сразу (`distDir ../fragilenotes/ui/react_dist` не существовал + `icons/icon.png` 0 байт) и `CI tauri cargo check` фейлил на `ubuntu-latest` 24.04 (`libwebkit2gtk-4.0-dev` не существует, теперь `4.1`/`soup3`). v0.4.3 — только фиксы без фич.
 
 **Сделано:**

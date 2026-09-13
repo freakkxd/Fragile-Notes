@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Fragile Notes",
-    "version": "0.4.4"
+    "version": "0.4.5"
   },
   "tauri": {
     "allowlist": {
@@ -23,9 +23,27 @@
     },
     "bundle": {
       "active": true,
+      "category": "Productivity",
+      "copyright": "© 2026 Fragilich",
       "identifier": "com.fragilich.notes",
       "icon": ["icons/icon.png"],
-      "targets": "all"
+      "targets": ["nsis", "msi"],
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "nsis": {
+          "displayLanguageSelector": false,
+          "installMode": "both",
+          "installerIcon": "icons/icon.png",
+          "languages": ["Russian", "English"],
+          "startMenuFolder": "Fragile Notes",
+          "template": null
+        },
+        "wix": {
+          "language": ["ru-RU", "en-US"],
+          "template": null
+        }
+      }
     },
     "security": { "csp": null },
     "windows": [{ "title": "Fragile Notes — Obsidian-like", "width": 1280, "height": 800, "resizable": true, "fullscreen": false, "visible": true }]
