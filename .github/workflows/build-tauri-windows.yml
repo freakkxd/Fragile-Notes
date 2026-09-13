@@ -59,8 +59,8 @@ jobs:
           choco install wixtoolset -y --no-progress
           try { nsis --version } catch { try { makensis -VERSION } catch { echo "NSIS check" } }
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --locked
+      - name: Install Tauri CLI (v1, совместим с tauri 1.6 в Cargo.toml)
+        run: cargo install tauri-cli --version "^1.6" --locked
 
       - name: Build Tauri bundle (NSIS + MSI)
         run: cargo tauri build
