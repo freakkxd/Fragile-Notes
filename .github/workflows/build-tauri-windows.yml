@@ -56,8 +56,8 @@ jobs:
         shell: powershell
         continue-on-error: true
         run: |
-          choco install wixtoolset -y --no-progress 2>&1 | tail -20 || echo "WiX install skip"
-          nsis --version 2>&1 | head -5 || makensis -VERSION 2>&1 | head -5 || echo "NSIS check"
+          choco install wixtoolset -y --no-progress
+          try { nsis --version } catch { try { makensis -VERSION } catch { echo "NSIS check" } }
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked

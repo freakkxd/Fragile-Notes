@@ -36,7 +36,6 @@
           "installMode": "both",
           "installerIcon": "icons/icon.png",
           "languages": ["Russian", "English"],
-          "startMenuFolder": "Fragile Notes",
           "template": null
         },
         "wix": {
