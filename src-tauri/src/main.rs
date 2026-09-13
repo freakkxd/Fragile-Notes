@@ -12,11 +12,17 @@ fn vault_root() -> PathBuf {
         return PathBuf::from(custom);
     }
     let home = dirs_next();
-    home.join("Documents").join("FragileNotesVault")
+    let root = home.join("Documents").join("FragileNotesVault");
+    // ensure exists, but never panic — program must stay open even if vault missing
+    let _ = fs::create_dir_all(&root);
+    root
 }
 
 fn dirs_next() -> PathBuf {
     if let Some(h) = std::env::var_os("HOME") {
+        return PathBuf::from(h);
+    }
+    if let Some(h) = std::env::var_os("USERPROFILE") {
         return PathBuf::from(h);
     }
     PathBuf::from(".")
@@ -32,10 +38,28 @@ fn is_text_file(p: &Path) -> bool {
         if ALLOWED.contains(&ext.to_ascii_lowercase().as_str()) {
             return true;
         }
-        // binary check fallback: no null bytes in first 1k
-        if let Ok(b) = fs::read(p) {
-            if b.contains(&0) {
-                return false;
+        // binary check: no null bytes in first 1k, else binary
+        if let Ok(f) = fs::File::open(p) {
+            use std::io::Read;
+            let mut buf = [0u8; 1024];
+            if let Ok(n) = std::io::BufReader::new(f).read(&mut buf) {
+                if n == 0 {
+                    return true;
+                }
+                if buf[..n].contains(&0) {
+                    return false;
+                }
+            }
+        }
+    } else {
+        // no extension — treat as text if no null bytes
+        if let Ok(f) = fs::File::open(p) {
+            use std::io::Read;
+            let mut buf = [0u8; 1024];
+            if let Ok(n) = std::io::BufReader::new(f).read(&mut buf) {
+                if buf[..n].contains(&0) {
+                    return false;
+                }
             }
         }
     }
@@ -50,18 +74,20 @@ fn list_notes() -> Vec<String> {
         return vec![];
     }
     let mut out = Vec::new();
-    for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
+    // filter_entry prevents descending into heavy dirs
+    let walker = WalkDir::new(&root).into_iter().filter_entry(|e| {
+        let name = e.file_name().to_string_lossy();
+        !matches!(
+            name.as_ref(),
+            "node_modules" | ".git" | "dist" | "build" | "target" | ".venv" | "venv" | ".cargo"
+        )
+    });
+    for entry in walker.filter_map(|e| e.ok()) {
         let p = entry.path();
         if p.is_file() && is_text_file(p) {
             if let Ok(rel) = p.strip_prefix(&root) {
-                out.push(rel.to_string_lossy().to_string());
-            }
-        }
-        // skip heavy dirs
-        if p.is_dir() {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if ["node_modules", ".git", "dist", "build", "target", ".venv"].contains(&name) {
-                continue;
+                // normalize to forward slashes for frontend
+                out.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
     }
@@ -71,12 +97,11 @@ fn list_notes() -> Vec<String> {
 
 #[tauri::command]
 fn read_note(path: String) -> Result<String, String> {
-    // zod-like runtime validation: path must be relative, no .. traversal
     if path.contains("..") || path.starts_with('/') || path.starts_with('\\') {
         return Err("invalid path".into());
     }
     let full = vault_root().join(&path);
-    fs::read_to_string(&full).map_err(|e| e.to_string())
+    fs::read_to_string(&full).map_err(|e| format!("read {}: {}", path, e))
 }
 
 #[tauri::command]
@@ -88,11 +113,10 @@ fn write_note(path: String, content: String) -> Result<(), String> {
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&full, content).map_err(|e| e.to_string())?;
-    // update FTS if db exists
+    fs::write(&full, &content).map_err(|e| e.to_string())?;
     let db = vault_root().join(".fragile_fts.db");
     if db.exists() {
-        let _ = fts_index(&db, &full, &fs::read_to_string(&full).unwrap_or_default());
+        let _ = fts_index(&db, &full, &content);
     }
     Ok(())
 }
@@ -115,7 +139,6 @@ fn fts_index(db: &Path, file: &Path, content: &str) -> rusqlite::Result<()> {
 fn fts_search(query: String) -> Vec<String> {
     let db = vault_root().join(".fragile_fts.db");
     if !db.exists() {
-        // fallback: naive scan
         return list_notes()
             .into_iter()
             .filter(|p| {
@@ -165,7 +188,16 @@ fn get_links(path: String) -> Vec<LinkInfo> {
 }
 
 fn main() {
+    // Ensure vault exists before Tauri starts — never panic, just log
+    let root = vault_root();
+    eprintln!("[fragile] vault: {}", root.display());
+    let _ = fs::create_dir_all(&root);
+
     tauri::Builder::default()
+        .setup(|_app| {
+            eprintln!("[fragile] setup ok, vault {}", root.display());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_notes,
             read_note,

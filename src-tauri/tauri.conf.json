@@ -3,12 +3,12 @@
     "beforeDevCommand": "npm run dev --prefix ../frontend",
     "beforeBuildCommand": "npm run build --prefix ../frontend",
     "devPath": "http://localhost:5173",
-    "distDir": "../fragilenotes/ui/react_dist",
+    "distDir": "../frontend/dist",
     "withGlobalTauri": true
   },
   "package": {
     "productName": "Fragile Notes",
-    "version": "0.4.2"
+    "version": "0.4.3"
   },
   "tauri": {
     "allowlist": {
@@ -28,6 +28,6 @@
       "targets": "all"
     },
     "security": { "csp": null },
-    "windows": [{ "title": "Fragile Notes — Obsidian-like", "width": 1200, "height": 800, "resizable": true }]
+    "windows": [{ "title": "Fragile Notes — Obsidian-like", "width": 1280, "height": 800, "resizable": true, "fullscreen": false, "visible": true }]
   }
 }

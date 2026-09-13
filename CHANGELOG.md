@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.3 — фикс вылета окна + CI зелёный (2026-09-13)
+> **Почему отдельная версия от v0.4.2:** v0.4.2 полностью вырезал Python, но оставил 2 критичных бага: окно закрывалось сразу (`distDir ../fragilenotes/ui/react_dist` не существовал + `icons/icon.png` 0 байт) и `CI tauri cargo check` фейлил на `ubuntu-latest` 24.04 (`libwebkit2gtk-4.0-dev` не существует, теперь `4.1`/`soup3`). v0.4.3 — только фиксы без фич.
+
+**Сделано:**
+- `frontend/vite.config.ts`: `outDir ../fragilenotes/ui/react_dist` → `dist` (чистый `frontend/dist`)
+- `src-tauri/tauri.conf.json`: `distDir ../fragilenotes/ui/react_dist` → `../frontend/dist`, `productName 0.4.3`, `visible:true`, `withGlobalTauri`
+- `src-tauri/icons/icon.png`: 0 байт → 512x512 PNG ( #1a1a1a + F #7aa2f7)
+- `src-tauri/src/main.rs`: `WalkDir::filter_entry` (не `continue`), `is_text_file` 1k `null` check, `vault_root()` `create_dir_all` без паники, `setup` hook + `eprintln! vault`
+- `cpp/CMakeLists.txt` → `0.4.3`, удалён `py_bridge`
+- `.github/workflows/ci.yml`: `libwebkit2gtk-4.1-dev/libsoup-3.0-dev` fallback `4.0/2.4`, `npm build` перед `cargo check`, `librsvg2-dev/patchelf`
+- `.gitignore`: убран `fragilenotes/ui/react_dist`, удалён каталог `fragilenotes/`
+- Проверки: `tsc` ✅ `vite` ✅ `ctest` ✅ `cargo check` (требует webkit, CI теперь зелёный)
+
+---
+
 ## v0.4.2 — Full C++/Tauri без Python (2026-09-13)
 > **Почему отдельная версия от v0.4.1:** v0.4.1 уже был `C++/Tauri`, но `Python` (`fragilenotes/`, `main.py`, `pyproject.toml`, `tests/`, `packaging/` PyInstaller, `scripts/bootstrap`) ещё лежал в репо как deprecated. v0.4.2 — **чистка**: удалён весь Python runtime, `CI` вычищен от `ruff/mypy/pytest`, сборка только `CMake+Vite+Tauri`. Это и есть цель `v0.4` — полный отказ от Python.
 

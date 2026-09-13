@@ -60,6 +60,5 @@ src-tauri/Cargo.lock
 # Frontend
 frontend/node_modules/
 frontend/dist/
-fragilenotes/ui/react_dist/
 build/
 dist/
