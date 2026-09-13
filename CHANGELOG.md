@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.4 — CI зелёный (фикс линковки webkit/jsc) (2026-09-13)
+> **Почему отдельная версия от v0.4.3:** v0.4.3 починил окно (`distDir` + иконка + `main.rs`), но `CI` всё ещё падал — `javascriptcore-rs-sys` искал `4.0.pc` + линкер ` -lwebkit2gtk-4.0` на `Ubuntu 24.04` где только `4.1`. v0.4.4 — финальный фикс `CI`: симлинки `.pc` + `.so` + `ldconfig` и `Cargo` `fs-all/dialog-all/path-all`.
+
+**Сделано:**
+- `.github/workflows/ci.yml`: `.pc` симлинки `webkit 4.1->4.0`/`jsc 4.1->4.0`, `.so` симлинки `libwebkit2gtk-4.1.so->4.0.so` + `libjavascriptcoregtk-4.1.so->4.0.so` + `ldconfig`, установка обеих `soup` (2.4 и 3.0)
+- `src-tauri/Cargo.toml`: `tauri` features `shell-open` → `shell-open, dialog-all, fs-all, path-all` (allowlist mismatch fix)
+- `src-tauri/src/main.rs`: `E0373` fix `setup(move |_app|)` (closure may outlive)
+- `src-tauri/icons/icon.png`: `PaletteAlpha` → `8-bit/color RGBA`
+- Версии → `0.4.4`, `CI` теперь `3/3` ✅ `frontend` ✅ `cpp` ✅ `tauri` ✅
+
+---
+
 ## v0.4.3 — фикс вылета окна + CI зелёный (2026-09-13)
 > **Почему отдельная версия от v0.4.2:** v0.4.2 полностью вырезал Python, но оставил 2 критичных бага: окно закрывалось сразу (`distDir ../fragilenotes/ui/react_dist` не существовал + `icons/icon.png` 0 байт) и `CI tauri cargo check` фейлил на `ubuntu-latest` 24.04 (`libwebkit2gtk-4.0-dev` не существует, теперь `4.1`/`soup3`). v0.4.3 — только фиксы без фич.
 

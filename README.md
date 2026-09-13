@@ -1,6 +1,6 @@
-# Fragile Notes — v0.4.3
+# Fragile Notes — v0.4.4
 
-> **Подпись v0.4.3 — почему отделили эту версию:**
+> **Подпись v0.4.4 — почему отделили эту версию:**
 > - **Сделано в 0.4.2:** полный отказ от Python (70613 deletions), но два бага: 1) окно Tauri закрывалось сразу — `distDir: ../fragilenotes/ui/react_dist` не существовал + `icons/icon.png` 0 байт, 2) `CI tauri cargo check` фейлил — `libwebkit2gtk-4.0-dev` не существует на `ubuntu-latest` 24.04 (теперь 4.1/soups 3.0).
 > - **Почему 0.4.3 отдельно:** фикс обоих багов без фич — `distDir → ../frontend/dist` (чистый `frontend/dist`), валидная 512px иконка, `main.rs` `WalkDir::filter_entry` + `setup` vault + `fs::read` 1k null-check, `CI` `webkit 4.1/soup3` fallback `4.0/soup2.4` и `frontend build` перед `cargo check`.
 > - **Цель 0.4.3:** окно не вылетает, `CI` зелёный.
@@ -11,7 +11,7 @@
 ![Release](https://img.shields.io/github/v/release/freakkxd/Fragile-Notes)
 ![License](https://img.shields.io/github/license/freakkxd/Fragile-Notes)
 
-## Актуальный стек v0.4.3
+## Актуальный стек v0.4.4
 
 | Слой | Технология | Где |
 |------|------------|-----|
@@ -27,7 +27,7 @@
 ## Быстрый старт
 
 ### Windows — Tauri bundle
-Скачай `FragileNotes-Setup-v0.4.3.exe` из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
+Скачай `FragileNotes-Setup-v0.4.4.exe` из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
 Волт `~/Documents/FragileNotesVault` создастся сам.
 
 ### Linux / macOS (из исходников — Tauri)
@@ -54,7 +54,7 @@ sudo apt install libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev libsoup2.4-d
 ## Безопасность волта
 Волт `~/Documents/FragileNotesVault` (`~/.config/fragile-notes/settings.json` `vault_root`).
 
-## Разработка v0.4.3
+## Разработка v0.4.4
 ```bash
 npm --prefix frontend run typecheck
 npm --prefix frontend run build # -> frontend/dist
@@ -73,7 +73,7 @@ src-tauri/           # Rust Tauri backend
 - `v0.3.10` — последний Python GTK
 - `v0.4.1` — C++/Tauri гибрид (Python deprecated)
 - `v0.4.2` — Full C++/Tauri — Python удалён
-- `v0.4.3` — **фикс вылета окна + CI** (текущий)
+- `v0.4.4` — **фикс вылета окна + CI** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`
