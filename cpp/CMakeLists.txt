@@ -43,7 +43,3 @@ target_link_libraries(fragile_tests PRIVATE fragile_core)
 
 enable_testing()
 add_test(NAME core_tests COMMAND fragile_tests)
-
-add_library(fragile_bridge SHARED src/bridge/py_bridge.cpp)
-target_link_libraries(fragile_bridge PRIVATE fragile_core)
-set_target_properties(fragile_bridge PROPERTIES OUTPUT_NAME _fragile_cpp PREFIX "")

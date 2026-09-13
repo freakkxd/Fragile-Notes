@@ -1,0 +1,5 @@
+# Linguist overrides — форсируем C++/TS/Rust, игнорим остатки
+*.py linguist-vendored
+*.pyc linguist-vendored
+# Но Python файлов уже нет — это для кэша
+cpp/src/bridge/* linguist-vendored
