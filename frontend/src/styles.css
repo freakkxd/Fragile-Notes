@@ -20,12 +20,12 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--fg);overf
 .ribbon button.active{background:var(--accent);color:#0b0b0b;border-color:var(--accent)}
 .ribbon .spacer{flex:1}
 .ribbon .sep{width:24px;height:1px;background:var(--border);margin:4px 0}
-/* Panels — fix: collapsed must fully disappear, иначе остаётся полоса */
-.left-panel{width:280px;min-width:240px;max-width:420px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;transition:width .2s ease, min-width .2s ease}
-.left-panel.collapsed{width:0 !important;min-width:0 !important;max-width:0 !important;flex:0 0 0 !important;padding:0 !important;border-right:0 !important;overflow:hidden !important}
+/* Panels — fix: collapsed must fully disappear, иначе остаётся полоса (как на скрине) */
+.left-panel{width:280px;min-width:240px;max-width:420px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.left-panel.collapsed{display:none !important;width:0 !important;min-width:0 !important;max-width:0 !important;flex:0 0 0 !important;padding:0 !important;border:0 !important;overflow:hidden !important}
 .center{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
-.right-panel{width:300px;min-width:260px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;gap:10px;padding:10px;overflow:auto;flex-shrink:0;transition:width .2s ease, min-width .2s ease}
-.right-panel.collapsed{width:0 !important;min-width:0 !important;max-width:0 !important;flex:0 0 0 !important;padding:0 !important;border-left:0 !important;overflow:hidden !important}
+.right-panel{width:300px;min-width:260px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;gap:10px;padding:10px;overflow:auto;flex-shrink:0}
+.right-panel.collapsed{display:none !important;width:0 !important;min-width:0 !important;max-width:0 !important;flex:0 0 0 !important;padding:0 !important;border:0 !important;overflow:hidden !important}
 .panel-header{padding:10px 8px 8px;font-weight:700;border-bottom:1px solid var(--border);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
 .panel-header .count{font-weight:500;background:var(--panel-2);border:1px solid var(--border);padding:2px 6px;border-radius:999px;font-size:10px}
 /* Toolbar */

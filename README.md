@@ -1,9 +1,9 @@
-# Fragile Notes — v0.4.7
+# Fragile Notes — v0.4.8
 
-> **Подпись v0.4.7 — почему отделили эту версию:**
-> - **Сделано в 0.4.6:** полировка UI (`Inter + JetBrains`, `FileTree` collapsible + иконки, `Editor` тулбар, `TabBar` `pin/dirty`, `Palette` `fuzzy`, `Graph/Canvas/Search` релизные)
-> - **Почему 0.4.7 отдельно:** фикс бага **пустой полосы после закрытия сайдбара** — `left/right-panel.collapsed` оставалась `280/300px` полоса (видно на скрине), можно было убрать только ручным драгом. Теперь `flex:0 0 0` + `!important` схлопывание, `center` растягивается.
-> - **Цель 0.4.7:** сайдбары закрываются без артефактов.
+> **Подпись v0.4.8 — почему отделили эту версию:**
+> - **Сделано в 0.4.7:** фикс `flex` схлопывания (`width:0 !important + flex:0 0 0`), но на скрине полоса осталась — `width:0` не перебивает `flex` в рантайме Tauri, пустой `div` 280px.
+> - **Почему 0.4.8 отдельно:** жёсткий `display:none !important` для `.left-panel.collapsed` / `.right-panel.collapsed` — теперь `Ctrl+B` / клик `◧` сразу убирает полосу, `center` занимает всё.
+> - **Цель 0.4.8:** сайдбары закрываются без артефактов.
 
 **Obsidian-like vault для Linux/Windows.** Ядро `C++` + `Tauri (Rust)` + `React`.
 
@@ -11,7 +11,7 @@
 ![Release](https://img.shields.io/github/v/release/freakkxd/Fragile-Notes)
 ![License](https://img.shields.io/github/license/freakkxd/Fragile-Notes)
 
-## Актуальный стек v0.4.7
+## Актуальный стек v0.4.8
 
 | Слой | Технология | Где |
 |------|------------|-----|
@@ -27,7 +27,7 @@
 ## Быстрый старт
 
 ### Windows — один файл
-Скачай **FragileNotes-Setup-v0.4.7.exe** из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
+Скачай **FragileNotes-Setup-v0.4.8.exe** из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
 Двойной клик → `Установить` → всё само (`Program Files` + `Start Menu`), `vault` `~/Documents/FragileNotesVault` создастся. Тихая: `exe /S`.
 
 ### Linux / macOS
@@ -53,7 +53,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ## Версионирование
 - `v0.4.6` — UI полировка
-- `v0.4.7` — **фикс полосы сайдбара** (текущий)
+- `v0.4.8` — **фикс полосы сайдбара** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`
