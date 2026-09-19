@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.6 — UI полировка до релизного вида (2026-09-13)
+> **Почему отдельная версия от v0.4.5:** v0.4.5 вернул `Windows NSIS` инсталлер (`targets nsis/msi`), но UI оставался базовым (простой `FileTree`, `textarea` без тулбара, без fuzzy). v0.4.6 — **полная полировка** до Obsidian-уровня без изменения ядра.
+
+**Сделано:**
+- `styles.css`: токены `--bg/#0b0b0b --panel/#141414 --accent/#7aa2f7`, `Inter + JetBrains Mono`, радиусы 8/12, тени `0 8px 32px`, `backdrop-blur`, анимации 150ms, `scrollbar` 8px, responsive (1024→hide right, 720→overlay left), `ribbon 44px` hover/active
+- `FileTree`: collapsible папки (`▾` + `collapsed`), иконки по расширению (📄🖼️📕🎨📜🐍🦀⚙️), счётчики файлов, `empty` CTA `+ Новая заметка` + подсказки `[[ ]] #tags - [ ]`
+- `Editor`: тулбар Bold/Italic/H1/Link/List/Task/Code, `Tab=2` пробела, `Ctrl+S`, `word wrap` info `chars/lines`, `placeholder` с синтаксисом
+- `TabBar`: `pin`, `dirty •`, `close` hover, `empty` hint `Ctrl+P`, `overflow scroll`
+- `CommandPalette`: `fuzzyScore` (подсветка совпадения), `↑↓ Enter` навигация, `20` результатов, `hint` бейджи
+- `StatusBar`: `words/chars`, `UTF-8`, `Markdown`, `FTS5`/`CRDT` индикаторы `●`
+- `GraphView/CanvasView/SearchView`: релизные карточки, легенды, `search-bar` с `FTS5` (`bridge.searchNotes`), `empty states`, кнопки `+ Заметка/Стрелка/Группа`
+- `App.tsx`: `Ribbon` active, `createNote` (`Заметка YYYY-MM-DD`), `Ctrl+B` toggle, `badge` mode, `SearchView` интеграция, `StatusBar` `chars`
+- Версии → `0.4.6`, `tsc` ✅ `vite 282kB (10.26kB css, gzip 89kB)` ✅ `ctest core ok` ✅
+
+
 ## v0.4.5 — полноценный Windows инсталлер с автоустановкой (2026-09-13)
 > **Почему отдельная версия от v0.4.4:** v0.4.4 починил `CI` (webkit/jsc/soup симлинки + `Cargo` features + `move` closure + иконка RGBA), но `exe` инсталлер пропал — `packaging/` и `build-windows.yml` были удалены в v0.4.2. v0.4.5 — возвращает **полноценный NSIS инсталлер** который ставит всё сам без действий юзера.
 

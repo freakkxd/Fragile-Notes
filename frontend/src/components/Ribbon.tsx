@@ -8,12 +8,13 @@ export default function Ribbon({ onNav }: Props) {
   const setCommandOpen = useVault((s) => s.setCommandOpen)
   return (
     <div className="ribbon">
-      <button title="Файлы" onClick={toggleLeft}>📁</button>
+      <button title="Файлы (Ctrl+B)" onClick={toggleLeft}>📁</button>
       <button title="Поиск" onClick={() => onNav('search')}>🔍</button>
       <button title="Граф" onClick={() => onNav('graph')}>🕸</button>
       <button title="Canvas" onClick={() => onNav('canvas')}>🎨</button>
-      <button title="Календарь" onClick={() => onNav('calendar')}>🗓</button>
+      <div className="sep" />
       <button title="Задачи" onClick={() => onNav('tasks')}>✓</button>
+      <button title="Календарь" onClick={() => onNav('calendar')}>🗓</button>
       <button title="AI Чат" onClick={() => onNav('ai_chat')}>🤖</button>
       <div className="spacer" />
       <button title="Палитра (Ctrl+P)" onClick={() => setCommandOpen(true)}>⌘</button>
