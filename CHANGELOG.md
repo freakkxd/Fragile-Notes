@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.7 — фикс пустой полосы после закрытия сайдбара (2026-09-19)
+> **Почему отдельная версия от v0.4.6:** v0.4.6 отполировал UI (токены, FileTree, Editor, fuzzy), но оставил баг — после `collapse` левого/правого сайдбара оставалась пустая полоса `280/300px`, которую можно было убрать только ручным ресайзом. v0.4.7 — точечный фикс `flex` схлопывания.
+
+**Сделано:**
+- `frontend/src/styles.css`: `.left-panel.collapsed` и `.right-panel.collapsed` → `width:0 !important; min-width:0 !important; max-width:0 !important; flex:0 0 0 !important; padding:0 !important; border:0 !important` + `flex-shrink:0` на базовых панелях, `transition: width/min-width`. Раньше `width:0` перебивался `min-width:240px` и `flex`, оставалась полоса как на скрине.
+- `center` теперь `flex:1` корректно растягивается, полоса исчезает сразу после `toggleLeft/toggleRight` (`Ctrl+B`), без ручного драга
+- Версии → `0.4.7`, `tsc` ✅ `vite 282kB` ✅ `ctest` ✅
+
+
 ## v0.4.6 — UI полировка до релизного вида (2026-09-13)
 > **Почему отдельная версия от v0.4.5:** v0.4.5 вернул `Windows NSIS` инсталлер (`targets nsis/msi`), но UI оставался базовым (простой `FileTree`, `textarea` без тулбара, без fuzzy). v0.4.6 — **полная полировка** до Obsidian-уровня без изменения ядра.
 
