@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.0 — нативный AO Engine: сбор + Web Clipper + обогащение (2026-09-19)
+> **Почему отдельная версия от v0.4.15:** v0.4.15 был визуально богаче (`glass`/`glow`), но `AO Engine` (`_System/ArchiveOrganism`) оставался внешним `Node` `ao-engine` (`ingestFiles`, `wrapWebClips`, `enrichNotes`). v0.5.0 — **портирован нативно** в `Tauri`+`C++`+`React` без `Node`.
+
+**Сделано:**
+- `src-tauri/src/collect.rs` — порт `wrapWebClipsInVault` (`TypeScript` → `Rust`): `walkdir` `Sources/web-clips` (`_System/ArchiveOrganism/Sources/web-clips`, `Sources/web-clips`, `Sources/raw`), `parse_frontmatter` `has_inbox_frontmatter`, `first_url` `Regex`, `slugify`, `buildInboxMarkdown` (`source: web`, `origin`, `ao_sort_status: undecided`, `tags: [sort-inbox]`), `write` `05 Sort/{date}-{slug}.md` + `telegram_rss.py` вызов, `collect_sources` `Tauri` `command` (`scanned/wrapped/telegram/errors`)
+- `src-tauri/src/collect.rs` `web_clip` — `Tauri` `command {url, title, html, selection}` → `write` `Sources/web-clips/{date}-{slug}.md` + `auto wrap` (как `Obsidian Web Clipper` в браузере, теперь нативно `Ctrl+Shift+W` / `Ribbon ✂`)
+- `src-tauri/src/enrich.rs` — порт `LlmService` + `embeddings`: `llm_status` `GET /health`, `llm_chat` `POST /v1/chat/completions` `Qwen3-14B` `8010/8011`, `enrich_notes` `WalkDir 05 Sort` `limit` `LLM` `prompt` `JSON tags/links` → `write` `enriched: true`, `embeddings_search` `FTS5` fallback `rusqlite`
+- `src-tauri/Cargo.toml` `+ chrono 0.4` `+ reqwest 0.12 blocking/json`, `src-tauri/src/main.rs` `mod collect, enrich` + `invoke_handler` `collect_sources, web_clip, llm_status, llm_chat, enrich_notes, embeddings_search`
+- `frontend/src/components/WebClipper.tsx` — `Clip` (`outerHTML`/`selection` → `invoke web_clip`), `Сбор` (`invoke collect_sources`), `Обогатить` (`invoke enrich_notes limit 3`), fallback `writeNote` если `Tauri` нет
+- `frontend/src/components/AIChatFull.tsx` — `Qwen3-14B` `chat` `user/assistant` `bubbles`, `llm_status` `day`, `RAG` `embeddings_search` (скоро `top 3` в `system` prompt), `stream` `typing`
+- `frontend/src/App.tsx` `right-panel` `WebClipper` + `ai_chat` → `AIChatFull` (был `LLM offline` stub)
+- Версии → `0.5.0`, `tsc` ✅ `vite 292kB` ✅ `cargo check` ✅ (был `regex` `"` + `slugify` temp drop + `unused Path`)
+
+
 ## v0.4.15 — визуально богаче: стекло, градиенты, glow (2026-09-19)
 > **Почему отдельная версия от v0.4.14:** v0.4.14 фиксил `AppImage` сборку (`tauri-plugin-updater` + `allowlist` + `beforeBuild`), но UI оставался плоским (тёмные панели без глубины). v0.4.15 — **визуально богаче** без изменения логики.
 

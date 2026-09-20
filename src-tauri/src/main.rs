@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod collect;
+mod enrich;
+use collect::{collect_sources, web_clip};
+use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
 use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -203,7 +207,13 @@ fn main() {
             read_note,
             write_note,
             fts_search,
-            get_links
+            get_links,
+            collect_sources,
+            web_clip,
+            llm_status,
+            llm_chat,
+            enrich_notes,
+            embeddings_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

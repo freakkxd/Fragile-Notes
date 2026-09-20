@@ -12,6 +12,8 @@ import StatusBar from './components/StatusBar'
 import GraphView from './components/GraphView'
 import CanvasView from './components/CanvasView'
 import SearchView from './components/SearchView'
+import WebClipper from './components/WebClipper'
+import AIChatFull from './components/AIChatFull'
 
 type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat'
 
@@ -146,12 +148,7 @@ export default function App() {
         {view === 'graph' && <GraphView files={files} />}
         {view === 'canvas' && <CanvasView />}
         {view === 'search' && <SearchView onSearch={bridge.searchNotes} />}
-        {view === 'ai_chat' && (
-          <div style={{ padding: 18 }}>
-            <h3>AI Чат</h3>
-            <div className="card"><p style={{ color:'var(--muted)', fontSize:13 }}>LLM offline — подключи <code>~/LLM/models/*.gguf</code> (llama.cpp). Tauri `llm` сервис покажет <code>online: false</code> пока нет модели.</p></div>
-          </div>
-        )}
+        {view === 'ai_chat' && <AIChatFull />}
 
         <StatusBar status={status} words={words} chars={chars} />
       </main>
@@ -159,6 +156,7 @@ export default function App() {
       {!rightCollapsed && (
         <aside className="right-panel">
           <div className="panel-header">Навигация <span className="count">{files.length}</span></div>
+          <WebClipper />
           <button onClick={() => { setView('graph'); setActiveRibbon('graph') }}>🕸 Граф связей</button>
           <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>
           <button onClick={() => setView('search')}>🔍 Поиск — FTS5</button>
