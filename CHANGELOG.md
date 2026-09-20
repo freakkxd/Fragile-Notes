@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.2 — фикс Windows сборки: icon.ico для Tauri (2026-09-20)
+> **Почему отдельная версия от v0.5.1:** v0.5.1 добавил `Task Manager v2`, но `Build Tauri Windows` падал `14м` — `icons/icon.ico not found; required for generating a Windows Resource file during tauri-build` (`tauri.conf` имел только `icon.png`, `Windows` требует `ico`).
+
+**Сделано:**
+- `src-tauri/icons/icon.ico` `362K` `6` иконок `16/32/48/64/128/256` `32bit` из `icon.png` `512` `magick -define icon:auto-resize`
+- Версии → `0.5.2`, `cargo check` ✅ `tauri-build` теперь находит `icon.ico`
+
+
 ## v0.5.1 — Task Manager v2: 6 поверхностей без костылей (2026-09-19)
 > **Почему отдельная версия от v0.5.0:** v0.5.0 портировал `AO Engine` (`collect` + `Web Clipper` + `enrich`), но `Task Manager` оставался костыльным (`Dataview` + `plugin` `taskIndex` `taskRules`). v0.5.1 — **чистый `Task Manager v2`** как в `Obsidian` `v1` без `Dataview`.
 

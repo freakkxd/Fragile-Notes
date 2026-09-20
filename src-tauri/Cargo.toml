@@ -1,6 +1,6 @@
 [package]
 name = "fragile-notes"
-version = "0.5.1"
+version = "0.5.2"
 description = "Fragile Notes — Obsidian-like vault, C++ core + Tauri + React"
 authors = ["freakkxd <zxcerega666@gmail.com>"]
 license = "MIT"
