@@ -1,31 +1,29 @@
-# Fragile Notes — v0.4.14
+# Fragile Notes — v0.4.15
 
-> **Подпись v0.4.14 — почему отделили эту версию:**
-> - **Сделано в 0.4.13:** фикс `allowlist` + `beforeBuild` (`frontend` без `../`), но `cargo check` падал — `tauri-plugin-updater 1.6` не существует (доступны `2.x`/`3.x`).
-> - **Почему 0.4.14 отдельно:** убран `tauri-plugin-updater` (для `Tauri 1.6` updater встроен), убран `.plugin()` — теперь `cargo tauri build` собирает `AppImage` и открывается.
-> - **Цель 0.4.14:** локально открывается.
+> **Подпись v0.4.15 — почему отделили эту версию:**
+> - **Сделано в 0.4.14:** фикс `AppImage` (`allowlist` + `beforeBuild` + `updater`).
+> - **Почему 0.4.15 отдельно:** **визуально богаче** — `glass` + `градиенты` + `glow` + `3D hover` без изменения ядра.
+> - **Цель 0.4.15:** интерфейс уровня `Obsidian` `+`.
 
-**Obsidian-like vault.** `C++` + `Tauri` + `React` (чисто).
+**Obsidian-like vault.** `C++` + `Tauri` + `React` — богатая визуально.
 
 ![CI](https://github.com/freakkxd/Fragile-Notes/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/freakkxd/Fragile-Notes)
 ![License](https://img.shields.io/github/license/freakkxd/Fragile-Notes)
 
-## Быстрый старт
+## Визуально богаче
+- `Glass` `blur 16px`, `ambient glow` `radial`, `ribbon` `gradient` + `scale`, `panels` `inset`, `tabs` `shadow`, `editor` `1.8`, `markdown` `gradient h1`, `file-tree` `translateX`, `palette` `18px`, `graph` `600x300`, `cards` `14px`
 
-### Linux — Tauri
+## Быстрый старт
 ```bash
 git clone https://github.com/freakkxd/Fragile-Notes.git
-cd Fragile-Notes
 npm --prefix frontend install && npm --prefix frontend run build
-cargo tauri dev    # dev
-cargo tauri build  # -> AppImage
-./src-tauri/target/release/bundle/appimage/*.AppImage
+cargo tauri dev
 ```
 
 ## Версионирование
-- `v0.4.13` — фикс `allowlist` + `beforeBuild`
-- `v0.4.14` — **фикс `tauri-plugin-updater`** (текущий)
+- `v0.4.14` — фикс `AppImage`
+- `v0.4.15` — **богаче визуально** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`

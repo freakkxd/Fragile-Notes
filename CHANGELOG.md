@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.15 — визуально богаче: стекло, градиенты, glow (2026-09-19)
+> **Почему отдельная версия от v0.4.14:** v0.4.14 фиксил `AppImage` сборку (`tauri-plugin-updater` + `allowlist` + `beforeBuild`), но UI оставался плоским (тёмные панели без глубины). v0.4.15 — **визуально богаче** без изменения логики.
+
+**Сделано:**
+- `frontend/src/styles.css`: `glass` `backdrop-blur 16px`, `ambient glow` `radial-gradient` (130,168,255 + 190,165,255 + 139,213,202), `ribbon` градиент + `hover` `translateY(-1px) scale(1.02)` + `active` `linear-gradient` + `glow`, `panels` `blur 16px` + `inset` бордер, `toolbar` `glass pill`, `tabs` `slant` + `shadow`, `editor` `rgba(6,8,15,.72)` + `line-height 1.8`, `markdown` `gradient h1` + `blockquote` `rgba(130,168,255,.08)`, `file-tree` `hover translateX(1px)` + `active gradient`, `empty` `dashed` + `CTA` `shadow`, `palette` `18px` + `blur 10px`, `graph` `radial 600x300` + `shadow`, `right-panel` `card` `14px` + `blur`, `welcome-hero` `linear-gradient 135deg` + `shadow`
+- Версии → `0.4.15`, `tsc` ✅ `vite 287kB` ✅
+
+
 ## v0.4.14 — фикс сборки: убран несуществующий tauri-plugin-updater 1.6 (2026-09-19)
 > **Почему отдельная версия от v0.4.13:** v0.4.13 добавил `tauri-plugin-updater 1.6` + `.plugin()` для автообновления, но `cargo check` падал — `candidate versions found which didn't match: 3.0.0-alpha, 2.12.0` (для `tauri 1.6` плагин не нужен, updater встроен через `tauri features updater`). Из-за этого `cargo tauri build` падал и `AppImage` не собирался → локально не открывается.
 
