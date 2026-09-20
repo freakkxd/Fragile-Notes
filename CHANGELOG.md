@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.14 — фикс сборки: убран несуществующий tauri-plugin-updater 1.6 (2026-09-19)
+> **Почему отдельная версия от v0.4.13:** v0.4.13 добавил `tauri-plugin-updater 1.6` + `.plugin()` для автообновления, но `cargo check` падал — `candidate versions found which didn't match: 3.0.0-alpha, 2.12.0` (для `tauri 1.6` плагин не нужен, updater встроен через `tauri features updater`). Из-за этого `cargo tauri build` падал и `AppImage` не собирался → локально не открывается.
+
+**Сделано:**
+- `src-tauri/Cargo.toml`: убран `tauri-plugin-updater = "1.6"` (не существует для `tauri 1.6`, updater уже в `tauri` crate с `features updater`)
+- `src-tauri/src/main.rs`: убран `.plugin(tauri_plugin_updater::Builder::new().build())` (для `1.x` не нужен, `tauri::Builder` с `updater` feature достаточно, `updater.ts` использует `@tauri-apps/api/updater` напрямую)
+- Версии → `0.4.14` (`cpp`, `frontend`, `src-tauri`, `updater.ts` `CURRENT`), `tsc` ✅ `vite` ✅
+
+
 
 ## v0.4.13 — фикс локальной сборки Tauri (allowlist + beforeBuild) (2026-09-19)
 > **Почему отдельная версия от v0.4.12:** v0.4.12 добавил `autoInstall` + `updater.json`, но локально на этом компе `cargo tauri build` падал — `allowlist.updater` не существует в `Tauri 1.x` (`Additional properties not allowed`) + `beforeBuildCommand` `../frontend` давал `ENOENT /home/fragilich/frontend/package.json` когда `cargo tauri build` запускается из `Fragile-Notes`. v0.4.13 — фикс сборки, чтобы `AppImage` открывался.

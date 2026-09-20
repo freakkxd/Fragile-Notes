@@ -194,7 +194,6 @@ fn main() {
     let _ = fs::create_dir_all(&root);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |_app| {
             eprintln!("[fragile] setup ok, vault {}", root.display());
             Ok(())
