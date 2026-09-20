@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.9 — хотфикс Python GTK: пустая полоса сайдбара (скрины) (2026-09-19)
+> **Почему отдельная версия от v0.4.8:** v0.4.8 фиксил `React Tauri` (`display:none` + `DOM` удаление), но на скринах `Python GTK` (`Adw` `Revealer` + `Gtk.Paned`) — полоса осталась как на скрине 1 (пустой `side_column` 280px). v0.4.9 — хотфикс `Python` (`WorkspaceMixin`).
+
+**Сделано:**
+- Восстановлен `Python` runtime (`fragilenotes/` 53 вьюхи, `main.py`, `pyproject.toml` 0.4.9) — гибрид `Python` + `Tauri` для переходного периода (был удалён в v0.4.2, но нужен для текущего инсталла)
+- `fragilenotes/ui/workspace_mixin.py` `WorkspaceMixin._on_toggle_sidebar`: при `vis=False` теперь `top.set_position(44)` + `GLib.timeout_add(220, collapsed)` + `side_column.remove_css_class(expanded)` + `set_size_request(44,-1)` с повтором через 250ms; при `vis=True` — `set_size_request(-1,-1)` + `add_css_class`. Раньше `width:0` перебивался `min-width:232` и `Paned` оставался 280px.
+- `frontend/src/styles.css` `display:none` уже в v0.4.8, теперь и `Python` фиксит ту же полосу в `GTK`
+- Версии → `0.4.9` (`fragilenotes/__init__.py`, `pyproject.toml`, `cpp`, `frontend`, `src-tauri`), `tsc` ✅ `vite` ✅ `ctest` ✅
+
+
 ## v0.4.8 — сайдбар теперь полностью схлопывается (display:none) (2026-09-19)
 > **Почему отдельная версия от v0.4.7:** v0.4.7 фиксил полосу через `width:0 !important + flex:0 0 0`, но на скрине полоса осталась — `width:0` не перебивает `flex` в рантайме Tauri, остаётся пустой `div` 280px. v0.4.8 — жёсткий `display:none`.
 

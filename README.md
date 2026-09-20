@@ -1,59 +1,41 @@
-# Fragile Notes — v0.4.8
+# Fragile Notes — v0.4.9
 
-> **Подпись v0.4.8 — почему отделили эту версию:**
-> - **Сделано в 0.4.7:** фикс `flex` схлопывания (`width:0 !important + flex:0 0 0`), но на скрине полоса осталась — `width:0` не перебивает `flex` в рантайме Tauri, пустой `div` 280px.
-> - **Почему 0.4.8 отдельно:** жёсткий `display:none !important` для `.left-panel.collapsed` / `.right-panel.collapsed` — теперь `Ctrl+B` / клик `◧` сразу убирает полосу, `center` занимает всё.
-> - **Цель 0.4.8:** сайдбары закрываются без артефактов.
+> **Подпись v0.4.9 — почему отделили эту версию:**
+> - **Сделано в 0.4.8:** `display:none` для `React Tauri` (`left/right-panel.collapsed`), но на скринах `Python GTK` — полоса осталась (пустой `side_column` 280px как на скрине 1, видно `Настройки` + `WORKSPACES`).
+> - **Почему 0.4.9 отдельно:** хотфикс `Python GTK` `WorkspaceMixin`: `top.set_position(44)` + `timeout_add` + `side_column.set_size_request(44)` — теперь `Ctrl+B` / клик `◧` полностью схлопывает без полосы. Восстановлен `Python` runtime (гибрид) для текущего инсталла.
+> - **Цель 0.4.9:** обе платформы без полосы.
 
-**Obsidian-like vault для Linux/Windows.** Ядро `C++` + `Tauri (Rust)` + `React`.
+**Obsidian-like vault.** Гибрид `C++` + `Tauri (Rust/React)` + `Python GTK` (hotfix).
 
 ![CI](https://github.com/freakkxd/Fragile-Notes/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/freakkxd/Fragile-Notes)
 ![License](https://img.shields.io/github/license/freakkxd/Fragile-Notes)
 
-## Актуальный стек v0.4.8
+## Актуальный стек v0.4.9
 
-| Слой | Технология | Где |
-|------|------------|-----|
-| **UI** | React 18 + TypeScript 5.5, Zustand, marked+DOMPurify, Vite 5.4 | `frontend/src/` — полированный Obsidian shell |
-| **Bridge** | Tauri 1.6 IPC + zod | `frontend/src/lib/bridge.ts` + `src-tauri/src/main.rs` |
-| **Core** | C++20, OpenSSL, SQLite FTS5, CRDT | `cpp/` |
-| **Backend** | Rust + Tauri, walkdir, rusqlite | `src-tauri/` |
-| **Build** | CMake, Vite, Tauri NSIS/MSI | `frontend/dist` + `src-tauri/target/release/bundle` |
-| **CI** | tsc, vite, ctest, cargo check/build + Windows NSIS | `.github/workflows/` |
-
-**UX:** `Ribbon` | `File Explorer` collapsible | `Tabs` | `Editor toolbar` | `Split` | `Ctrl+P fuzzy` | `Ctrl+B` (без полосы) | `StatusBar` | `Graph/Canvas`.
+| Слой | Технология |
+|------|------------|
+| **UI Python** | GTK4 4.14 + libadwaita 1.5, `Revealer` + `Paned` (hotfix) | 
+| **UI Tauri** | React 18 + TS, `display:none` |
+| **Core** | C++20, Tauri Rust, Python (transition) |
+| **Build** | CMake, Vite, Tauri NSIS + PyInstaller (hybrid) |
 
 ## Быстрый старт
 
-### Windows — один файл
-Скачай **FragileNotes-Setup-v0.4.8.exe** из **Releases** → https://github.com/freakkxd/Fragile-Notes/releases/latest
-Двойной клик → `Установить` → всё само (`Program Files` + `Start Menu`), `vault` `~/Documents/FragileNotesVault` создастся. Тихая: `exe /S`.
+### Windows — Tauri
+Скачай `FragileNotes-Setup-v0.4.9.exe` → https://github.com/freakkxd/Fragile-Notes/releases/latest — всё само.
 
-### Linux / macOS
+### Linux — Python (текущий инсталл на скринах)
 ```bash
-git clone https://github.com/freakkxd/Fragile-Notes.git
-cd Fragile-Notes
-cmake -S cpp -B build/cpp && cmake --build build/cpp && ./build/cpp/fragile_tests
-npm --prefix frontend install && npm --prefix frontend run build
-cargo install tauri-cli --version "^1.6"
-cargo tauri dev    # dev
-cargo tauri build  # bundle
+git pull
+pip install -e . # обновит 0.4.9
+fragile-notes # или python main.py — теперь без полосы
 ```
-
-## Безопасность волта
-Волт `~/Documents/FragileNotesVault`. В `.gitignore` заблокированы личные заметки.
-
-## Разработка
-```bash
-npm --prefix frontend run typecheck && npm --prefix frontend run build # 282kB
-cmake -S cpp -B build/cpp && ctest --test-dir build/cpp
-cargo check --manifest-path src-tauri/Cargo.toml
-```
+Tauri: `npm --prefix frontend run build && cargo tauri dev`
 
 ## Версионирование
-- `v0.4.6` — UI полировка
-- `v0.4.8` — **фикс полосы сайдбара** (текущий)
+- `v0.4.8` — `display:none` React
+- `v0.4.9` — **Python GTK hotfix + гибрид** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`

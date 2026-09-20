@@ -1,0 +1,57 @@
+[
+  {
+    "id": "hello_world",
+    "name": "Hello World",
+    "version": "0.1.0",
+    "description": "Пример плагина: логирует открытие, сохранение и создание заметок.",
+    "author": "FragileNotes",
+    "filename": "hello_world.py",
+    "source": "hello_world.py",
+    "hooks": ["on_open", "on_save", "on_new"],
+    "category": "example"
+  },
+  {
+    "id": "word_counter",
+    "name": "Word Counter",
+    "version": "0.1.0",
+    "description": "Считает слова при сохранении заметки и выводит в консоль.",
+    "author": "FragileNotes",
+    "filename": "word_counter.py",
+    "source": "word_counter.py",
+    "hooks": ["on_save"],
+    "category": "utility"
+  },
+  {
+    "id": "daily_quote",
+    "name": "Daily Quote",
+    "version": "0.1.0",
+    "description": "Подсказывает случайную цитату при создании новой заметки.",
+    "author": "FragileNotes",
+    "filename": "daily_quote.py",
+    "source": "daily_quote.py",
+    "hooks": ["on_new"],
+    "category": "inspiration"
+  },
+  {
+    "id": "auto_tag",
+    "name": "Auto Tag",
+    "version": "0.1.0",
+    "description": "Анализирует текст при сохранении и предлагает теги (#todo, #idea).",
+    "author": "FragileNotes",
+    "filename": "auto_tag.py",
+    "source": "auto_tag.py",
+    "hooks": ["on_save"],
+    "category": "utility"
+  },
+  {
+    "id": "reading_time",
+    "name": "Reading Time",
+    "version": "0.1.0",
+    "description": "Показывает оценку времени чтения (~200 слов/мин) при открытии заметки.",
+    "author": "FragileNotes",
+    "filename": "reading_time.py",
+    "source": "reading_time.py",
+    "hooks": ["on_open"],
+    "category": "utility"
+  }
+]
