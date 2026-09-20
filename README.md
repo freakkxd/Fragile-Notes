@@ -1,42 +1,40 @@
-# Fragile Notes — v0.4.11
+# Fragile Notes — v0.4.12
 
-> **Подпись v0.4.11 — почему отделили эту версию:**
-> - **Сделано в 0.4.10:** чистый `Tauri` без `Python` (`AppImage`).
-> - **Почему 0.4.11 отдельно:** **автообновление**: на этом компе после каждого `push` — `git hook` + `systemd timer` пересобирает `AppImage`; в `Tauri` — баннер `⬆ Доступно обновление` из `GitHub Releases` (`api.github.com`) с кнопкой `Скачать`.
-> - **Цель 0.4.11:** не надо вручную `git pull && cargo tauri build`.
+> **Подпись v0.4.12 — почему отделили эту версию:**
+> - **Сделано в 0.4.11:** автообновление на этом компе (`systemd timer` + `git hooks`) + баннер `GitHub Releases` с кнопкой `Скачать` (надо было кликать).
+> - **Почему 0.4.12 отдельно:** **полная автоматика на любом устройстве без ручных триггеров** — `Tauri updater` сам `checkUpdate` → `installUpdate` → `relaunch` каждые `5 мин` + `focus`, без `Скачать`.
+> - **Цель 0.4.12:** `AppImage`/`exe` на любом устройстве обновляются молча.
 
-**Obsidian-like vault.** `C++` + `Tauri` + `React` + автообновление.
+**Obsidian-like vault.** `C++` + `Tauri` + `React` + автообновление (везде).
 
 ![CI](https://github.com/freakkxd/Fragile-Notes/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/freakkxd/Fragile-Notes)
 ![License](https://img.shields.io/github/license/freakkxd/Fragile-Notes)
 
-## Автообновление
+## Автообновление (без ручных триггеров)
 
-| Канал | Как работает |
-|-------|--------------|
-| **Локально (этот комп)** | `post-commit`/`post-merge` + `systemd timer 5мин` → `~/bin/fragile-auto-build.sh` (`git pull` → `npm build` → `cargo tauri build` → `~/Applications/Fragile-Notes.AppImage`) |
-| **Удалённо (установленный AppImage)** | `App.tsx` `checkForUpdates` (`fetch api.github.com/releases/latest`) при старте + 30мин + `focus` → баннер `⬆ Доступно обновление {tag}` → `Скачать` (`shell.open`) |
+| Устройство | Как |
+|------------|-----|
+| **Любое (установленный AppImage/exe)** | `App.tsx` `autoInstallIfAvailable()` → `Tauri plugin updater` `checkUpdate()` ( `updater.json` с `pubkey` ) → `installUpdate()` → `relaunch()` каждые `5 мин` + `focus`/`visibilitychange`, без клика |
+| **Этот комп (разработка)** | `post-commit`/`post-merge` + `systemd timer 5мин` → `~/bin/fragile-auto-build.sh` (для `cargo tauri dev`) |
 
-Лог локальной сборки: `~/.cache/fragile-auto-build.log`, ручной триггер: `~/bin/fragile-auto-build.sh` или `systemctl --user start fragile-auto-update.service`
+Fallback: если `updater.json` нет — баннер `GitHub API` `⬆ Доступно обновление` (как в v0.4.11).
 
 ## Быстрый старт
 
-### Windows
-`FragileNotes-Setup-v0.4.11.exe` → https://github.com/freakkxd/Fragile-Notes/releases/latest — автообновление через баннер.
+### Windows / Linux — релиз
+Скачай `*.AppImage` / `*.exe` → https://github.com/freakkxd/Fragile-Notes/releases/latest — обновится сам.
 
-### Linux — Tauri (без Python)
+### Linux — из исходников
 ```bash
 git clone https://github.com/freakkxd/Fragile-Notes.git
-cd Fragile-Notes
 npm --prefix frontend install && npm --prefix frontend run build
-cargo tauri dev    # dev
-cargo tauri build  # -> AppImage
+cargo tauri dev
 ```
 
 ## Версионирование
-- `v0.4.10` — чистый Tauri
-- `v0.4.11` — **автообновление** (текущий)
+- `v0.4.11` — автообновление с кликом `Скачать`
+- `v0.4.12` — **авто без кликов** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`

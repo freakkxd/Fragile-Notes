@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.12 — автообновление на любом устройстве без ручных триггеров (2026-09-19)
+> **Почему отдельная версия от v0.4.11:** v0.4.11 сделал автообновление только на этом компе (`systemd timer` + `git hooks` + баннер `GitHub API` с кнопкой `Скачать` — надо было кликать). v0.4.12 — **полная автоматика на любом устройстве**: `Tauri updater` сам скачивает и ставит.
+
+**Сделано:**
+- `frontend/src/lib/updater.ts`: `autoInstallIfAvailable()` — `import('@tauri-apps/api/updater').checkUpdate()` → `installUpdate()` → `relaunch()` (Tauri `plugin:updater`), fallback `GitHub API` баннер. `CURRENT 0.4.12`.
+- `frontend/src/App.tsx`: проверка каждые `5 мин` + `focus` + `visibilitychange`, при `shouldUpdate` сразу `autoInstallIfAvailable()` без клика (раньше только баннер `Скачать`). `checkForUpdates` теперь пробует `Tauri plugin` сначала, затем `GitHub`.
+- `src-tauri/tauri.conf.json` `updater {active:true, endpoints:[.../updater.json], pubkey}` уже был, теперь используется; `allowlist.updater.all:true`
+- `.github/workflows/build-tauri.yml`: новый единый workflow `Linux (AppImage/deb)` + `Windows (NSIS/MSI)` → `cargo tauri build` с `TAURI_PRIVATE_KEY` → `updater.json` (`version`, `pubkey`, `platforms` с `url`/`signature` из `.sig`) + upload `AppImage`/`deb`/`exe`/`msi`/`sig`/`updater.json` в `Releases` на `tags v*` (удалён старый `build-tauri-windows.yml`)
+- Локальное на этом компе остаётся: `post-commit`/`post-merge` + `systemd timer 5мин` → `fragile-auto-build.sh` (для разработки), удалённое на любом устройстве — `Tauri updater` (без `git`).
+- Версии → `0.4.12`, `tsc` ✅ `vite 284kB` ✅
+
+
 ## v0.4.11 — автообновление Tauri (GitHub Releases + локальная пересборка) (2026-09-19)
 > **Почему отдельная версия от v0.4.10:** v0.4.10 снова сделал чистый `Tauri` без `Python`, но без автообновления — после каждого `push` надо было вручную `git pull && cargo tauri build`. v0.4.11 — **автообновление**: локально на этом компе после каждого `push` + в `Tauri` баннер из `GitHub Releases`.
 

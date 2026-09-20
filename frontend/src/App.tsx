@@ -23,19 +23,31 @@ export default function App() {
 
   useEffect(() => { loadVault() }, [loadVault])
 
-  // Автообновление: проверка GitHub Releases при старте + каждые 30 мин + после каждого пуша (via git hook rebuild)
+  // Автообновление на любом устройстве — без ручных триггеров
   useEffect(() => {
     let cancelled = false
+    let installing = false
     const check = async () => {
+      if (installing) return
+      // 1. Пробуем Tauri auto-install (скачает и поставит молча)
+      try {
+        const { autoInstallIfAvailable } = await import('./lib/updater')
+        if (await autoInstallIfAvailable()) {
+          installing = true
+          return // будет relaunch
+        }
+      } catch {}
+      // 2. Fallback — баннер с GitHub
       const res = await checkForUpdates(true)
       if (!cancelled && res?.hasUpdate) setUpdateInfo({ latest: res.latest, url: res.url })
     }
     check()
-    const id = setInterval(check, 30 * 60 * 1000)
-    // также слушаем событие от Rust side (post-push rebuild) если есть
+    const id = setInterval(check, 5 * 60 * 1000) // каждые 5 мин, без кликов
     const onFocus = () => check()
+    const onVisibility = () => { if (document.visibilityState === 'visible') check() }
     window.addEventListener('focus', onFocus)
-    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', onFocus) }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
 
   useEffect(() => {

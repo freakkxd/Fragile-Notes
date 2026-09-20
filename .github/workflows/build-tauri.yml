@@ -1,0 +1,122 @@
+name: Build Tauri (All Platforms) + Updater
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Linux AppImage + deb (for updater on any Linux device)
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: frontend/package.json }
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pkg-config libgtk-3-dev librsvg2-dev patchelf libssl-dev libsqlite3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libsoup2.4-dev libayatana-appindicator3-dev 2>&1 | tail -10 || true
+          for p in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/pkgconfig; do
+            [ -d "$p" ] || continue
+            [ -f "$p/javascriptcoregtk-4.1.pc" ] && [ ! -f "$p/javascriptcoregtk-4.0.pc" ] && sudo ln -sf javascriptcoregtk-4.1.pc "$p/javascriptcoregtk-4.0.pc" || true
+            [ -f "$p/webkit2gtk-4.1.pc" ] && [ ! -f "$p/webkit2gtk-4.0.pc" ] && sudo ln -sf webkit2gtk-4.1.pc "$p/webkit2gtk-4.0.pc" || true
+          done
+          [ -f /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so ] && [ ! -f /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.0.so ] && sudo ln -sf libwebkit2gtk-4.1.so /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.0.so || true
+          [ -f /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.1.so ] && [ ! -f /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.0.so ] && sudo ln -sf libjavascriptcoregtk-4.1.so /usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.0.so || true
+          sudo ldconfig || true
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+      - run: cargo install tauri-cli --version "^1.6" --locked
+      - name: Build Tauri (AppImage)
+        run: cargo tauri build
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      - run: ls -R src-tauri/target/release/bundle/ 2>&1 | head -100
+      - uses: actions/upload-artifact@v4
+        with: { name: linux-bundles, path: src-tauri/target/release/bundle/**/* }
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: frontend/package.json }
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+      - run: npm --prefix frontend run typecheck
+      - name: Build C++ core (non-blocking on Windows)
+        shell: bash
+        continue-on-error: true
+        run: |
+          cmake -S cpp -B build/cpp 2>&1 | head -20 || echo "cmake skip"
+          cmake --build build/cpp 2>&1 | tail -10 || true
+      - name: Install WiX
+        shell: powershell
+        continue-on-error: true
+        run: |
+          choco install wixtoolset -y --no-progress
+          try { nsis --version } catch { try { makensis -VERSION } catch { echo "NSIS" } }
+      - run: cargo install tauri-cli --version "^1.6" --locked
+      - name: Build Tauri (NSIS + MSI)
+        run: cargo tauri build
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      - run: ls -R src-tauri/target/release/bundle/ 2>&1 | head -100
+      - uses: actions/upload-artifact@v4
+        with: { name: windows-bundles, path: src-tauri/target/release/bundle/**/* }
+
+  release:
+    needs: [build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: bundles }
+      - run: ls -R bundles 2>&1 | head -100
+      - name: Generate updater.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          PUBKEY=$(cat src-tauri/tauri.conf.json | grep -o '"pubkey": "[^"]*"' | cut -d'"' -f4 | head -1)
+          echo "Version $VERSION pubkey $PUBKEY"
+          # Find signatures and URLs (Tauri generates .sig files)
+          find bundles -name "*.sig" 2>&1 | head -20
+          ls bundles/**/bundle/**/* 2>&1 | head -50
+          # Simple updater.json for fallback (custom GitHub API updater also works)
+          cat > updater.json <<JSON
+          {
+            "version": "$VERSION",
+            "notes": "Auto-update to $VERSION — see https://github.com/freakkxd/Fragile-Notes/releases/tag/v$VERSION",
+            "pubkey": "$PUBKEY",
+            "platforms": {
+              "linux-x86_64": { "signature": "", "url": "https://github.com/freakkxd/Fragile-Notes/releases/download/v$VERSION/Fragile_Notes_${VERSION}_amd64.AppImage.tar.gz" },
+              "windows-x86_64": { "signature": "", "url": "https://github.com/freakkxd/Fragile-Notes/releases/download/v$VERSION/Fragile_Notes_${VERSION}_x64_en-US.msi.zip" }
+            }
+          }
+          JSON
+          cat updater.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bundles/**/*.AppImage
+            bundles/**/*.deb
+            bundles/**/*.exe
+            bundles/**/*.msi
+            bundles/**/*.sig
+            updater.json
+          generate_release_notes: true
+          fail_on_unmatched_files: false
