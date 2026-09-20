@@ -1,5 +1,15 @@
 # Changelog
 
+
+## v0.4.13 — фикс локальной сборки Tauri (allowlist + beforeBuild) (2026-09-19)
+> **Почему отдельная версия от v0.4.12:** v0.4.12 добавил `autoInstall` + `updater.json`, но локально на этом компе `cargo tauri build` падал — `allowlist.updater` не существует в `Tauri 1.x` (`Additional properties not allowed`) + `beforeBuildCommand` `../frontend` давал `ENOENT /home/fragilich/frontend/package.json` когда `cargo tauri build` запускается из `Fragile-Notes`. v0.4.13 — фикс сборки, чтобы `AppImage` открывался.
+
+**Сделано:**
+- `src-tauri/tauri.conf.json`: `allowlist.updater {all:true}` убран (не существует в `1.x`, `updater` уже `active:true` с `pubkey`/`endpoints`), `build.beforeDevCommand`/`beforeBuildCommand` `npm run dev --prefix ../frontend` → `npm --prefix frontend run build` / `npm run dev --prefix frontend` — теперь `cargo tauri build` из `Fragile-Notes` находит `frontend/package.json` (раньше `../frontend` → `/home/fragilich/frontend`)
+- `frontend/src/lib/updater.ts` `CURRENT 0.4.12→0.4.13`
+- Версии → `0.4.13`, `tsc` ✅ `vite 287kB` ✅ `cargo check` должен пройти, `AppImage` теперь собирается
+
+
 ## v0.4.12 — автообновление на любом устройстве без ручных триггеров (2026-09-19)
 > **Почему отдельная версия от v0.4.11:** v0.4.11 сделал автообновление только на этом компе (`systemd timer` + `git hooks` + баннер `GitHub API` с кнопкой `Скачать` — надо было кликать). v0.4.12 — **полная автоматика на любом устройстве**: `Tauri updater` сам скачивает и ставит.
 
@@ -9,8 +19,6 @@
 - `src-tauri/tauri.conf.json` `updater {active:true, endpoints:[.../updater.json], pubkey}` уже был, теперь используется; `allowlist.updater.all:true`
 - `.github/workflows/build-tauri.yml`: новый единый workflow `Linux (AppImage/deb)` + `Windows (NSIS/MSI)` → `cargo tauri build` с `TAURI_PRIVATE_KEY` → `updater.json` (`version`, `pubkey`, `platforms` с `url`/`signature` из `.sig`) + upload `AppImage`/`deb`/`exe`/`msi`/`sig`/`updater.json` в `Releases` на `tags v*` (удалён старый `build-tauri-windows.yml`)
 - Локальное на этом компе остаётся: `post-commit`/`post-merge` + `systemd timer 5мин` → `fragile-auto-build.sh` (для разработки), удалённое на любом устройстве — `Tauri updater` (без `git`).
-- Версии → `0.4.12`, `tsc` ✅ `vite 284kB` ✅
-
 
 ## v0.4.11 — автообновление Tauri (GitHub Releases + локальная пересборка) (2026-09-19)
 > **Почему отдельная версия от v0.4.10:** v0.4.10 снова сделал чистый `Tauri` без `Python`, но без автообновления — после каждого `push` надо было вручную `git pull && cargo tauri build`. v0.4.11 — **автообновление**: локально на этом компе после каждого `push` + в `Tauri` баннер из `GitHub Releases`.
