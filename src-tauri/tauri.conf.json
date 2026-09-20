@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Fragile Notes",
-    "version": "0.5.2"
+    "version": "0.5.3"
   },
   "tauri": {
     "allowlist": {
@@ -32,15 +32,15 @@
       "category": "Productivity",
       "copyright": "© 2026 Fragilich",
       "identifier": "com.fragilich.notes",
-      "icon": ["icons/icon.png"],
-      "targets": ["nsis", "msi"],
+      "icon": ["icons/icon.ico", "icons/icon.png"],
+      "targets": ["appimage", "deb", "nsis", "msi", "updater"],
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
         "nsis": {
           "displayLanguageSelector": false,
           "installMode": "both",
-          "installerIcon": "icons/icon.png",
+          "installerIcon": "icons/icon.ico",
           "languages": ["Russian", "English"],
           "template": null
         },

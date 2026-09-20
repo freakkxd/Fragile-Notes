@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.3 — фикс сборки Tauri bundle: icon + targets (2026-09-21)
+> **Почему отдельная версия от v0.5.2:** v0.5.2 добавил `src-tauri/icons/icon.ico` `362K`, но `tauri.conf.json` всё ещё имел `bundle.icon ["icon.png"]` без `icon.ico` и `targets ["nsis","msi"]` только для `Windows` — `Windows build` падал `thread panicked at tauri-cli src/interface/rust.rs:1073 the bundle config must have a .ico icon` (`build-windows 11m46s FAILED`), `Linux build` собрал `release` бинарь `23s` но `bundle/` не создался `No such file bundle/` → `No artifacts uploaded` (`linux-bundles` пусто, `release` без `AppImage/deb`). v0.5.3 — **фикс `tauri.conf`** чтобы `Tauri bundler` генерил артефакты на обеих платформах.
+
+**Сделано:**
+- `src-tauri/tauri.conf.json` `bundle.icon` `["icon.png"]` → `["icons/icon.ico","icons/icon.png"]` — теперь `tauri-cli` на `Windows` находит `ico` (раньше падал `1073`), `bundle.windows.nsis.installerIcon` `icon.png` → `icon.ico` (NSIS требует `ico`)
+- `src-tauri/tauri.conf.json` `bundle.targets` `["nsis","msi"]` → `["appimage","deb","nsis","msi","updater"]` — `Linux` теперь генерит `AppImage`+`deb` (`1024×` bundle), `updater` артефакт `*.AppImage.tar.gz` + `.sig` для `updater.json` (раньше `Warn updater enabled but bundle target list does not contain updater`)
+- Версии → `0.5.3` (`Cargo.toml`, `tauri.conf.json`, `frontend/package.json`, `cpp/CMakeLists`, `frontend/src/lib/updater.ts` `CURRENT`), `tsc` ✅ `vite 299kB` ✅
+- `README.md` подпись `v0.5.3`, `CHANGELOG.md` этот раздел
+
 ## v0.5.2 — фикс Windows сборки: icon.ico для Tauri (2026-09-20)
 > **Почему отдельная версия от v0.5.1:** v0.5.1 добавил `Task Manager v2`, но `Build Tauri Windows` падал `14м` — `icons/icon.ico not found; required for generating a Windows Resource file during tauri-build` (`tauri.conf` имел только `icon.png`, `Windows` требует `ico`).
 
