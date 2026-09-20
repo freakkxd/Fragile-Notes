@@ -65,14 +65,16 @@ export default function App() {
     <div className="app">
       <Ribbon onNav={handleNav} />
 
-      <aside className={`left-panel ${leftCollapsed ? 'collapsed' : ''}`}>
-        <div className="panel-header">Vault — {files.length} <span className="count">{mode}</span></div>
-        <div style={{ padding: '6px 8px', display:'flex', gap:6 }}>
-          <button className="badge" style={{ flex:1, cursor:'pointer', background:'var(--accent)', color:'#0b0b0b', borderColor:'var(--accent)' }} onClick={createNote}>+ Новая</button>
-          <button className="badge" style={{ cursor:'pointer' }} onClick={loadVault}>⟳</button>
-        </div>
-        <FileTree files={files} current={activePath} onOpen={(p) => { setView('editor'); setActiveRibbon('files'); openFile(p) }} onNew={createNote} />
-      </aside>
+      {!leftCollapsed && (
+        <aside className="left-panel">
+          <div className="panel-header">Vault — {files.length} <span className="count">{mode}</span></div>
+          <div style={{ padding: '6px 8px', display:'flex', gap:6 }}>
+            <button className="badge" style={{ flex:1, cursor:'pointer', background:'var(--accent)', color:'#0b0b0b', borderColor:'var(--accent)' }} onClick={createNote}>+ Новая</button>
+            <button className="badge" style={{ cursor:'pointer' }} onClick={loadVault}>⟳</button>
+          </div>
+          <FileTree files={files} current={activePath} onOpen={(p) => { setView('editor'); setActiveRibbon('files'); openFile(p) }} onNew={createNote} />
+        </aside>
+      )}
 
       <main className="center">
         <div className="toolbar">
@@ -118,25 +120,27 @@ export default function App() {
         <StatusBar status={status} words={words} chars={chars} />
       </main>
 
-      <aside className={`right-panel ${rightCollapsed ? 'collapsed' : ''}`}>
-        <div className="panel-header">Навигация <span className="count">{files.length}</span></div>
-        <button onClick={() => { setView('graph'); setActiveRibbon('graph') }}>🕸 Граф связей</button>
-        <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>
-        <button onClick={() => setView('search')}>🔍 Поиск — FTS5</button>
-        <button onClick={() => handleNav('ai_chat')}>🤖 AI Чат</button>
-        <div className="card">
-          <h4>Контент</h4>
-          <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>Backlinks • Outline • Tags — парсятся `C++` (`[[ ]]`, `#tags`, `frontmatter`).<br/>Tauri IPC + `zod` валидация.</div>
-        </div>
-        <div className="card">
-          <h4>Tasks</h4>
-          <div style={{ fontSize:12, color:'var(--muted)' }}>Задачи из <code>- [ ]</code> — агрегируются `tasks` модулем. Скоро `Kanban`/`Calendar`.</div>
-        </div>
-        <div className="card" style={{ opacity:.8 }}>
-          <h4>Совет</h4>
-          <div style={{ fontSize:12, color:'var(--muted)' }}><b>Ctrl+P</b> палитра • <b>Ctrl+S</b> сохранить • <b>Ctrl+B</b> боковая • `[[` ссылка • `#тег`</div>
-        </div>
-      </aside>
+      {!rightCollapsed && (
+        <aside className="right-panel">
+          <div className="panel-header">Навигация <span className="count">{files.length}</span></div>
+          <button onClick={() => { setView('graph'); setActiveRibbon('graph') }}>🕸 Граф связей</button>
+          <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>
+          <button onClick={() => setView('search')}>🔍 Поиск — FTS5</button>
+          <button onClick={() => handleNav('ai_chat')}>🤖 AI Чат</button>
+          <div className="card">
+            <h4>Контент</h4>
+            <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>Backlinks • Outline • Tags — парсятся `C++` (`[[ ]]`, `#tags`, `frontmatter`).<br/>Tauri IPC + `zod` валидация.</div>
+          </div>
+          <div className="card">
+            <h4>Tasks</h4>
+            <div style={{ fontSize:12, color:'var(--muted)' }}>Задачи из <code>- [ ]</code> — агрегируются `tasks` модулем. Скоро `Kanban`/`Calendar`.</div>
+          </div>
+          <div className="card" style={{ opacity:.8 }}>
+            <h4>Совет</h4>
+            <div style={{ fontSize:12, color:'var(--muted)' }}><b>Ctrl+P</b> палитра • <b>Ctrl+S</b> сохранить • <b>Ctrl+B</b> боковая • `[[` ссылка • `#тег`</div>
+          </div>
+        </aside>
+      )}
 
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} commands={commands} />
     </div>
