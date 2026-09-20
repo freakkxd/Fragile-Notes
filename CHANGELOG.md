@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.1 — Task Manager v2: 6 поверхностей без костылей (2026-09-19)
+> **Почему отдельная версия от v0.5.0:** v0.5.0 портировал `AO Engine` (`collect` + `Web Clipper` + `enrich`), но `Task Manager` оставался костыльным (`Dataview` + `plugin` `taskIndex` `taskRules`). v0.5.1 — **чистый `Task Manager v2`** как в `Obsidian` `v1` без `Dataview`.
+
+**Сделано:**
+- `src-tauri/src/tasks.rs` — `Task {id,title,status,task_type,due,scheduled,project,path}` `statusLaw` `is_terminal(done/cancelled)`, `is_relevant_on_day` `routine/scheduled/due`, `tasks_root` `Tasks` fallback `05 Sort`, `load_tasks_from_vault` `walkdir` `frontmatter` `status` `task_type`, `tasks_list(filter: today/board/completed/workspace)` `todayBucket` `Local::now`, `tasks_create` `Tasks/{date}-{slug}.md` `frontmatter`, `tasks_update_status` `status: todo/doing/done` `+ - [ ]/[x]`, `tasks_archive` `Archive/Tasks`
+- `src-tauri/src/main.rs` `mod tasks` + `invoke_handler` `tasks_list/create/update_status/archive`
+- `frontend/src/components/tasks/TaskManager.tsx` — 6 поверхностей: `Start` (KPI `counts` + `Today/Workspace/Board` + `Create`), `Today` (`getTodayTaskBucket` `due==today` `+ relevance`), `Day` (`02 Daily/{date}.md` `embed`), `Workspace` (`project` фильтр), `Board` (`Kanban` `todo/doing/done` `drag` `statusLaw`), `Completed` (`terminal` `archive` `Review`) — `useTasks` `invoke tasks_list` + `TaskRow` `Выполнено`
+- `frontend/src/App.tsx` `ViewId +tasks`, `Ribbon` `✓ Задачи` уже был, `right-panel` `✓ Task Manager v2` `active`, `tasks` `Tauri` `commands` `Zustand` `store` `sqlite` `WAL` + `markdown` `sync`
+- Версии → `0.5.1`, `tsc` ✅ `vite 299kB` ✅ `cargo check` ✅
+
+
 ## v0.5.0 — нативный AO Engine: сбор + Web Clipper + обогащение (2026-09-19)
 > **Почему отдельная версия от v0.4.15:** v0.4.15 был визуально богаче (`glass`/`glow`), но `AO Engine` (`_System/ArchiveOrganism`) оставался внешним `Node` `ao-engine` (`ingestFiles`, `wrapWebClips`, `enrichNotes`). v0.5.0 — **портирован нативно** в `Tauri`+`C++`+`React` без `Node`.
 

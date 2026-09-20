@@ -2,8 +2,10 @@
 
 mod collect;
 mod enrich;
+mod tasks;
 use collect::{collect_sources, web_clip};
 use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
+use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -213,7 +215,11 @@ fn main() {
             llm_status,
             llm_chat,
             enrich_notes,
-            embeddings_search
+            embeddings_search,
+            tasks_list,
+            tasks_create,
+            tasks_update_status,
+            tasks_archive
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

@@ -14,8 +14,9 @@ import CanvasView from './components/CanvasView'
 import SearchView from './components/SearchView'
 import WebClipper from './components/WebClipper'
 import AIChatFull from './components/AIChatFull'
+import TaskManager from './components/tasks/TaskManager'
 
-type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat'
+type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat' | 'tasks'
 
 export default function App() {
   const { files, activePath, content, mode, tabs, leftCollapsed, rightCollapsed, commandOpen, status, loadVault, openFile, setContent, save, setMode, setCommandOpen } = useVault()
@@ -79,7 +80,7 @@ export default function App() {
 
   const handleNav = (id: string) => {
     setActiveRibbon(id)
-    if (id === 'graph' || id === 'canvas' || id === 'search') setView(id as ViewId)
+    if (id === 'graph' || id === 'canvas' || id === 'search' || id === 'tasks') setView(id as ViewId)
     else if (id === 'ai_chat') setView('ai_chat')
     else setView('editor')
   }
@@ -149,6 +150,7 @@ export default function App() {
         {view === 'canvas' && <CanvasView />}
         {view === 'search' && <SearchView onSearch={bridge.searchNotes} />}
         {view === 'ai_chat' && <AIChatFull />}
+        {view === 'tasks' && <TaskManager />}
 
         <StatusBar status={status} words={words} chars={chars} />
       </main>
@@ -157,6 +159,7 @@ export default function App() {
         <aside className="right-panel">
           <div className="panel-header">Навигация <span className="count">{files.length}</span></div>
           <WebClipper />
+          <button onClick={() => { setView('tasks'); setActiveRibbon('tasks') }} style={{ background: activeRibbon==='tasks'?'var(--accent)':'var(--panel-2)', color: activeRibbon==='tasks'?'#0b0b12':'var(--fg)' }}>✓ Task Manager v2</button>
           <button onClick={() => { setView('graph'); setActiveRibbon('graph') }}>🕸 Граф связей</button>
           <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>
           <button onClick={() => setView('search')}>🔍 Поиск — FTS5</button>
