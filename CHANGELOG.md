@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.11 — автообновление Tauri (GitHub Releases + локальная пересборка) (2026-09-19)
+> **Почему отдельная версия от v0.4.10:** v0.4.10 снова сделал чистый `Tauri` без `Python`, но без автообновления — после каждого `push` надо было вручную `git pull && cargo tauri build`. v0.4.11 — **автообновление**: локально на этом компе после каждого `push` + в `Tauri` баннер из `GitHub Releases`.
+
+**Сделано:**
+- Сгенерирован `Tauri signing keypair` (`~/.tauri/fragile.key` + `.pub`), `pubkey` `dW50cn...TkUK` добавлен в `tauri.conf.json` `updater {active:true, endpoints:[.../updater.json], pubkey}`, `Cargo.toml` `tauri features +updater` + `tauri-plugin-updater 1.6`, `src-tauri/src/main.rs` `.plugin(tauri_plugin_updater::Builder::new().build())`
+- `GitHub Secrets` `TAURI_PRIVATE_KEY` + `TAURI_KEY_PASSWORD` — для подписи `updater.json` в `CI`
+- `frontend/src/lib/updater.ts` — проверка `https://api.github.com/repos/freakkxd/Fragile-Notes/releases/latest`, сравнение `CURRENT 0.4.11`, баннер в `App.tsx` `⬆ Доступно обновление {latest} [Скачать]` + `openReleasePage` (`shell.open` || `window.open`), проверка при старте + каждые 30 мин + на `focus`
+- Локальное автообновление на этом компе: `~/bin/fragile-auto-build.sh` (`git fetch/pull` → `npm ci/build` → `cargo tauri build` → `~/Applications/Fragile-Notes.AppImage` + `.desktop`), `post-commit`/`post-merge` хуки + `systemd --user` `fragile-auto-update.timer` каждые 5 мин, `cargo-tauri 1.6.6` установлен
+- Версии → `0.4.11`, `tsc` ✅ `vite 284kB` ✅
+
+
 ## v0.4.10 — чистый Tauri без Python (финал v0.4) (2026-09-19)
 > **Почему отдельная версия от v0.4.9:** v0.4.9 был гибридом (`Python` + `Tauri`) — вернул `Python` чтобы пофиксить твой `Linux` `GTK` на скринах. v0.4.10 — **снова чистый `Tauri`** как задумывалось для `v0.4`, без `Python` вообще (`pip` `fragile-notes` удалён).
 

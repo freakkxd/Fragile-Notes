@@ -1,6 +1,6 @@
 [package]
 name = "fragile-notes"
-version = "0.4.10"
+version = "0.4.11"
 description = "Fragile Notes — Obsidian-like vault, C++ core + Tauri + React"
 authors = ["freakkxd <zxcerega666@gmail.com>"]
 license = "MIT"
@@ -12,7 +12,8 @@ rust-version = "1.77"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.6", features = ["shell-open", "dialog-all", "fs-all", "path-all"] }
+tauri = { version = "1.6", features = ["shell-open", "dialog-all", "fs-all", "path-all", "updater"] }
+tauri-plugin-updater = "1.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 walkdir = "2.4"

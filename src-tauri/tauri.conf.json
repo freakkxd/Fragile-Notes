@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Fragile Notes",
-    "version": "0.4.10"
+    "version": "0.4.11"
   },
   "tauri": {
     "allowlist": {
@@ -19,7 +19,14 @@
       },
       "path": { "all": true },
       "dialog": { "all": true, "open": true, "save": true },
-      "shell": { "open": true }
+      "shell": { "open": true },
+      "updater": { "all": true }
+    },
+    "updater": {
+      "active": true,
+      "endpoints": ["https://github.com/freakkxd/Fragile-Notes/releases/latest/download/updater.json"],
+      "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlEQjhFNTIyOTYyM0QwQjUKUldTMTBDT1dJdVc0blZpc0YrVWxBcjQxUUE0KzJLbWNZUWljWDRZNFN0SE9meVNxZlZuU0N0TkUK"
     },
     "bundle": {
       "active": true,

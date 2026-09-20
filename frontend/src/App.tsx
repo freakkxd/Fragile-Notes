@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useVault } from './store/vault'
 import * as bridge from './lib/bridge'
+import { checkForUpdates, openReleasePage } from './lib/updater'
 import Ribbon from './components/Ribbon'
 import FileTree from './components/FileTree'
 import Editor from './components/Editor'
@@ -18,8 +19,24 @@ export default function App() {
   const { files, activePath, content, mode, tabs, leftCollapsed, rightCollapsed, commandOpen, status, loadVault, openFile, setContent, save, setMode, setCommandOpen } = useVault()
   const [view, setView] = useState<ViewId>('editor')
   const [activeRibbon, setActiveRibbon] = useState<string>('files')
+  const [updateInfo, setUpdateInfo] = useState<{ latest: string; url: string } | null>(null)
 
   useEffect(() => { loadVault() }, [loadVault])
+
+  // Автообновление: проверка GitHub Releases при старте + каждые 30 мин + после каждого пуша (via git hook rebuild)
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      const res = await checkForUpdates(true)
+      if (!cancelled && res?.hasUpdate) setUpdateInfo({ latest: res.latest, url: res.url })
+    }
+    check()
+    const id = setInterval(check, 30 * 60 * 1000)
+    // также слушаем событие от Rust side (post-push rebuild) если есть
+    const onFocus = () => check()
+    window.addEventListener('focus', onFocus)
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', onFocus) }
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,6 +94,13 @@ export default function App() {
       )}
 
       <main className="center">
+        {updateInfo && (
+          <div style={{ padding:'6px 10px', background:'var(--accent)', color:'#0b0b0b', display:'flex', gap:8, alignItems:'center', fontSize:13, fontWeight:600 }}>
+            <span>⬆ Доступно обновление {updateInfo.latest}</span>
+            <button onClick={()=> openReleasePage(updateInfo.url)} style={{ background:'#0b0b0b', color:'var(--accent)', border:0, padding:'4px 10px', borderRadius:6, cursor:'pointer' }}>Скачать</button>
+            <button onClick={()=> setUpdateInfo(null)} style={{ background:'transparent', border:0, color:'#0b0b0b', cursor:'pointer', marginLeft:'auto' }}>✕</button>
+          </div>
+        )}
         <div className="toolbar">
           <button className="ghost" onClick={()=> useVault.getState().toggleLeft()} title="Скрыть левую панель (Ctrl+B)">◧</button>
           <button onClick={() => setMode(mode === 'edit' ? 'preview' : mode === 'preview' ? 'split' : 'edit')} title="Edit/Preview/Split">{mode==='edit'?'✎ Edit':mode==='preview'?'👁 Preview':'⬌ Split'}</button>
