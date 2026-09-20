@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.10 — чистый Tauri без Python (финал v0.4) (2026-09-19)
+> **Почему отдельная версия от v0.4.9:** v0.4.9 был гибридом (`Python` + `Tauri`) — вернул `Python` чтобы пофиксить твой `Linux` `GTK` на скринах. v0.4.10 — **снова чистый `Tauri`** как задумывалось для `v0.4`, без `Python` вообще (`pip` `fragile-notes` удалён).
+
+**Сделано:**
+- Удалены снова: `fragilenotes/` 53 вьюхи, `main.py`, `pyproject.toml`, `run.sh`, `fragile`, `fragile_notes.egg-info` — только `C++/Tauri/React`
+- `pip uninstall fragile-notes` — на `Linux` теперь только `cargo tauri dev` / `AppImage` (`src-tauri/target/release/bundle/appimage`)
+- Версии → `0.4.10` (`cpp`, `frontend`, `src-tauri`), `tsc` ✅ `vite` ✅ `ctest` ✅
+
+
 ## v0.4.9 — хотфикс Python GTK: пустая полоса сайдбара (скрины) (2026-09-19)
 > **Почему отдельная версия от v0.4.8:** v0.4.8 фиксил `React Tauri` (`display:none` + `DOM` удаление), но на скринах `Python GTK` (`Adw` `Revealer` + `Gtk.Paned`) — полоса осталась как на скрине 1 (пустой `side_column` 280px). v0.4.9 — хотфикс `Python` (`WorkspaceMixin`).
 
