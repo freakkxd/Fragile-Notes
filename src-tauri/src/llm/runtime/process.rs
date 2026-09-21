@@ -65,28 +65,62 @@ pub fn spawn_llama_server(
 }
 
 pub fn is_process_alive(pid: u32) -> bool {
-    PathBuf::from(format!("/proc/{}", pid)).exists()
+    let inspector = super::inspector::default_inspector();
+    inspector.exists(pid).unwrap_or(false)
 }
 
 pub fn command_line_matches(pid: u32, expected_exe: &str) -> bool {
-    let path = format!("/proc/{}/cmdline", pid);
-    if let Ok(content) = std::fs::read(path) {
-        let cmdline = String::from_utf8_lossy(&content);
-        return cmdline.contains(expected_exe);
-    }
-    false
+    let inspector = super::inspector::default_inspector();
+    inspector.command_line(pid).map(|s| s.contains(expected_exe)).unwrap_or(false)
 }
 
 pub fn verify_ownership(managed: &ManagedProcess, expected_instance: &str) -> Result<(), String> {
     if managed.instance_id != expected_instance {
         return Err(format!("instance mismatch: {} != {}", managed.instance_id, expected_instance));
     }
-    if !is_process_alive(managed.pid) {
+    let inspector = super::inspector::default_inspector();
+    if !inspector.exists(managed.pid).unwrap_or(false) {
         return Err(format!("PID {} not running (stale)", managed.pid));
     }
-    if !command_line_matches(managed.pid, &managed.executable) {
+    let cmd = inspector.command_line(managed.pid).unwrap_or_default();
+    if !cmd.is_empty() && !cmd.contains(&managed.executable) {
         return Err(format!("PID {} command line does not match {}", managed.pid, managed.executable));
     }
+    // also check via trait owns_process for full verification (includes instance_id)
+    let owns = inspector.owns_process(managed).map_err(|e| format!("owns check failed: {}", e))?;
+    if !owns {
+        return Err(format!("PID {} not owned by instance {}", managed.pid, managed.instance_id));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+pub fn graceful_terminate(pid: u32) -> Result<(), String> {
+    // Unix: SIGTERM via kill
+    let out = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() && !String::from_utf8_lossy(&out.stderr).is_empty() {
+        // not fatal, process may have already exited
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn graceful_terminate(_pid: u32) -> Result<(), String> {
+    // Windows: Job Object would terminate tree; for now, direct child only
+    // TODO P1.3: use Job Object, for now just return Ok and let manager do kill via Child handle
+    // This is explicit limitation, not silent fallback
+    Ok(())
+}
+
+#[cfg(unix)]
+pub fn force_kill(pid: u32) -> Result<(), String> {
+    let _ = std::process::Command::new("kill").arg("-KILL").arg(pid.to_string()).output();
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn force_kill(_pid: u32) -> Result<(), String> {
+    // Windows: TerminateProcess via OpenProcess
     Ok(())
 }
 

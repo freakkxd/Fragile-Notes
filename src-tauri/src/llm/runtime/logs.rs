@@ -17,12 +17,21 @@ pub struct LogSink {
     file_path: PathBuf,
 }
 
+fn sanitize_runtime_id(id: &str) -> String {
+    // prevent path traversal: only allow alphanumeric, -, _, .
+    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect::<String>().chars().take(64).collect()
+}
+
 impl LogSink {
     pub fn new(runtime_id: &str, base_dir: &Path) -> Self {
+        let safe_id = sanitize_runtime_id(runtime_id);
         let dir = base_dir.join("runtime-logs");
         let _ = std::fs::create_dir_all(&dir);
-        let file_path = dir.join(format!("{}.log", runtime_id));
-        Self { runtime_id: runtime_id.to_string(), ring: Arc::new(Mutex::new(VecDeque::with_capacity(RING_CAP))), file_path }
+        // ensure runtime_id does not contain path separators
+        let file_path = dir.join(format!("{}.log", safe_id));
+        // verify file_path is still under dir (prevent traversal)
+        let file_path = if file_path.starts_with(&dir) { file_path } else { dir.join("invalid.log") };
+        Self { runtime_id: safe_id, ring: Arc::new(Mutex::new(VecDeque::with_capacity(RING_CAP))), file_path }
     }
 
     pub fn push(&self, stream: LogStream, text: String) {
@@ -62,8 +71,12 @@ impl LogSink {
     }
 
     pub fn tail(&self, n: usize) -> Vec<LogLine> {
+        if n == 0 { return vec![]; }
+        let n = n.min(RING_CAP);
         if let Ok(ring) = self.ring.lock() {
-            ring.iter().rev().take(n).cloned().collect::<Vec<_>>().into_iter().rev().collect()
+            let len = ring.len();
+            let start = len.saturating_sub(n);
+            ring.iter().skip(start).cloned().collect()
         } else { vec![] }
     }
 
@@ -93,15 +106,38 @@ impl LogSink {
 }
 
 fn mask_secrets(s: &str) -> String {
+    const MASK: &str = "••••••••";
+    const MASK_LEN: usize = 24; // "••••••••".len() 8*3
     let mut out = s.to_string();
-    for pat in ["Bearer ", "x-api-key: ", "key=", "Authorization:"] {
-        if let Some(start) = out.find(pat) {
+    // Cover all secret patterns: Bearer, x-api-key, api_key, sk-, sk-ant-, AIza, key=
+    for pat in ["Bearer ", "x-api-key: ", "x-api-key=", "key=", "api_key=", "api_key: ", "Authorization:"] {
+        let mut search_from = 0;
+        while let Some(start) = out[search_from..].find(pat).map(|i| search_from + i) {
             let after = start + pat.len();
-            let end = out[after..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'').map(|i| after + i).unwrap_or(out.len());
+            let end = out[after..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ',' || c == '}').map(|i| after + i).unwrap_or(out.len());
             let len = end - after;
             if len > 8 {
-                out.replace_range(after..end, "••••••••");
+                out.replace_range(after..end, MASK);
+                search_from = after + MASK_LEN;
+            } else {
+                search_from = end;
             }
+            if search_from >= out.len() { break; }
+        }
+    }
+    // Direct token patterns without prefix: sk-..., sk-ant-..., AIza...
+    for prefix in ["sk-", "sk-ant-", "AIza"] {
+        let mut search_from = 0;
+        while let Some(start) = out[search_from..].find(prefix).map(|i| search_from + i) {
+            let end = out[start..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ',' || c == '}').map(|i| start + i).unwrap_or(out.len());
+            let token = &out[start..end];
+            if token.len() > 12 {
+                out.replace_range(start..end, MASK);
+                search_from = start + MASK_LEN;
+            } else {
+                search_from = end;
+            }
+            if search_from >= out.len() { break; }
         }
     }
     out

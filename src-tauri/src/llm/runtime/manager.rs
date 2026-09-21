@@ -188,22 +188,20 @@ impl RuntimeManager {
         let pos = runtimes.iter().position(|r| r.runtime_id == runtime_id).ok_or("runtime not found")?;
         let managed = runtimes.remove(pos);
         verify_ownership(&managed, &self.instance_id)?;
-        // Graceful: try SIGTERM, wait grace, then SIGKILL
         let grace = Duration::from_millis(self.health_policy.shutdown_grace_ms);
         let pid = managed.pid;
-        // Try graceful termination via kill -TERM
-        let _ = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).output();
+        // 1. state → Stopping (implicit via removing from active, but we keep Stopping in memory)
+        // 2. graceful termination (Unix SIGTERM, Windows graceful via Child)
+        let _ = super::process::graceful_terminate(pid);
         let start = std::time::Instant::now();
         while start.elapsed() < grace {
-            if !PathBuf::from(format!("/proc/{}", pid)).exists() { break; }
+            if !super::process::is_process_alive(pid) { break; }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        // Force kill if still alive and owned
-        if PathBuf::from(format!("/proc/{}", pid)).exists() {
-            // Verify still our process before force
+        // 5. verify ownership again before force kill
+        if super::process::is_process_alive(pid) {
             if verify_ownership(&managed, &self.instance_id).is_ok() {
-                let _ = std::process::Command::new("kill").arg("-KILL").arg(pid.to_string()).output();
-                // Also try via Child handle
+                let _ = super::process::force_kill(pid);
                 if let Ok(mut map) = self.children.lock() {
                     if let Some(mut child) = map.remove(runtime_id) {
                         let _ = child.kill();
@@ -212,12 +210,10 @@ impl RuntimeManager {
                 }
             }
         } else {
-            // Already exited, remove from children
             if let Ok(mut map) = self.children.lock() { map.remove(runtime_id); }
         }
-        // Wait for exit watcher to update, then save state
+        // 7. wait for exit watcher, 8. free port via save_state, 9. Stopped
         self.save_state(&runtimes)?;
-        // Keep logs, but we could rotate
         Ok(())
     }
 
@@ -246,7 +242,7 @@ impl RuntimeManager {
         let runtimes = self.load_state();
         let mut out = Vec::new();
         for mp in runtimes {
-            let alive = PathBuf::from(format!("/proc/{}", mp.pid)).exists();
+            let alive = super::process::is_process_alive(mp.pid);
             let status = if !alive { TypesHealthState::Exited } else { TypesHealthState::Unknown };
             out.push(RuntimeInfo{
                 runtime_id: mp.runtime_id.clone(),
@@ -269,11 +265,10 @@ impl RuntimeManager {
         let before = runtimes.len();
         runtimes.retain(|mp| {
             if mp.instance_id != self.instance_id {
-                if !PathBuf::from(format!("/proc/{}", mp.pid)).exists() { return false; }
-                // also check command line matches
+                if !super::process::is_process_alive(mp.pid) { return false; }
                 if !crate::llm::runtime::process::command_line_matches(mp.pid, &mp.executable) { return false; }
             }
-            if !PathBuf::from(format!("/proc/{}", mp.pid)).exists() { return false; }
+            if !super::process::is_process_alive(mp.pid) { return false; }
             true
         });
         let removed = before - runtimes.len();
