@@ -34,10 +34,21 @@ impl Downloader {
         cancel: Arc<AtomicBool>,
         on_progress: impl Fn(DownloadEvent),
     ) -> Result<(), String> {
+        // Validate token_ref before any network
+        job.source.validate_token_ref()?;
         let source = parse_source(job.source.clone())?;
-        let url = match source {
-            SourceKind::DirectUrl { url, .. } => url.to_string(),
-            SourceKind::HuggingFace { repo_id, revision, filename, .. } => super::source::resolve_hf_url(&repo_id, &revision, &filename),
+        let (url, token) = match source {
+            SourceKind::DirectUrl { url, .. } => (url.to_string(), None),
+            SourceKind::HuggingFace { repo_id, revision, filename, token_ref } => {
+                let url = super::source::resolve_hf_url(&repo_id, &revision, &filename);
+                let token = if let Some(r) = token_ref {
+                    // Only accept keychain://fragile-notes/<key>
+                    let key = r.strip_prefix("keychain://fragile-notes/").ok_or_else(|| "token_ref must be keychain://fragile-notes/...".to_string())?;
+                    // Fetch via SecretStore directly before HTTP (never log token)
+                    keyring::Entry::new("com.fragilich.notes", key).ok().and_then(|e| e.get_password().ok())
+                } else { None };
+                (url, token)
+            }
         };
         // Validate destination is inside models_dir (no traversal)
         let dest = &job.destination;
@@ -54,12 +65,16 @@ impl Downloader {
         let mut downloaded = existing;
         job.bytes_downloaded = downloaded;
 
-        // Build request with Range if resume
+        // Build request with Range if resume + auth if HuggingFace private
         let mut req = self.client.get(&url);
+        if let Some(t) = token {
+            // Do not log token; add as Bearer
+            req = req.header("Authorization", format!("Bearer {}", t));
+        }
         if downloaded > 0 {
             req = req.header("Range", format!("bytes={}-", downloaded));
         }
-        // Security: only https
+        // Security: only https, redirect already limited, no HTTP downgrade
         if !url.starts_with("https://") {
             return Err("HTTPS policy: only https allowed".to_string());
         }

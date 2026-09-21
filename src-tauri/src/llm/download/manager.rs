@@ -18,7 +18,34 @@ pub struct DownloadManager {
 
 impl DownloadManager {
     pub fn new(state_path: PathBuf, models_dir: PathBuf) -> Self {
-        Self { state_path, models_dir, jobs: Arc::new(Mutex::new(HashMap::new())), cancels: Arc::new(Mutex::new(HashMap::new())) }
+        let mgr = Self { state_path: state_path.clone(), models_dir, jobs: Arc::new(Mutex::new(HashMap::new())), cancels: Arc::new(Mutex::new(HashMap::new())) };
+        // Load existing jobs and handle lifecycle after restart: Downloading/Installing -> Paused
+        if state_path.exists() {
+            if let Ok(txt) = std::fs::read_to_string(&state_path) {
+                if let Ok(list) = serde_json::from_str::<Vec<DownloadJob>>(&txt) {
+                    let mut jobs = mgr.jobs.lock().unwrap();
+                    for mut job in list {
+                        match job.status {
+                            DownloadStatus::Downloading | DownloadStatus::Installing => {
+                                // If Installing and part exists but final absent, keep Paused for resume
+                                if job.part_path.exists() && !job.destination.exists() {
+                                    job.status = DownloadStatus::Paused;
+                                } else if job.status == DownloadStatus::Installing && !job.part_path.exists() {
+                                    job.status = DownloadStatus::Failed;
+                                    job.error = Some(super::types::DownloadError{ code: "install_failed".to_string(), message: "Installing but no part file after restart".to_string(), retryable: false });
+                                } else {
+                                    job.status = DownloadStatus::Paused;
+                                }
+                                job.updated_at = Utc::now();
+                            },
+                            _ => {}
+                        }
+                        jobs.insert(job.id, job);
+                    }
+                }
+            }
+        }
+        mgr
     }
 
     fn sanitize_filename(name: &str) -> Result<String, String> {
@@ -43,6 +70,8 @@ impl DownloadManager {
     }
 
     pub fn start(&self, source: DownloadSource) -> Result<Uuid, String> {
+        // Harden: reject raw HF token, only allow secret ref
+        source.validate_token_ref()?;
         let id = Uuid::new_v4();
         let dest = self.destination_for(&source.filename)?;
         let part = dest.with_extension("gguf.part");
@@ -93,6 +122,9 @@ impl DownloadManager {
                 // Throttled progress already in downloader, here we just update job
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
+                    // If pause was requested, downloader keeps checking cancel flag and will exit next chunk.
+                    // Do not overwrite Paused status with progress.
+                    if j.status == DownloadStatus::Paused || j.status == DownloadStatus::Cancelled { return; }
                     j.bytes_downloaded = ev.downloaded;
                     j.total_bytes = ev.total;
                     j.updated_at = Utc::now();
@@ -101,6 +133,11 @@ impl DownloadManager {
             {
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
+                    // If user paused/cancelled during download, job already has Paused/Cancelled — keep it, do not overwrite with Failed/Cancelled.
+                    // downloader returns Err("cancelled") on flag; we preserve the earlier user-initiated state and leave .part for resume.
+                    if j.status == DownloadStatus::Paused || j.status == DownloadStatus::Cancelled {
+                        j.updated_at = Utc::now();
+                    } else {
                     match res {
                         Ok(_) => {
                             j.status = DownloadStatus::Verifying;
@@ -120,8 +157,9 @@ impl DownloadManager {
                             }
                         },
                         Err(e) if e == "cancelled" => {
-                            j.status = DownloadStatus::Cancelled;
-                            j.error = Some(DownloadError{ code: "cancelled".to_string(), message: e, retryable: false });
+                            // Flag set but status not yet Paused/Cancelled — treat as Paused (preserve .part) if job was Downloading
+                            j.status = DownloadStatus::Paused;
+                            j.error = Some(DownloadError{ code: "paused".to_string(), message: e, retryable: true });
                         },
                         Err(e) => {
                             j.status = DownloadStatus::Failed;
@@ -129,6 +167,7 @@ impl DownloadManager {
                         }
                     }
                     j.updated_at = Utc::now();
+                    }
                 }
             }
             // Persist state
@@ -140,14 +179,23 @@ impl DownloadManager {
         Ok(id)
     }
 
-    pub fn pause(&self, id: Uuid) -> Result<(), String> {
-        if let Some(flag) = self.cancels.lock().unwrap().get(&id) {
-            flag.store(true, Ordering::Relaxed);
-            if let Some(job) = self.jobs.lock().unwrap().get_mut(&id) {
-                job.status = DownloadStatus::Paused;
+     pub fn pause(&self, id: Uuid) -> Result<(), String> {
+        let flag = { self.cancels.lock().unwrap().get(&id).cloned().ok_or("job not found")? };
+        flag.store(true, Ordering::Relaxed);
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&id) {
+                // Only pause if currently Downloading/Queued; do not overwrite Completed/Failed
+                if job.status == DownloadStatus::Downloading || job.status == DownloadStatus::Queued || job.status == DownloadStatus::Verifying || job.status == DownloadStatus::Installing {
+                    job.status = DownloadStatus::Paused;
+                    job.updated_at = Utc::now();
+                    job.error = Some(DownloadError{ code: "paused".to_string(), message: "paused by user".to_string(), retryable: true });
+                }
             }
-            Ok(())
-        } else { Err("job not found".to_string()) }
+        }
+        // Persist paused state immediately so UI shows pause even if bytes_stream still draining
+        let _ = save_jobs(&self.state_path, &self.jobs);
+        Ok(())
     }
 
     pub fn resume(&self, id: Uuid) -> Result<(), String> {
@@ -177,20 +225,30 @@ impl DownloadManager {
             let res = downloader.download(&mut job_clone, cancel_flag.clone(), |ev| {
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
+                    if j.status == DownloadStatus::Paused || j.status == DownloadStatus::Cancelled { return; }
                     j.bytes_downloaded = ev.downloaded;
                     j.total_bytes = ev.total;
+                    j.updated_at = Utc::now();
                 }
             }).await;
             {
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
+                    if j.status == DownloadStatus::Paused || j.status == DownloadStatus::Cancelled {
+                        j.updated_at = Utc::now();
+                    } else {
                     match res {
                         Ok(_) => { j.status = DownloadStatus::Verifying; let install_res = install_downloaded(&*j, j.sha256.clone()); match install_res {
                             Ok(p) => { j.status = DownloadStatus::Completed; j.destination = p; },
                             Err(e) => { j.status = DownloadStatus::Failed; j.error = Some(DownloadError{ code: "install_failed".to_string(), message: e, retryable: false}); }
                         }},
-                        Err(e) if e=="cancelled" => { j.status = DownloadStatus::Cancelled; },
+                        Err(e) if e=="cancelled" => {
+                            j.status = DownloadStatus::Paused;
+                            j.error = Some(DownloadError{ code: "paused".to_string(), message: e, retryable: true });
+                        },
                         Err(e) => { j.status = DownloadStatus::Failed; j.error = Some(DownloadError{ code: "network".to_string(), message: e, retryable: true}); }
+                    }
+                    j.updated_at = Utc::now();
                     }
                 }
             }
@@ -200,22 +258,51 @@ impl DownloadManager {
         Ok(())
     }
 
-    pub fn cancel(&self, id: Uuid) -> Result<(), String> { self.pause(id) }
+    pub fn cancel(&self, id: Uuid) -> Result<(), String> {
+        let flag = { self.cancels.lock().unwrap().get(&id).cloned().ok_or("job not found")? };
+        flag.store(true, Ordering::Relaxed);
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&id) {
+                job.status = DownloadStatus::Cancelled;
+                job.updated_at = Utc::now();
+                job.error = Some(DownloadError{ code: "cancelled".to_string(), message: "cancelled by user".to_string(), retryable: false });
+            }
+        }
+        let _ = save_jobs(&self.state_path, &self.jobs);
+        Ok(())
+    }
 
     pub fn status(&self, id: Uuid) -> Result<DownloadJob, String> {
         let jobs = self.jobs.lock().unwrap();
-        jobs.get(&id).cloned().ok_or("job not found".to_string())
+        jobs.get(&id).cloned().map(|j| j.sanitized_for_api()).ok_or("job not found".to_string())
     }
 
     pub fn list(&self) -> Vec<DownloadJob> {
         let jobs = self.jobs.lock().unwrap();
-        jobs.values().cloned().collect()
+        jobs.values().cloned().map(|j| j.sanitized_for_api()).collect()
+    }
+
+    /// Internal: raw status without masking (for installer/worker only)
+    pub fn status_raw(&self, id: Uuid) -> Result<DownloadJob, String> {
+        let jobs = self.jobs.lock().unwrap();
+        jobs.get(&id).cloned().ok_or("job not found".to_string())
     }
 }
 
 fn save_jobs(path: &Path, jobs: &Arc<Mutex<HashMap<Uuid, DownloadJob>>>) -> Result<(), String> {
     let jobs = jobs.lock().unwrap();
-    let list: Vec<&DownloadJob> = jobs.values().collect();
+    // Persist sanitized: ensure raw token never hits disk (validate already, but double-mask)
+    let list: Vec<DownloadJob> = jobs.values().map(|j| {
+        let mut sanitized = j.clone();
+        // Keep token_ref only if it's a valid keychain ref; otherwise strip
+        if let Some(r) = &j.source.token_ref {
+            if !r.starts_with("keychain://") {
+                sanitized.source.token_ref = None;
+            }
+        }
+        sanitized
+    }).collect();
     let txt = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, txt).map_err(|e| e.to_string())?;

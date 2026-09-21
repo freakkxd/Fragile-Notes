@@ -56,11 +56,12 @@ impl Scanner {
         let id = stable_id(&identity);
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("model.gguf").to_string();
         let format = ModelFormat::Gguf;
-        // Try GGUF header, fallback to filename
-        let (metadata, source) = match gguf::parse_file(path) {
-            Ok(meta) => (meta, super::types::MetadataSource::Gguf),
+        // Try GGUF header, fallback to filename for placeholder/dev files.
+        // Installer still requires valid GGUF before atomic rename, so corrupted final never becomes Present via installer.
+        // This fallback keeps existing tests (filename_fallback with "not gguf" content) passing.
+        let metadata = match gguf::parse_file(path) {
+            Ok(meta) => meta,
             Err(_) => {
-                // fallback: guess from filename (quant via regex)
                 let mut meta = super::types::ModelMetadata::default();
                 let quant = {
                     let re = regex::Regex::new(r"(?i)(Q[0-9]_[A-Za-z0-9_]+|f16|f32|bf16|q8_0)").unwrap();
@@ -68,7 +69,7 @@ impl Scanner {
                 };
                 meta.quantization = Some(quant);
                 meta.metadata_source = super::types::MetadataSource::Filename;
-                (meta, super::types::MetadataSource::Filename)
+                meta
             }
         };
         let now = chrono::Utc::now();

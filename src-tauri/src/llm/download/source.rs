@@ -4,16 +4,16 @@ use super::types::DownloadSource;
 #[derive(Debug, Clone)]
 pub enum SourceKind {
     DirectUrl { url: Url, filename: String, expected_size: Option<u64>, sha256: Option<String> },
-    HuggingFace { repo_id: String, revision: String, filename: String, token: Option<String> },
+    HuggingFace { repo_id: String, revision: String, filename: String, token_ref: Option<String> },
 }
 
 pub fn parse_source(source: DownloadSource) -> Result<SourceKind, String> {
+    source.validate_token_ref()?;
     if let Some(repo_id) = source.repo_id {
-        // HuggingFace
         let rev = source.revision.unwrap_or_else(|| "main".to_string());
-        // For v1, convert to direct resolved URL: https://huggingface.co/{repo_id}/resolve/{revision}/{filename}
-        // Auth via token if private
-        return Ok(SourceKind::HuggingFace { repo_id, revision: rev, filename: source.filename, token: source.sha256.clone() });
+        // HuggingFace: ensure filename sanitized, token_ref already validated as keychain ref
+        sanitize_filename(&source.filename)?;
+        return Ok(SourceKind::HuggingFace { repo_id, revision: rev, filename: source.filename.clone(), token_ref: source.token_ref.clone() });
     }
     // DirectUrl
     let url = Url::parse(&source.url).map_err(|e| format!("invalid url: {}", e))?;
