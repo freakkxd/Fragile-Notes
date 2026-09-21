@@ -10,9 +10,10 @@ use walkdir::WalkDir;
 
 pub mod runtime;
 pub mod task;
+pub mod models;
 
 // ---------- helpers ----------
-fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     let vault = vault_root().join(".fragile").join("llm.json");
     if vault.parent().map(|p| p.exists()).unwrap_or(false) || std::env::var("FRAGILE_VAULT").is_ok() {
         return vault;
@@ -30,6 +31,10 @@ fn config_path() -> PathBuf {
 fn runtime_state_path() -> PathBuf {
     config_path().parent().unwrap_or(Path::new(".")).join("llm-runtime-state.json")
 }
+pub(crate) fn registry_path() -> PathBuf {
+    config_path().with_file_name("llm-models.json")
+}
+pub(crate) fn config_path_pub() -> PathBuf { config_path() }
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") { return PathBuf::from(custom); }
     let home = dirs_next();

@@ -15,6 +15,7 @@ use llm::{
     llm_runtime_stop, llm_save_config, llm_save_pipeline, llm_scan_models, llm_set_active_model,
     llm_set_provider_credential, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
 };
+use llm::models::{llm_models_list, llm_models_scan};
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -254,7 +255,9 @@ fn main() {
             llm_runtime_restart,
             llm_task_run,
             llm_task_cancel,
-            llm_task_status
+            llm_task_status,
+            llm_models_scan,
+            llm_models_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
