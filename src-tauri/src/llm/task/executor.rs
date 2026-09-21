@@ -79,6 +79,25 @@ impl TaskExecutor {
                 return Err(format!("unsupported_capability: Chat for model {}", sel.model.id));
             }
         }
+        // Registry is source of truth for path/state (E2E gate: must use ResolvedModel.path, not active_model or first file)
+        let registry_model_path: Option<std::path::PathBuf> = {
+            let mut reg = crate::llm::models::registry::Registry::new(crate::llm::registry_path());
+            let _ = reg.load();
+            if let Some(rec) = reg.all().into_iter().find(|r| r.id == sel.model.id) {
+                // State gate: Changed/Missing/Invalid blocks spawn (no spawn, ModelUnavailable)
+                if rec.state != crate::llm::models::types::ModelState::Present {
+                    return Err(format!("model_unavailable: {} state {:?}", rec.id, rec.state));
+                }
+                // Also ensure RuntimeProfile model_id consistency if present
+                if let Some(rp) = &sel.runtime_profile {
+                    if rp.model_id != rec.id {
+                        return Err(format!("model_runtime_mismatch: RuntimeProfile {} model_id {} != ModelRecord {}", rp.id, rp.model_id, rec.id));
+                    }
+                }
+                Some(rec.path)
+            } else { None }
+        };
+        let effective_model_path = registry_model_path.map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| sel.model.path.clone());
         // Ensure runtime if local
         let runtime_id = if matches!(scope, super::policy::ProviderScope::LocalManaged) {
             let rp = sel.runtime_profile.ok_or_else(|| "runtime_not_found: local task requires runtime profile".to_string())?;
@@ -86,8 +105,10 @@ impl TaskExecutor {
             let key = format!("runtime:{}", rp.id);
             let (should_start, notify) = self.startup.should_start(&key).await;
             if should_start {
-                // We are the starter
-                let res = self.ensure_runtime(&rp, &sel.model, &scope).await;
+                // We are the starter — use registry-resolved path, not stale active_model
+                let mut model_for_runtime = sel.model.clone();
+                model_for_runtime.path = effective_model_path.clone();
+                let res = self.ensure_runtime(&rp, &model_for_runtime, &scope).await;
                 match res {
                     Ok(rid) => {
                         self.startup.mark_ready(&key).await;

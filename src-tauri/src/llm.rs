@@ -806,12 +806,28 @@ pub fn llm_runtime_list() -> Result<String, String> {
 pub async fn llm_runtime_start(profile_id: String) -> Result<String, String> {
     let cfg = load_config_inner();
     let rp = cfg.runtime_profiles.iter().find(|r| r.id==profile_id).cloned().ok_or("profile not found")?;
-    // For P1.2, use RuntimeManager with model path resolution
-    let model_path = if rp.model_id.is_empty() { cfg.local.active_model.clone() } else {
-        cfg.models.iter().find(|m| m.id==rp.model_id).map(|m| m.path.clone()).unwrap_or(rp.model_id.clone())
+    // E2E gate: Registry is source of truth for model path (ResolvedModel.path), not active_model / first file
+    let model_path = {
+        let mut reg = crate::llm::models::registry::Registry::new(crate::llm::registry_path());
+        let _ = reg.load();
+        if let Some(rec) = reg.all().into_iter().find(|r| r.id == rp.model_id) {
+            if rec.state != crate::llm::models::types::ModelState::Present {
+                return Err(format!("model_unavailable: {} state {:?}", rec.id, rec.state));
+            }
+            rec.path.to_string_lossy().to_string()
+        } else if !rp.model_id.is_empty() {
+            // Fallback to config models for legacy, but validate path exists
+            cfg.models.iter().find(|m| m.id==rp.model_id).map(|m| m.path.clone()).unwrap_or_else(|| {
+                // If no config model, treat model_id as path only if it looks like absolute path
+                if rp.model_id.contains('/') || rp.model_id.ends_with(".gguf") { rp.model_id.clone() } else { String::new() }
+            })
+        } else {
+            // No model_id on profile — legacy active_model fallback (deprecated, deny for E2E strict)
+            return Err("model_not_found: runtime profile has empty model_id, run scan and link model".to_string());
+        }
     };
     if model_path.is_empty() {
-        return Err("model path missing for profile".to_string());
+        return Err("model_not_found: model path missing for profile".to_string());
     }
     let mgr = RUNTIME_MANAGER.clone();
     let res = mgr.start(&profile_id, &model_path, &rp.binary_path, &rp.settings).await;
