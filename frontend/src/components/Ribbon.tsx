@@ -16,6 +16,7 @@ export default function Ribbon({ onNav }: Props) {
       <button title="Задачи" onClick={() => onNav('tasks')}>✓</button>
       <button title="Календарь" onClick={() => onNav('calendar')}>🗓</button>
       <button title="AI Чат" onClick={() => onNav('ai_chat')}>🤖</button>
+      <button title="Нейросети — llama.cpp + GPT/Gemini/Claude" onClick={() => onNav('llm')}>🧠</button>
       <div className="spacer" />
       <button title="Палитра (Ctrl+P)" onClick={() => setCommandOpen(true)}>⌘</button>
       <button title="Правый сайдбар" onClick={toggleRight}>⚙</button>

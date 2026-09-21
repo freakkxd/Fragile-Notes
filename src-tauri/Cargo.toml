@@ -1,6 +1,6 @@
 [package]
 name = "fragile-notes"
-version = "0.5.4"
+version = "0.5.5"
 description = "Fragile Notes — Obsidian-like vault, C++ core + Tauri + React"
 authors = ["freakkxd <zxcerega666@gmail.com>"]
 license = "MIT"
@@ -23,6 +23,7 @@ aes-gcm = "0.10"
 pbkdf2 = "0.12"
 rand = "0.8"
 chrono = "0.4"
+base64 = "0.22"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 [features]

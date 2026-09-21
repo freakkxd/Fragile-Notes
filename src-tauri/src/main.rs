@@ -3,8 +3,14 @@
 mod collect;
 mod enrich;
 mod tasks;
+mod llm;
 use collect::{collect_sources, web_clip};
 use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
+use llm::{
+    llm_chat_universal, llm_delete_pipeline, llm_download_model, llm_get_config, llm_get_pipelines,
+    llm_pipeline_run, llm_save_config, llm_save_pipeline, llm_scan_models, llm_set_active_model,
+    llm_test_provider,
+};
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -221,7 +227,18 @@ fn main() {
             tasks_list,
             tasks_create,
             tasks_update_status,
-            tasks_archive
+            tasks_archive,
+            llm_get_config,
+            llm_save_config,
+            llm_scan_models,
+            llm_set_active_model,
+            llm_download_model,
+            llm_test_provider,
+            llm_chat_universal,
+            llm_get_pipelines,
+            llm_save_pipeline,
+            llm_delete_pipeline,
+            llm_pipeline_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

@@ -16,8 +16,9 @@ const SearchView = lazy(() => import('./components/SearchView'))
 const WebClipper = lazy(() => import('./components/WebClipper'))
 const AIChatFull = lazy(() => import('./components/AIChatFull'))
 const TaskManager = lazy(() => import('./components/tasks/TaskManager'))
+const LLMSettings = lazy(() => import('./components/LLMSettings'))
 
-type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat' | 'tasks'
+type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat' | 'tasks' | 'llm'
 
 export default function App() {
   const { files, activePath, content, mode, tabs, leftCollapsed, rightCollapsed, commandOpen, status, loadVault, openFile, setContent, save, setMode, setCommandOpen } = useVault()
@@ -75,13 +76,14 @@ export default function App() {
     { id: 'graph', label: 'Открыть Граф', hint: 'graph', action: () => { setView('graph'); setActiveRibbon('graph') } },
     { id: 'canvas', label: 'Открыть Canvas', hint: 'canvas', action: () => { setView('canvas'); setActiveRibbon('canvas') } },
     { id: 'search', label: 'Поиск в волте', hint: 'FTS', action: () => setView('search') },
+    { id: 'llm', label: 'Настройки нейросетей — llama.cpp + GPT/Gemini/Claude', hint: 'LLM', action: () => { setView('llm'); setActiveRibbon('llm') } },
     { id: 'reload', label: 'Перезагрузить волт', hint: 'reload', action: () => loadVault() },
     ...files.map(f => ({ id: `open:${f}`, label: `Открыть ${f}`, hint: f.split('/').slice(-2).join('/'), action: () => { setView('editor'); setActiveRibbon('files'); openFile(f) } }))
   ], [files, save, setMode, loadVault, openFile])
 
   const handleNav = (id: string) => {
     setActiveRibbon(id)
-    if (id === 'graph' || id === 'canvas' || id === 'search' || id === 'tasks') setView(id as ViewId)
+    if (id === 'graph' || id === 'canvas' || id === 'search' || id === 'tasks' || id === 'llm') setView(id as ViewId)
     else if (id === 'ai_chat') setView('ai_chat')
     else setView('editor')
   }
@@ -152,6 +154,7 @@ export default function App() {
         {view === 'search' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка поиска…</div>}><SearchView onSearch={bridge.searchNotes} /></Suspense>}
         {view === 'ai_chat' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка AI чата…</div>}><AIChatFull /></Suspense>}
         {view === 'tasks' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка задач…</div>}><TaskManager /></Suspense>}
+        {view === 'llm' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка LLM…</div>}><LLMSettings /></Suspense>}
 
         <StatusBar status={status} words={words} chars={chars} />
       </main>
@@ -165,6 +168,7 @@ export default function App() {
           <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>
           <button onClick={() => setView('search')}>🔍 Поиск — FTS5</button>
           <button onClick={() => handleNav('ai_chat')}>🤖 AI Чат</button>
+          <button onClick={() => { setView('llm'); setActiveRibbon('llm') }} style={{ background: activeRibbon==='llm'?'var(--accent)':'var(--panel-2)', color: activeRibbon==='llm'?'#0b0b12':'var(--fg)' }}>🧠 Нейросети — llama.cpp + API</button>
           <div className="card">
             <h4>Контент</h4>
             <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>Backlinks • Outline • Tags — парсятся `C++` (`[[ ]]`, `#tags`, `frontmatter`).<br/>Tauri IPC + `zod` валидация.</div>
