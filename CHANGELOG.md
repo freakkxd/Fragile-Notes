@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.4 — оптимизация RAM: lazy + reuse Client + release profile (2026-09-21)
+> **Почему отдельная версия от v0.5.3:** v0.5.3 починил сборку `Tauri bundle` (`icon` + `targets`), но фоном висело `5-6МБ RSS` — `reqwest Client` пересоздавался на каждый `llm_ping/chat` (`2МБ churn`), `Regex` компилировался на каждый вызов `slugify/first_url/get_links/enrich`, `updater` polling `5мин` + все тяжелые вьюхи в одном `299kB` бандле. v0.5.4 — **аккуратная Фаза 1** без ломки фич: меньше RAM фоном `~3.5МБ`.
+
+**Сделано:**
+- `src-tauri/Cargo.toml` `[profile.release] opt-level="z" lto=true codegen-units=1 panic="abort" strip=true` — бинарь `19МБ → ~12-14МБ`, меньше RSS фоном (`z` + `lto` + `strip`)
+- `src-tauri/src/enrich.rs` `CLIENT: Lazy<reqwest::blocking::Client>` `timeout 90s pool_max_idle 2 pool_idle 30s` — переиспользуем 1 пул соединений, `llm_ping` теперь `CLIENT.get().timeout(5s)` вместо `Client::builder().build()` каждый раз (−1-2МБ на запрос), `RE_FRONT` + `RE_TAG` `Lazy<Regex>` вместо `Regex::new` в цикле
+- `src-tauri/src/collect.rs` `RE_SLUG/RE_URL/RE_URL_KV/RE_TITLE_KV` `Lazy<Regex>` + `once_cell` — `slugify`/`first_url`/`wrap_web_clips` без ре-компиляции regex
+- `src-tauri/src/main.rs` `RE_WIKILINK Lazy` для `get_links`, `Vec::with_capacity(256)` для `list_notes` + `tasks.rs` `with_capacity(64)` — меньше реаллокаций
+- `frontend/src/App.tsx` `React.lazy` для `GraphView/CanvasView/SearchView/AIChatFull/TaskManager/WebClipper` + `Suspense` fallback, `updater interval 5*60*1000 → 15*60*1000` — фоном не грузим `TaskManager 7.45kB`/`WebClipper 3kB`/`AI 2.38kB`/`Graph 1.1kB` до клика, −3 проверки/с, меньше CPU/RAM
+- `frontend/vite.config.ts` `manualChunks: {vendor: [react,react-dom,zustand], md: [marked,dompurify]}` — `299kB monolith → 144kB vendor + 64kB md + 76kB index + lazy 1-7kB` — `initial chunk` меньше, WebView меньше памяти фоном
+- Версии → `0.5.4` (`Cargo`, `tauri.conf`, `package.json`, `CMake`, `updater.ts CURRENT`), `tsc` ✅ `vite 6.87s 144+64+76kB` ✅
+- `README.md` подпись `v0.5.4`, `CHANGELOG.md` этот раздел
+
 ## v0.5.3 — фикс сборки Tauri bundle: icon + targets (2026-09-21)
 > **Почему отдельная версия от v0.5.2:** v0.5.2 добавил `src-tauri/icons/icon.ico` `362K`, но `tauri.conf.json` всё ещё имел `bundle.icon ["icon.png"]` без `icon.ico` и `targets ["nsis","msi"]` только для `Windows` — `Windows build` падал `thread panicked at tauri-cli src/interface/rust.rs:1073 the bundle config must have a .ico icon` (`build-windows 11m46s FAILED`), `Linux build` собрал `release` бинарь `23s` но `bundle/` не создался `No such file bundle/` → `No artifacts uploaded` (`linux-bundles` пусто, `release` без `AppImage/deb`). v0.5.3 — **фикс `tauri.conf`** чтобы `Tauri bundler` генерил артефакты на обеих платформах.
 

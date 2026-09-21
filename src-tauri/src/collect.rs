@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use chrono::Utc;
 use regex::Regex;
+use once_cell::sync::Lazy;
 
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") { return PathBuf::from(custom); }
@@ -29,17 +30,20 @@ fn has_inbox_frontmatter(content: &str) -> bool {
     false
 }
 
+static RE_SLUG: Lazy<Regex> = Lazy::new(|| Regex::new(r"[^\p{L}\p{N}]+").unwrap());
+static RE_URL: Lazy<Regex> = Lazy::new(|| Regex::new(r#"https?://[^\s<>"')\]]+"#).unwrap());
+static RE_URL_KV: Lazy<Regex> = Lazy::new(|| Regex::new(r#"url["\s:]+([^\s\n]+)"#).unwrap());
+static RE_TITLE_KV: Lazy<Regex> = Lazy::new(|| Regex::new(r#"title["\s:]+(.+)"#).unwrap());
+
 fn slugify(s: &str) -> String {
-    let re = Regex::new(r"[^\p{L}\p{N}]+").unwrap();
     let lower = s.to_lowercase();
-    let slug = re.replace_all(&lower, "-");
+    let slug = RE_SLUG.replace_all(&lower, "-");
     let slug = slug.trim_matches('-').to_string();
     if slug.is_empty() { "item".to_string() } else { slug[..slug.len().min(80)].to_string() }
 }
 
 fn first_url(text: &str) -> Option<String> {
-    let re = Regex::new(r#"https?://[^\s<>"')\]]+"#).unwrap();
-    re.find(text).map(|m| m.as_str().to_string())
+    RE_URL.find(text).map(|m| m.as_str().to_string())
 }
 
 pub fn wrap_web_clips(vault: &Path) -> (usize, usize, Vec<String>) {
@@ -66,15 +70,13 @@ pub fn wrap_web_clips(vault: &Path) -> (usize, usize, Vec<String>) {
             let (fm_opt, body) = parse_frontmatter(&content);
             let fm_str = fm_opt.unwrap_or_default();
             let url = {
-                let re = Regex::new(r#"url["\s:]+([^\s\n]+)"#).unwrap();
-                re.captures(&fm_str).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+                RE_URL_KV.captures(&fm_str).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
                     .or_else(|| first_url(&body))
                     .or_else(|| first_url(&content))
                     .unwrap_or_default()
             };
             let title = {
-                let re = Regex::new(r#"title["\s:]+(.+)"#).unwrap();
-                re.captures(&fm_str).and_then(|c| c.get(1)).map(|m| m.as_str().trim().trim_matches('"').trim_matches('\'').to_string())
+                RE_TITLE_KV.captures(&fm_str).and_then(|c| c.get(1)).map(|m| m.as_str().trim().trim_matches('"').trim_matches('\'').to_string())
                     .or_else(|| body.lines().find(|l| !l.trim().is_empty()).map(|s| s.trim().to_string()))
                     .unwrap_or_else(|| "Web Clip".to_string())
             };

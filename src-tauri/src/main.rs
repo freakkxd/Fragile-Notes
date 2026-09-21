@@ -6,12 +6,15 @@ mod tasks;
 use collect::{collect_sources, web_clip};
 use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+static RE_WIKILINK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[\[([^\]|#]+)").unwrap());
 
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") {
@@ -79,7 +82,7 @@ fn list_notes() -> Vec<String> {
         let _ = fs::create_dir_all(&root);
         return vec![];
     }
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(256);
     // filter_entry prevents descending into heavy dirs
     let walker = WalkDir::new(&root).into_iter().filter_entry(|e| {
         let name = e.file_name().to_string_lossy();
@@ -179,10 +182,9 @@ struct LinkInfo {
 #[tauri::command]
 fn get_links(path: String) -> Vec<LinkInfo> {
     let content = read_note(path.clone()).unwrap_or_default();
-    let re = Regex::new(r"\[\[([^\]|#]+)").unwrap();
     let mut out = Vec::new();
     for (idx, line) in content.lines().enumerate() {
-        for cap in re.captures_iter(line) {
+        for cap in RE_WIKILINK.captures_iter(line) {
             out.push(LinkInfo {
                 from: path.clone(),
                 to: cap[1].trim().to_string(),

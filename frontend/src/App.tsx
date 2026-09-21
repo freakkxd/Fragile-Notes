@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { useVault } from './store/vault'
 import * as bridge from './lib/bridge'
 import { checkForUpdates, openReleasePage } from './lib/updater'
@@ -9,12 +9,13 @@ import Preview from './components/Preview'
 import TabBar from './components/TabBar'
 import CommandPalette from './components/CommandPalette'
 import StatusBar from './components/StatusBar'
-import GraphView from './components/GraphView'
-import CanvasView from './components/CanvasView'
-import SearchView from './components/SearchView'
-import WebClipper from './components/WebClipper'
-import AIChatFull from './components/AIChatFull'
-import TaskManager from './components/tasks/TaskManager'
+// Heavy views — lazy to save 100-150kB initial bundle + memory фоном
+const GraphView = lazy(() => import('./components/GraphView'))
+const CanvasView = lazy(() => import('./components/CanvasView'))
+const SearchView = lazy(() => import('./components/SearchView'))
+const WebClipper = lazy(() => import('./components/WebClipper'))
+const AIChatFull = lazy(() => import('./components/AIChatFull'))
+const TaskManager = lazy(() => import('./components/tasks/TaskManager'))
 
 type ViewId = 'editor' | 'graph' | 'canvas' | 'search' | 'ai_chat' | 'tasks'
 
@@ -45,7 +46,7 @@ export default function App() {
       if (!cancelled && res?.hasUpdate) setUpdateInfo({ latest: res.latest, url: res.url })
     }
     check()
-    const id = setInterval(check, 5 * 60 * 1000) // каждые 5 мин, без кликов
+    const id = setInterval(check, 15 * 60 * 1000) // каждые 15 мин фоном — экономит CPU/RAM + сеть (было 5мин)
     const onFocus = () => check()
     const onVisibility = () => { if (document.visibilityState === 'visible') check() }
     window.addEventListener('focus', onFocus)
@@ -146,11 +147,11 @@ export default function App() {
             {(mode === 'preview' || mode === 'split') && <Preview markdown={content} />}
           </div>
         )}
-        {view === 'graph' && <GraphView files={files} />}
-        {view === 'canvas' && <CanvasView />}
-        {view === 'search' && <SearchView onSearch={bridge.searchNotes} />}
-        {view === 'ai_chat' && <AIChatFull />}
-        {view === 'tasks' && <TaskManager />}
+        {view === 'graph' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка графа…</div>}><GraphView files={files} /></Suspense>}
+        {view === 'canvas' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка canvas…</div>}><CanvasView /></Suspense>}
+        {view === 'search' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка поиска…</div>}><SearchView onSearch={bridge.searchNotes} /></Suspense>}
+        {view === 'ai_chat' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка AI чата…</div>}><AIChatFull /></Suspense>}
+        {view === 'tasks' && <Suspense fallback={<div style={{padding:12, opacity:.6}}>Загрузка задач…</div>}><TaskManager /></Suspense>}
 
         <StatusBar status={status} words={words} chars={chars} />
       </main>
@@ -158,7 +159,7 @@ export default function App() {
       {!rightCollapsed && (
         <aside className="right-panel">
           <div className="panel-header">Навигация <span className="count">{files.length}</span></div>
-          <WebClipper />
+          <Suspense fallback={<div style={{opacity:.5, fontSize:12}}>Загрузка…</div>}><WebClipper /></Suspense>
           <button onClick={() => { setView('tasks'); setActiveRibbon('tasks') }} style={{ background: activeRibbon==='tasks'?'var(--accent)':'var(--panel-2)', color: activeRibbon==='tasks'?'#0b0b12':'var(--fg)' }}>✓ Task Manager v2</button>
           <button onClick={() => { setView('graph'); setActiveRibbon('graph') }}>🕸 Граф связей</button>
           <button onClick={() => { setView('canvas'); setActiveRibbon('canvas') }}>🎨 Canvas доска</button>

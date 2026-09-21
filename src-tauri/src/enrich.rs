@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use walkdir::WalkDir;
 use regex::Regex;
+use once_cell::sync::Lazy;
 
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") { return PathBuf::from(custom); }
@@ -15,10 +17,23 @@ fn llm_base_url(profile: &str) -> String {
     format!("http://127.0.0.1:{}", port)
 }
 
+// Reuse single Client — экономит 1-2МБ на каждый запрос, не пересоздаем пул соединений
+static CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(2)
+        .build()
+        .expect("reqwest client")
+});
+
+static RE_FRONT: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)^---\n(.*?)\n---\n").unwrap());
+static RE_TAG: Lazy<Regex> = Lazy::new(|| Regex::new(r"#([A-Za-z0-9/_\-]+)").unwrap());
+
 pub fn llm_ping(profile: &str) -> String {
     let url = format!("{}/health", llm_base_url(profile));
-    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap();
-    match client.get(&url).send() {
+    // переиспользуем CLIENT, но с коротким таймаутом на ping
+    match CLIENT.get(&url).timeout(Duration::from_secs(5)).send() {
         Ok(resp) if resp.status().is_success() => {
             let txt = resp.text().unwrap_or_default();
             format!("{{\"profile\":\"{}\",\"online\":true,\"health\":{}}}", profile, txt)
@@ -36,14 +51,13 @@ pub fn llm_status(profile: String) -> Result<String, String> {
 #[tauri::command]
 pub fn llm_chat(profile: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
     let url = format!("{}/v1/chat/completions", llm_base_url(&profile));
-    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
     let body = serde_json::json!({
         "model": "qwen3-14b",
         "messages": messages,
         "temperature": 0.7,
         "stream": false
     });
-    let resp = client.post(&url).json(&body).send().map_err(|e| format!("LLM offline {}: {}", url, e))?;
+    let resp = CLIENT.post(&url).json(&body).send().map_err(|e| format!("LLM offline {}: {}", url, e))?;
     if !resp.status().is_success() {
         return Err(format!("LLM HTTP {}: {}", resp.status(), resp.text().unwrap_or_default()));
     }
@@ -58,14 +72,13 @@ pub fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
     if !sort_dir.exists() { return Err("05 Sort not found".to_string()); }
     let mut enriched = 0;
     let mut errors = Vec::new();
-    let re_front = Regex::new(r"(?s)^---\n(.*?)\n---\n").unwrap();
     for entry in WalkDir::new(&sort_dir).into_iter().filter_map(|e| e.ok()).take(limit) {
         let p = entry.path();
         if !p.is_file() || p.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
         let content = match fs::read_to_string(p) { Ok(c) => c, Err(e) => { errors.push(e.to_string()); continue; } };
         // skip already enriched
         if content.contains("enriched: true") || content.contains("ao_enriched:") { continue; }
-        let body = if let Some(cap) = re_front.captures(&content) {
+        let body = if let Some(cap) = RE_FRONT.captures(&content) {
             content[cap.get(0).unwrap().end()..].to_string()
         } else { content.clone() };
         let snippet = body.chars().take(1500).collect::<String>();
@@ -94,8 +107,7 @@ pub fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
 }
 
 fn extract_tags(resp: &str) -> Vec<String> {
-    let re = Regex::new(r"#([A-Za-z0-9/_\-]+)").unwrap();
-    re.captures_iter(resp).map(|c| format!("#{}", &c[1])).take(3).collect()
+    RE_TAG.captures_iter(resp).map(|c| format!("#{}", &c[1])).take(3).collect()
 }
 
 #[tauri::command]

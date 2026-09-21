@@ -55,7 +55,7 @@ fn tasks_root(vault: &Path) -> PathBuf {
 fn load_tasks_from_vault(vault: &Path) -> Vec<Task> {
     let root = tasks_root(vault);
     if !root.exists() { return vec![]; }
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(64);
     for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
         let p = entry.path();
         if !p.is_file() || p.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
