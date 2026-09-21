@@ -1,14 +1,18 @@
 pub mod types;
 pub mod validation;
 pub mod chunker;
+pub mod store;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_persistence;
 
 pub use types::{
-    EmbeddingError, EmbeddingLimits, EmbeddingRequest, EmbeddingResponse, NoteChunk,
+    ChunkDiff, EmbeddingError, EmbeddingLimits, EmbeddingModelRef, EmbeddingRecord, EmbeddingRequest, EmbeddingResponse, IndexRun, IndexStatus, NoteChunk,
 };
-pub use validation::{validate_embedding_request, validate_embedding_response, sha256_hex, content_hash_for};
+pub use validation::{validate_embedding_request, validate_embedding_response, content_hash_for, sha256_hex};
 pub use chunker::{ChunkingConfig, ChunkingError, ChunkedNote, chunk_markdown, normalize_for_hash};
+pub use store::{ChunkStore, EmbeddingStore, SqliteStore};
 
 use async_trait::async_trait;
 

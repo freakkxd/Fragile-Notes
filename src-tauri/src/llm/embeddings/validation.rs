@@ -15,8 +15,7 @@ pub fn validate_embedding_response(response: &EmbeddingResponse, request: &Embed
     response.validate_for(request, limits)
 }
 
-// Helper for NoteChunk hash validation (exposed for chunker next stage)
 pub fn content_hash_for(content: &str) -> String {
-    // For now, hash raw content. Future chunker will normalize before calling.
-    sha256_hex(content)
+    // CRLF -> LF normalized, as in chunker and NoteChunk::validate
+    sha256_hex(&content.replace("\r\n", "\n"))
 }

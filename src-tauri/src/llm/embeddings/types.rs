@@ -182,3 +182,80 @@ impl NoteChunk {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingRecord {
+    pub chunk_id: String,
+    pub model_id: String,
+    pub model_fingerprint: String,
+    pub content_hash: String,
+    pub dimensions: usize,
+    pub vector: Vec<f32>,
+}
+
+impl EmbeddingRecord {
+    pub fn validate(&self, limits: &EmbeddingLimits) -> Result<(), EmbeddingError> {
+        if self.chunk_id.trim().is_empty() {
+            return Err(EmbeddingError::EmptyInput);
+        }
+        if self.model_id.trim().is_empty() {
+            return Err(EmbeddingError::EmptyModelId);
+        }
+        if self.content_hash.trim().is_empty() {
+            return Err(EmbeddingError::EmptyInput);
+        }
+        if self.dimensions == 0 {
+            return Err(EmbeddingError::InvalidDimensions { dimensions: 0 });
+        }
+        if self.dimensions > limits.max_dimensions {
+            return Err(EmbeddingError::MaxDimensionsExceeded { max: limits.max_dimensions, actual: self.dimensions });
+        }
+        if self.vector.len() != self.dimensions {
+            return Err(EmbeddingError::DimensionMismatch { expected: self.dimensions, actual: self.vector.len(), index: 0 });
+        }
+        for (pos, v) in self.vector.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(EmbeddingError::NonFiniteValue { index: 0, pos });
+            }
+        }
+        let bytes = self.vector.len() * std::mem::size_of::<f32>();
+        if bytes > limits.max_vector_bytes {
+            return Err(EmbeddingError::VectorTooLarge { max_bytes: limits.max_vector_bytes, actual_bytes: bytes });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingModelRef {
+    pub model_id: String,
+    pub model_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkDiff {
+    pub added: Vec<NoteChunk>,
+    pub changed: Vec<NoteChunk>,
+    pub unchanged: Vec<NoteChunk>,
+    pub deleted_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IndexStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexRun {
+    pub id: String,
+    pub note_id: String,
+    pub source_hash: String,
+    pub status: IndexStatus,
+    pub processed_chunks: usize,
+    pub total_chunks: usize,
+    pub error: Option<String>,
+}
