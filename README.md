@@ -1,25 +1,24 @@
-# Fragile Notes — v0.5.5
+# Fragile Notes — v0.5.6
 
-> **Подпись v0.5.5 — почему отделили эту версию:**
-> - **Сделано в 0.5.4:** оптимизация RAM `5-6МБ→3.5МБ` (`Lazy Client/Regex` + `lazy chunks`).
-> - **Почему 0.5.5 отдельно:** **гибкая нейросеть из приложения** — полный `llama.cpp` конструктор + внешние `API` (GPT/Gemini/Claude). Локально: парсинг `.gguf`, выбор/установка моделей по задачам (`chat/coder/embed/enrich`), гибкая настройка (`n_ctx/threads/gpu_layers/temp/top_p/top_k/repeat` + `extra_args`), пайплайны. Облачно: `API ключ` + `Вход в аккаунт (OAuth)` для каждого провайдера.
-> - **Цель 0.5.5:** юзер сам строит пайплайны `с помощью нейросетей и для нейросетей`.
+> **Подпись v0.5.6 — почему отделили эту версию:**
+> - **Сделано в 0.5.5:** `LLM Hub` прототип с `base64` ключами, `extra_args String`, `blocking reqwest`, `single active_model`, `fake download`.
+> - **Почему 0.5.6 отдельно:** **Foundation Fix P0** — контракт и миграции: `schema v2` `Provider/Model/RuntimeProfile/TaskProfile`, `atomic save + backup`, `keyring Standard` без `base64`, `typed LlamaSettings`, `async Gateway + RuntimeManager (N=1 task-exclusive)`, `real connection test`, `privacy guard`, `fake download → NotImplemented`. Без новых фич — стабилизация.
+> - **Цель 0.5.6:** не потерять настройки и ключи при миграции, единый транспорт, фундамент для `P1`.
 
-**Obsidian-like vault.** `Task Manager v2` + `Tauri` `C++` + `LLM Hub`.
+**Obsidian-like vault.** `Task Manager v2` + `Tauri` `C++` + `LLM Hub v2`.
 
 ## Быстрый старт
 ```bash
 git clone https://github.com/freakkxd/Fragile-Notes.git
 cargo tauri dev
-# LLM → 🧠 Нейросети в приложении
+# 🧠 Нейросети — теперь с keyring и typed llama.cpp
 ```
 
 ## Версионирование
-- `v0.5.1` — `Task Manager v2`
-- `v0.5.2` — фикс `icon.ico` файл
 - `v0.5.3` — фикс `tauri.conf` bundle
 - `v0.5.4` — оптимизация RAM `lazy + reuse`
-- `v0.5.5` — **LLM Hub: llama.cpp + GPT/Gemini/Claude + пайплайны** (текущий)
+- `v0.5.5` — LLM Hub прототип
+- `v0.5.6` — **Foundation P0: schema v2 + keyring + Gateway + RuntimeManager** (текущий)
 
 ## Лицензия
 MIT — `LICENSE`

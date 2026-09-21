@@ -323,7 +323,7 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
             <button onClick={()=>{
               if(!newStep.name) return
               const id='s'+Math.random().toString(36).slice(2,5)
-              const step: llm.PipelineStep = {id, name: newStep.name as string, provider_id: (newStep.provider_id as string) || 'local', model: (newStep.model as string) || '', prompt_template: (newStep.prompt_template as string) || '{{content}}', input_from:'note_content', output_to:'chat', enabled:true}
+              const step: llm.PipelineStep = {id, name: newStep.name as string, kind:'llm', provider_id: (newStep.provider_id as string) || 'local', model: (newStep.model as string) || '', model_ref: (newStep.model as string) || '', prompt_template: (newStep.prompt_template as string) || '{{content}}', input_from:'note_content', input_refs:['note_content'], output_to:'chat', enabled:true}
               setEditing({...editing, steps:[...editing.steps, step]})
               setNewStep({provider_id:'local', prompt_template:'{{content}}', input_from:'note_content', output_to:'chat', enabled:true})
             }} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>+ Добавить шаг</button>
