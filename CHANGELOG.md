@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — P1 E2E hardening (gate перед v0.6.0, 2026-09-22)
+
+> **Цель:** закрыть критические проверки перед embeddings. Downloader отвечает за bytes, Installer — за верификацию+atomic install, Registry — за индекс. Ручной E2E обязателен (`scan → registry → ResolvedModel.path → RuntimeManager → health → Gateway`). Embeddings не начаты — ждёт прохождения gate. Абстракция следующего этапа: `pub trait EmbeddingProvider { async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>; }`.
+
+**Сделано (2e7347e + d46c31c):**
+- `src-tauri/src/llm/download/types.rs` `DownloadSource.token_ref: Option<String>` как `keychain://fragile-notes/<key>` — `validate_token_ref()` отвергает raw `hf_.../sk-...`, `sanitized_for_api()` маскирует в `masked:••••••••`, `sanitized_for_persist()` не пишет raw на диск
+- `src-tauri/src/llm/download/source.rs` `SourceKind::HuggingFace {token_ref}` + `parse_source` валидирует ref и sanitize filename
+- `src-tauri/src/llm/download/downloader.rs` `token` получает `keyring::Entry::new("com.fragilich.notes", key).get_password()` непосредственно перед `reqwest` `Authorization: Bearer` (не логируется), `Range` resume, `HTTPS policy`, `max 100GB`, `disk_space statvfs`, `progress 200ms/1MB`, проверка `cancel.flag` в `bytes_stream` каждую `chunk`
+- `src-tauri/src/llm/download/manager.rs` `DownloadManager::new` восстанавливает `downloads.json`: `Downloading/Installing → Paused` (или `Failed` если `Installing+!part`), `start()` отвергает raw token, `pause()` ставит `Paused`+`paused`+persist и флаг `AtomicBool` (bytes_stream выходит на след. chunk, `.part` остаётся), `cancel()` ставит `Cancelled`, `save_jobs` стрипает raw ref, `status()/list()` возвращают masked, `resume()` реюзит `.part` с `Range`, `Installing + .part + !final → Paused` — требует явный `Resume`
+- `src-tauri/src/llm/task/executor.rs` `run_chat` использует `Registry` как source of truth: `ModelRecord.path` → `effective_model_path`, `state != Present (Changed/Missing/Invalid) => model_unavailable` без spawn, `RuntimeProfile.model_id != ModelRecord.id => model_runtime_mismatch`, spawn идёт с `--model <ResolvedModel.path>` (проверяется `tr '\0' ' ' </proc/<pid>/cmdline`)
+- `src-tauri/src/llm.rs` `llm_runtime_start` резолвит `model_path` из `Registry` (`Present` only), `model_unavailable` для `Changed`, `model_not_found` если `profile.model_id` пуст (требует `scan + link`), убран fallback на `local.active_model`/`first file`
+- `src-tauri/src/llm/models/scanner.rs` уточнён fallback комментарий: `GGUF parse → Filename` для placeholder, Installer всё равно требует `checksum→GGUF parse→atomic rename→Present`, `.part` (`.gguf.part`) не сканируется как Present
+- Проверки `cargo check` ✅ `cargo test 58 passed` ✅ `git diff --check` ✅, E2E checklist в `docs/E2E-P1.6-report.md`
+- `README.md` добавлен раздел `P1.6 E2E gate`, `docs/E2E-P1.6-report.md` шаблон отчёта с полями `model_id/path/sha256/provider_id/runtime_profile_id/executable/port/health/chat latency/exit code/final state` + 13 чеков
+
+**Не делать до gate:** `embeddings` (сначала `chunking → EmbeddingProvider → persistence → lexical fallback`, затем `vector search`), не добавлять `embeddings` как `chat` capability без отдельного `response type`.
+
+---
+
 ## v0.5.6 — Foundation P0: schema v2 + keyring + Gateway + RuntimeManager (2026-09-21)
 > **Почему отдельная версия от v0.5.5:** v0.5.5 сделал LLM Hub прототип с `base64` ключами (`api_key` в `llm.json`), `extra_args: String`, `reqwest::blocking`, `single active_model` + `provider.model`, `fake download` placeholder, `api_key` в `Zustand`/`invoke`. По твоему вердикту P0 — не фичи, а контракт: терялись ключи, секреты в plaintext, один порт 8010, `OAuth` ложь, `pipeline ctx=output` опасен. v0.5.6 — Foundation: контракт и миграции без новых AI-фич.
 
