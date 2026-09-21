@@ -8,6 +8,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+pub mod runtime;
+
 // ---------- helpers ----------
 fn config_path() -> PathBuf {
     let vault = vault_root().join(".fragile").join("llm.json");
