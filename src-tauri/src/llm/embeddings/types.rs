@@ -168,12 +168,12 @@ impl NoteChunk {
         if self.content_hash.trim().is_empty() {
             return Err("content_hash is empty".to_string());
         }
-        // Verify content_hash matches SHA-256 hex lowercase of content
-        // Normalization is chunker's responsibility; for contract we just hash raw content as is.
+        // Verify content_hash matches SHA-256 hex lowercase of normalized content (CRLF -> LF)
+        let normalized = self.content.replace("\r\n", "\n");
         let expected = {
             use sha2::{Sha256, Digest};
             let mut hasher = Sha256::new();
-            hasher.update(self.content.as_bytes());
+            hasher.update(normalized.as_bytes());
             format!("{:x}", hasher.finalize())
         };
         if self.content_hash.to_lowercase() != expected {

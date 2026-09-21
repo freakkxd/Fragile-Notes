@@ -1,5 +1,6 @@
 pub mod types;
 pub mod validation;
+pub mod chunker;
 #[cfg(test)]
 mod tests;
 
@@ -7,6 +8,7 @@ pub use types::{
     EmbeddingError, EmbeddingLimits, EmbeddingRequest, EmbeddingResponse, NoteChunk,
 };
 pub use validation::{validate_embedding_request, validate_embedding_response, sha256_hex, content_hash_for};
+pub use chunker::{ChunkingConfig, ChunkingError, ChunkedNote, chunk_markdown, normalize_for_hash};
 
 use async_trait::async_trait;
 
