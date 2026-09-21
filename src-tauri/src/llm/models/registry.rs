@@ -41,29 +41,62 @@ impl Registry {
         let mut updated = Vec::new();
         let mut seen_ids = HashSet::new();
 
-        for rec in scan.discovered {
-            seen_ids.insert(rec.id.clone());
-            if let Some(existing) = self.records.get_mut(&rec.id) {
-                // Preserve manual roles
+        for mut rec in scan.discovered {
+            // Check for moved file: same sha256 but different stable id (path change)
+            let mut target_id = rec.id.clone();
+            let mut is_moved = false;
+            if !self.records.contains_key(&rec.id) {
+                if let Some(sha) = &rec.sha256 {
+                    if !sha.is_empty() {
+                        for (existing_id, existing) in self.records.iter() {
+                            if let Some(existing_sha) = &existing.sha256 {
+                                if existing_sha == sha && existing.size_bytes == rec.size_bytes {
+                                    // Same file moved: keep original id, update path
+                                    target_id = existing_id.clone();
+                                    is_moved = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            seen_ids.insert(target_id.clone());
+            if let Some(existing) = self.records.get_mut(&target_id) {
                 let old_roles = existing.roles.clone();
                 let old_first_seen = existing.first_seen_at;
-                // Check if changed (size/mtime)
-                if existing.size_bytes != rec.size_bytes || existing.path != rec.path {
+                let old_id = existing.id.clone();
+                // Changed detection: same path but different sha256 or size
+                let is_changed = if is_moved {
+                    false // moved is not changed, it's present at new path
+                } else if existing.path == rec.path && existing.sha256.is_some() && rec.sha256.is_some() && existing.sha256 != rec.sha256 {
+                    true
+                } else if existing.size_bytes != rec.size_bytes {
+                    true
+                } else {
+                    false
+                };
+                if is_changed {
                     existing.state = ModelState::Changed;
-                    updated.push(rec.id.clone());
+                    updated.push(old_id.clone());
                 } else {
                     existing.state = ModelState::Present;
+                    if is_moved { updated.push(old_id.clone()); }
                 }
                 existing.last_seen_at = chrono::Utc::now();
                 existing.path = rec.path.clone();
                 existing.size_bytes = rec.size_bytes;
+                existing.sha256 = rec.sha256.clone();
                 existing.metadata = rec.metadata.clone();
-                // Keep manual roles
                 if !old_roles.is_empty() { existing.roles = old_roles; }
                 existing.first_seen_at = old_first_seen;
+                // Ensure id stays stable
+                existing.id = old_id;
             } else {
                 // New
                 let id = rec.id.clone();
+                // ensure id is stable (not verified truncated)
+                rec.id = id.clone();
                 self.records.insert(id.clone(), rec);
                 added.push(id);
             }

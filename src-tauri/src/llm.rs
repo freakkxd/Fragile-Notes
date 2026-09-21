@@ -858,6 +858,67 @@ pub struct TaskErrorDto {
 
 #[tauri::command]
 pub async fn llm_task_run(task_profile_id: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
+    // E2E: Registry → TaskProfile → ResolvedModel → RuntimeProfile consistency → RuntimeManager → Gateway
+    let cfg = load_config_inner();
+    // Validate task exists
+    let task = cfg.task_profiles.iter().find(|t| t.id == task_profile_id).cloned().ok_or_else(|| {
+        let dto = TaskErrorDto{ code: "task_not_found".to_string(), message: format!("task {} not found", task_profile_id), retryable: false };
+        serde_json::to_string(&dto).unwrap()
+    })?;
+    // Resolve model via Registry (source of truth for path/state)
+    let mut reg = crate::llm::models::registry::Registry::new(crate::llm::registry_path());
+    let _ = reg.load();
+    let model_rec = reg.all().into_iter().find(|r| r.id == task.model_ref).or_else(|| {
+        // fallback to LlmConfig.models for old configs
+        cfg.models.iter().find(|m| m.id == task.model_ref).map(|m| crate::llm::models::types::ModelRecord{
+            id: m.id.clone(), provider_id: m.provider_id.clone(), path: std::path::PathBuf::from(&m.path), filename: m.name.clone(),
+            format: crate::llm::models::types::ModelFormat::Gguf, size_bytes: m.metadata.size_bytes, sha256: Some(m.metadata.sha256.clone()).filter(|s| !s.is_empty()),
+            metadata: crate::llm::models::types::ModelMetadata{ architecture: Some(m.metadata.arch.clone()).filter(|s| !s.is_empty()), ..Default::default() },
+            capabilities: vec![crate::llm::Capability::Chat], roles: vec![crate::llm::models::types::ModelRole::General],
+            source: crate::llm::models::types::ModelSource::LocalFile, state: crate::llm::models::types::ModelState::Present,
+            first_seen_at: chrono::Utc::now(), last_seen_at: chrono::Utc::now(), diagnostics: vec![]
+        })
+    }).ok_or_else(|| {
+        let dto = TaskErrorDto{ code: "model_not_found".to_string(), message: format!("model {} not found in registry", task.model_ref), retryable: false };
+        serde_json::to_string(&dto).unwrap()
+    })?;
+    // Fallback for E2E: if registry empty (no scan yet), allow old LlmConfig path for backward compat in tests
+    // Check model state before spawn
+    if model_rec.state != crate::llm::models::types::ModelState::Present {
+        // In tests, registry may be empty and we fallback to LlmConfig, so allow Present only if registry had it
+        // For fallback case, state will be Present as we constructed, so this check is for real registry
+        if model_rec.state == crate::llm::models::types::ModelState::Missing || model_rec.state == crate::llm::models::types::ModelState::Invalid || model_rec.state == crate::llm::models::types::ModelState::Changed {
+            let dto = TaskErrorDto{ code: "model_unavailable".to_string(), message: format!("model {} state {:?}", model_rec.id, model_rec.state), retryable: false };
+            return Err(serde_json::to_string(&dto).unwrap());
+        }
+    }
+    // RuntimeProfile consistency
+    if let Some(rp_id) = &task.runtime_profile_id {
+        let rp = cfg.runtime_profiles.iter().find(|r| &r.id == rp_id).ok_or_else(|| {
+            let dto = TaskErrorDto{ code: "runtime_not_found".to_string(), message: format!("runtime {} not found", rp_id), retryable: false };
+            serde_json::to_string(&dto).unwrap()
+        })?;
+        if rp.model_id != model_rec.id {
+            let dto = TaskErrorDto{ code: "model_runtime_mismatch".to_string(), message: format!("RuntimeProfile {} model_id {} != ModelRecord {}", rp.id, rp.model_id, model_rec.id), retryable: false };
+            return Err(serde_json::to_string(&dto).unwrap());
+        }
+        if rp.provider_id != model_rec.provider_id {
+            let dto = TaskErrorDto{ code: "model_provider_mismatch".to_string(), message: format!("provider mismatch: model {} vs runtime {}", model_rec.provider_id, rp.provider_id), retryable: false };
+            return Err(serde_json::to_string(&dto).unwrap());
+        }
+    } else {
+        // For local model, runtime profile should exist
+        if model_rec.provider_id == "local" {
+            let dto = TaskErrorDto{ code: "local_model_missing_runtime".to_string(), message: format!("local model {} requires runtime profile", model_rec.id), retryable: false };
+            return Err(serde_json::to_string(&dto).unwrap());
+        }
+        // For cloud, no runtime is expected — check that we don't have a runtime for cloud
+        if model_rec.provider_id != "local" && task.runtime_profile_id.is_some() {
+            let dto = TaskErrorDto{ code: "cloud_model_has_runtime".to_string(), message: "cloud model should not have runtime".to_string(), retryable: false };
+            return Err(serde_json::to_string(&dto).unwrap());
+        }
+    }
+
     let executor = TASK_EXECUTOR.clone();
     match executor.run_chat(&task_profile_id, messages).await {
         Ok((run, response)) => {
@@ -869,6 +930,8 @@ pub async fn llm_task_run(task_profile_id: String, messages: Vec<serde_json::Val
             let (code, retryable) = if e.contains("task_not_found") { ("task_not_found", false) }
             else if e.contains("provider_not_found") { ("provider_not_found", false) }
             else if e.contains("model_not_found") { ("model_not_found", false) }
+            else if e.contains("model_unavailable") { ("model_unavailable", false) }
+            else if e.contains("model_runtime_mismatch") { ("model_runtime_mismatch", false) }
             else if e.contains("runtime_not_found") { ("runtime_not_found", false) }
             else if e.contains("PrivacyPolicyViolation") || e.contains("privacy_violation") { ("privacy_violation", false) }
             else if e.contains("unsupported_capability") { ("unsupported_capability", false) }

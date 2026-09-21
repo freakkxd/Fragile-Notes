@@ -46,7 +46,13 @@ impl Scanner {
     }
 
     fn scan_single(&self, path: &Path) -> Result<ModelRecord, String> {
-        let identity = file_identity(path)?;
+        let mut identity = file_identity(path)?;
+        // Compute sha256 lazily for small files (<50MB) for moved detection; for large, keep None to avoid 30GB read
+        if identity.file_size < 50 * 1024 * 1024 {
+            if let Ok(hash) = super::identity::compute_sha256(path) {
+                identity.sha256 = Some(hash);
+            }
+        }
         let id = stable_id(&identity);
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("model.gguf").to_string();
         let format = ModelFormat::Gguf;
