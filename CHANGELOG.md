@@ -1,21 +1,41 @@
 # Changelog
 
-## Unreleased — P1 E2E hardening (gate перед v0.6.0, 2026-09-22)
+## v0.5.7 — P1 local model lifecycle — E2E gate passed (2026-09-22)
 
-> **Цель:** закрыть критические проверки перед embeddings. Downloader отвечает за bytes, Installer — за верификацию+atomic install, Registry — за индекс. Ручной E2E обязателен (`scan → registry → ResolvedModel.path → RuntimeManager → health → Gateway`). Embeddings не начаты — ждёт прохождения gate. Абстракция следующего этапа: `pub trait EmbeddingProvider { async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>; }`.
+> **Почему отдельная версия от v0.5.6:** `v0.5.6` дал Foundation P0 (schema v2, keyring, Gateway, RuntimeManager), но P1.1–P1.6 (Runtime Core, Health+Logs, Resolver, TaskExecutor, Registry, Downloader) были в development-ветке без реального запуска. `v0.5.7` — первый проверенный локальный цикл с реальной GGUF. Не `v0.6.0` — схема `x.x.x+1`: `0.5.6 → 0.5.7 → 0.5.8`.
 
-**Сделано (2e7347e + d46c31c):**
-- `src-tauri/src/llm/download/types.rs` `DownloadSource.token_ref: Option<String>` как `keychain://fragile-notes/<key>` — `validate_token_ref()` отвергает raw `hf_.../sk-...`, `sanitized_for_api()` маскирует в `masked:••••••••`, `sanitized_for_persist()` не пишет raw на диск
-- `src-tauri/src/llm/download/source.rs` `SourceKind::HuggingFace {token_ref}` + `parse_source` валидирует ref и sanitize filename
-- `src-tauri/src/llm/download/downloader.rs` `token` получает `keyring::Entry::new("com.fragilich.notes", key).get_password()` непосредственно перед `reqwest` `Authorization: Bearer` (не логируется), `Range` resume, `HTTPS policy`, `max 100GB`, `disk_space statvfs`, `progress 200ms/1MB`, проверка `cancel.flag` в `bytes_stream` каждую `chunk`
-- `src-tauri/src/llm/download/manager.rs` `DownloadManager::new` восстанавливает `downloads.json`: `Downloading/Installing → Paused` (или `Failed` если `Installing+!part`), `start()` отвергает raw token, `pause()` ставит `Paused`+`paused`+persist и флаг `AtomicBool` (bytes_stream выходит на след. chunk, `.part` остаётся), `cancel()` ставит `Cancelled`, `save_jobs` стрипает raw ref, `status()/list()` возвращают masked, `resume()` реюзит `.part` с `Range`, `Installing + .part + !final → Paused` — требует явный `Resume`
-- `src-tauri/src/llm/task/executor.rs` `run_chat` использует `Registry` как source of truth: `ModelRecord.path` → `effective_model_path`, `state != Present (Changed/Missing/Invalid) => model_unavailable` без spawn, `RuntimeProfile.model_id != ModelRecord.id => model_runtime_mismatch`, spawn идёт с `--model <ResolvedModel.path>` (проверяется `tr '\0' ' ' </proc/<pid>/cmdline`)
-- `src-tauri/src/llm.rs` `llm_runtime_start` резолвит `model_path` из `Registry` (`Present` only), `model_unavailable` для `Changed`, `model_not_found` если `profile.model_id` пуст (требует `scan + link`), убран fallback на `local.active_model`/`first file`
-- `src-tauri/src/llm/models/scanner.rs` уточнён fallback комментарий: `GGUF parse → Filename` для placeholder, Installer всё равно требует `checksum→GGUF parse→atomic rename→Present`, `.part` (`.gguf.part`) не сканируется как Present
-- Проверки `cargo check` ✅ `cargo test 58 passed` ✅ `git diff --check` ✅, E2E checklist в `docs/E2E-P1.6-report.md`
-- `README.md` добавлен раздел `P1.6 E2E gate`, `docs/E2E-P1.6-report.md` шаблон отчёта с полями `model_id/path/sha256/provider_id/runtime_profile_id/executable/port/health/chat latency/exit code/final state` + 13 чеков
+> **Цель v0.5.7:** зафиксировать `scan → registry → ResolvedModel.path → RuntimeManager --model <path> → Starting→Loading→Ready → Gateway chat → Stop` как релиз. Embeddings не начаты.
 
-**Не делать до gate:** `embeddings` (сначала `chunking → EmbeddingProvider → persistence → lexical fallback`, затем `vector search`), не добавлять `embeddings` как `chat` capability без отдельного `response type`.
+**Сделано — P1.1–P1.6 + 3 фикса, E2E Qwen2-0.5B 397M:**
+
+- **P1.1 Runtime Core** `src-tauri/src/llm/runtime/` `RuntimeManager` `HealthState` `process spawn` без shell `port allocator` `ownership` `persisted state` `SystemPath/BundledSidecar/PATH`.
+- **P1.2 Health + Logs** `health polling` `Loading/Ready/NoSlots/Failed/Exited` `timeout/cancellation` `exit watcher` `stdout/stderr draining` `ring 500` `file rotation` `log masking` `inspector Unix/Windows`.
+- **P1.3 Executable Resolver** `explicit user path → bundled sidecar → PATH → actionable error`, `Command::new(path).arg("--version")` без shell, `Explicit invalid path` не заменяется молча.
+- **P1.4 TaskExecutor** `TaskProfile → Provider/Model/RuntimeProfile → capability/privacy → ensure_runtime single-flight → wait Ready → Gateway chat` `cancellation/retention/typed errors`.
+- **P1.5 Model Registry** `bounded GGUF header` `stable ModelRecord.id` `SHA-256` `moved file` сохраняет id `Changed/Missing/Invalid` `manual roles` `path validation/symlink` `atomic persistence`, `stable_id(canonical_path+size+mtime)` для >50MB без sha.
+- **P1.6 Downloader** `Downloader=bytes` `Installer=verify+atomic rename` `Registry=index` `HTTPS/.part/progress/cancellation/pause-resume/Range/checksum/GGUF/atomic` `token_ref keychain://` без raw.
+- **Фиксы, выявленные E2E (90a8ece):**
+  - `runtime/process.rs` — `spawn_llama_server` больше не отвергает `--model/--port` как forbidden (manager уже фильтрует `runtime_args`), проверяет только `shell meta` и наличие `--model/--port`.
+  - `task/startup.rs` — `get_state/clear`, `wait` сразу возвращается если `Ready` (фиксит hang где второй `task_run` ждал вечно на уже-notified `Ready`).
+  - `task/executor.rs` — `run_chat` использует `Registry` `Present` `effective_model_path`, `Changed/Missing → model_unavailable` без spawn, при `Ready` с пустым `list` (после `Stop`) `clear+restart` вместо возврата `profile_id`, возвращает `runtime_id` из `list`.
+- **E2E gate (4da25e5, docs/E2E-P1.6-report.md) — PASS** с `Qwen2-0.5B-Instruct Q4_K_M` `/tmp/fragile-e2e-v0_5_7/models/qwen2-0_5b-instruct-q4_k_m.gguf` `397805248` `sha256 f0a42bb979ca62b5e61f3bf924ab4b6a40aa091825ee7dcb4039949980ab81a8` `provider local` `runtime-e2e-qwen0.5b` `model-f9e30ca0823eb413` `exe /home/fragilich/src/llama.cpp/build/bin/llama-server 0.4.0-dev` `port 8010` `health Ready` `latency 4521ms` `response Hello!` `cmdline --model <path> --port 8010` `Stop` `list []` `second run same id` `Changed/Missing → model_unavailable` ` .part not Present`.
+
+**Сделано (2e7347e + d46c31c + 90a8ece + 4da25e5):**
+- `download/types.rs` `DownloadSource.token_ref` `keychain://` `validate_token_ref` `sanitized_for_api` `masked:••••••••`
+- `download/source.rs` `HuggingFace {token_ref}` `parse_source` ref+sanitize
+- `download/downloader.rs` `keyring Entry` перед `Authorization: Bearer` (не логируется) `Range` `HTTPS` `100GB` `statvfs` `200ms/1MB` `AtomicBool`
+- `download/manager.rs` `new()` `Downloading/Installing → Paused` `start()` reject raw `pause()` `Paused`+`AtomicBool`+`.part` `cancel()` `Cancelled` `save_jobs` strip raw `status/list` masked `resume()` `Range` `Installing+part+!final → Paused`
+- `task/executor.rs` `Registry` `effective_model_path` `model_unavailable` `model_runtime_mismatch` `--model <path>`
+- `llm.rs` `llm_runtime_start` `Registry Present` `model_unavailable` `model_not_found` без fallback `active_model`
+- `models/scanner.rs` `GGUF→Filename` fallback, `.part` не `Present`, `e2e_manual.rs` 60 тестов (2 e2e)
+- Проверки `cargo check` ✅ `cargo test 60 passed` ✅ `cargo clippy -D warnings` ✅ `npm typecheck` ✅ `vite build 1.20s` ✅ `git diff --check` ✅
+
+**Breaking / Migration (совместимо с v0.5.6 config v2):**
+- `llm_runtime_start` теперь `model_unavailable`/`model_not_found` если `RuntimeProfile.model_id` пуст или `ModelRecord.state != Present` — вместо молчаливого `active_model`. Миграция: `llm_models_scan` → проверить `Registry Present` → создать `RuntimeProfile {model_id}` и `TaskProfile {model_ref}` с тем же `id`.
+- `DownloadSource.token_ref` теперь только `keychain://` — raw `hf_...` отвергается. Миграция: `llm_set_provider_credential` или `DownloadSource.token_ref = "keychain://fragile-notes/hf-token"`.
+- `spawn_llama_server` теперь требует `--model`/`--port` в финальных args (ранее ошибочно считал их forbidden). Нет действия для пользователя.
+
+**Версии → 0.5.7** (`Cargo.toml`, `tauri.conf.json`, `package.json`, `CMakeLists.txt`, `updater.ts CURRENT`), `60 tests` ✅, E2E `docs/E2E-P1.6-report.md` заполнен реальными значениями, `v0.5.6` tag не изменён.
 
 ---
 
