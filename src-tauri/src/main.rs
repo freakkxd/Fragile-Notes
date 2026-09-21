@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(dead_code, unused)]
 
 mod collect;
 mod enrich;

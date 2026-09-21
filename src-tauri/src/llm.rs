@@ -14,14 +14,15 @@ fn config_path() -> PathBuf {
     if vault.parent().map(|p| p.exists()).unwrap_or(false) || std::env::var("FRAGILE_VAULT").is_ok() {
         return vault;
     }
-    if let Some(home) = dirs_next() {
+    {
+        let home = dirs_next();
         let p = home.join(".config").join("Fragile-Notes").join("llm.json");
         if p.parent().map(|p| p.exists()).unwrap_or(false) {
             return p;
         }
+        // default to vault path (ensure dir)
         return vault;
     }
-    vault
 }
 fn runtime_state_path() -> PathBuf {
     config_path().parent().unwrap_or(Path::new(".")).join("llm-runtime-state.json")
@@ -85,7 +86,7 @@ pub struct Provider {
     pub extra: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelMetadata {
     #[serde(default)] pub size_bytes: u64,
     #[serde(default)] pub sha256: String,
@@ -108,7 +109,7 @@ pub struct Model {
     #[serde(default)] pub metadata: ModelMetadata,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LlamaAdvancedSettings {
     #[serde(default)] pub flash_attention: bool,
     #[serde(default)] pub mlock: bool,
@@ -191,7 +192,7 @@ pub struct Pipeline {
     pub steps: Vec<PipelineStep>,
 }
 
-// Legacy LocalSettings for migration compat (keep but new code uses RuntimeProfile)
+// Legacy LocalSettings for migration compat (kept, new code uses RuntimeProfile + LlamaSettings)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalSettings {
     pub binary_path: String,
@@ -207,12 +208,13 @@ pub struct LocalSettings {
     #[serde(default)] pub port: u16,
     #[serde(default)] pub auto_start: bool,
     #[serde(default)] pub use_mmap: bool,
-    #[serde(default)] pub extra_args: String,
+    // legacy extra_args kept as Option for migration only — new code uses runtime_args Vec
+    #[serde(default, alias = "extra_args")] pub legacy_extra_args: Option<String>,
 }
 impl Default for LocalSettings {
     fn default() -> Self {
         let home = dirs_next();
-        Self { binary_path:"llama-server".to_string(), models_dir: home.join("Models").to_string_lossy().to_string(), active_model:String::new(), n_ctx:8192, n_threads:0, n_gpu_layers:0, temp:0.7, top_p:0.9, top_k:40, repeat_penalty:1.1, port:8010, auto_start:false, use_mmap:true, extra_args:String::new() }
+        Self { binary_path:"llama-server".to_string(), models_dir: home.join("Models").to_string_lossy().to_string(), active_model:String::new(), n_ctx:8192, n_threads:0, n_gpu_layers:0, temp:0.7, top_p:0.9, top_k:40, repeat_penalty:1.1, port:8010, auto_start:false, use_mmap:true, legacy_extra_args: None }
     }
 }
 
@@ -286,7 +288,7 @@ fn get_keyring(provider_id: &str) -> Result<String, String> {
     entry.get_password().map_err(|e| format!("keyring get failed: {}", e))
 }
 fn delete_keyring(provider_id: &str) -> Result<(), String> {
-    if let Ok(entry) = keyring::Entry::new("com.fragilich.notes", provider_id) { let _ = entry.delete_credential(); }
+    if let Ok(entry) = keyring::Entry::new("com.fragilich.notes", provider_id) { let _ = entry.delete_password(); }
     Ok(())
 }
 fn has_keyring(provider_id: &str) -> bool {
@@ -308,7 +310,7 @@ fn load_config_inner() -> LlmConfig {
     let p = config_path();
     if !p.exists() { return LlmConfig::default(); }
     let txt = match fs::read_to_string(&p) { Ok(t)=>t, Err(_)=> return LlmConfig::default() };
-    let mut val: serde_json::Value = match serde_json::from_str(&txt) { Ok(v)=>v, Err(_)=> return LlmConfig::default() };
+    let val: serde_json::Value = match serde_json::from_str(&txt) { Ok(v)=>v, Err(_)=> return LlmConfig::default() };
     // migrate if needed
     if val.get("schema_version").and_then(|v| v.as_u64()) != Some(2) {
         match migrate_to_v2(val.clone()) {
@@ -379,7 +381,8 @@ fn migrate_to_v2(old: serde_json::Value) -> Result<serde_json::Value, String> {
             if !new_cfg.local.active_model.is_empty() {
                 let model_id = format!("local-{}", new_cfg.local.active_model.split('/').last().unwrap_or("model"));
                 new_cfg.models.push(Model{ id: model_id.clone(), provider_id:"local".to_string(), name: new_cfg.local.active_model.clone(), path: new_cfg.local.active_model.clone(), remote_id:String::new(), capabilities: vec![Capability::Chat], capability_source: Some(CapabilitySource::ModelMetadata), metadata: ModelMetadata{ size_bytes:0, sha256:String::new(), quant: parse_quant(&new_cfg.local.active_model), arch:String::new(), context_length: new_cfg.local.n_ctx, chat_template:String::new(), source:"gguf".to_string() } });
-                new_cfg.runtime_profiles.push(RuntimeProfile{ id:"runtime-local".to_string(), provider_id:"local".to_string(), model_id: model_id.clone(), executable_source: Some(ExecutableSource::SystemPath), binary_path: new_cfg.local.binary_path.clone(), port: new_cfg.local.port, policy:"on-demand".to_string(), settings: LlamaSettings{ n_ctx: new_cfg.local.n_ctx, n_threads: new_cfg.local.n_threads, n_gpu_layers: new_cfg.local.n_gpu_layers, temp: new_cfg.local.temp, top_p: new_cfg.local.top_p, top_k: new_cfg.local.top_k, repeat_penalty: new_cfg.local.repeat_penalty, use_mmap: new_cfg.local.use_mmap, advanced: LlamaAdvancedSettings{..Default::default()}, runtime_args: if new_cfg.local.extra_args.is_empty(){vec![]}else{new_cfg.local.extra_args.split_whitespace().map(|s| s.to_string()).collect()} } });
+                let legacy_args = new_cfg.local.legacy_extra_args.clone().unwrap_or_default();
+                new_cfg.runtime_profiles.push(RuntimeProfile{ id:"runtime-local".to_string(), provider_id:"local".to_string(), model_id: model_id.clone(), executable_source: Some(ExecutableSource::SystemPath), binary_path: new_cfg.local.binary_path.clone(), port: new_cfg.local.port, policy:"on-demand".to_string(), settings: LlamaSettings{ n_ctx: new_cfg.local.n_ctx, n_threads: new_cfg.local.n_threads, n_gpu_layers: new_cfg.local.n_gpu_layers, temp: new_cfg.local.temp, top_p: new_cfg.local.top_p, top_k: new_cfg.local.top_k, repeat_penalty: new_cfg.local.repeat_penalty, use_mmap: new_cfg.local.use_mmap, advanced: LlamaAdvancedSettings{..Default::default()}, runtime_args: if legacy_args.is_empty(){vec![]}else{legacy_args.split_whitespace().map(|s| s.to_string()).collect()} } });
                 // task profile refs
                 for tp in &mut new_cfg.task_profiles { if tp.id=="task-chat" || tp.id=="task-enrich" { tp.model_ref = model_id.clone(); tp.runtime_profile_id = Some("runtime-local".to_string()); } }
             }
@@ -566,7 +569,7 @@ pub struct ConnectionTestResult {
 pub struct ConnectionError { pub code: String, pub message: String, pub retryable: bool }
 
 #[tauri::command]
-pub fn llm_test_provider(provider_id: String) -> Result<String, String> {
+pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
     let cfg = load_config_inner();
     let prov = cfg.providers.iter().find(|p| p.id==provider_id).ok_or("provider not found")?.clone();
     let start = std::time::Instant::now();
@@ -574,11 +577,13 @@ pub fn llm_test_provider(provider_id: String) -> Result<String, String> {
         ProviderKind::LocalLlamaCpp | ProviderKind::Ollama => {
             let base = if prov.endpoint.is_empty() { format!("http://127.0.0.1:{}", cfg.local.port) } else { prov.endpoint.clone() };
             let health = format!("{}/health", base.trim_end_matches('/'));
-            // simple blocking health with timeout - real would be async with /health slots parsing
-            let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
-            match client.get(&health).send() {
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
+            match client.get(&health).send().await {
                 Ok(r) if r.status().is_success() => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: Some(vec![Capability::Chat]), error: None },
-                Ok(r) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: if r.status().as_u16()==401 {"unauthorized".to_string()} else {"server_error".to_string()}, message: format!("HTTP {}", r.status()), retryable: r.status().as_u16()>=500 }) },
+                Ok(r) => {
+                    let status = r.status();
+                    ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: if status.as_u16()==401 {"unauthorized".to_string()} else {"server_error".to_string()}, message: format!("HTTP {}", status), retryable: status.as_u16()>=500 }) }
+                },
                 Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message: e.to_string().replace('"',"'"), retryable:true }) },
             }
         }
@@ -587,7 +592,6 @@ pub fn llm_test_provider(provider_id: String) -> Result<String, String> {
             if !has { return Ok(serde_json::to_string(&ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"unauthorized".to_string(), message:"no api_key in keyring".to_string(), retryable:false }) }).unwrap()); }
             let secret = get_keyring(&provider_id).unwrap_or_default();
             if secret.len()<10 { return Ok(serde_json::to_string(&ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"invalid_key".to_string(), message:"api_key too short".to_string(), retryable:false }) }).unwrap()); }
-            // Real probe: GET /v1/models for OpenAI/Custom, etc. For MVP do lightweight probe without spending tokens
             let base = if prov.endpoint.is_empty() { "https://api.openai.com/v1".to_string() } else { prov.endpoint.clone() };
             let url = match prov.kind {
                 ProviderKind::OpenAI | ProviderKind::CustomOpenAI => format!("{}/models", base.trim_end_matches('/')),
@@ -595,15 +599,16 @@ pub fn llm_test_provider(provider_id: String) -> Result<String, String> {
                 ProviderKind::Claude => format!("{}/v1/models", base.trim_end_matches('/')),
                 _ => base,
             };
-            let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(8)).build().map_err(|e| e.to_string())?;
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(8)).build().map_err(|e| e.to_string())?;
             let mut req = client.get(&url);
             if prov.kind==ProviderKind::OpenAI || prov.kind==ProviderKind::CustomOpenAI { req = req.header("Authorization", format!("Bearer {}", secret)); }
             if prov.kind==ProviderKind::Claude { req = req.header("x-api-key", secret.clone()).header("anthropic-version","2023-06-01"); }
-            match req.send() {
+            match req.send().await {
                 Ok(r) if r.status().is_success() => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: Some(vec![Capability::Chat, Capability::Streaming]), error: None },
                 Ok(r) => {
-                    let code = match r.status().as_u16() { 401 => "unauthorized", 429 => "rate_limited", 404 => "unsupported", 500..=599 => "server_error", _ => "network" };
-                    ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: code.to_string(), message: format!("HTTP {} {}", r.status(), r.text().unwrap_or_default().chars().take(300).collect::<String>()), retryable: r.status().as_u16()>=500 || r.status().as_u16()==429 }) }
+                    let status = r.status();
+                    let txt = r.text().await.unwrap_or_default().chars().take(300).collect::<String>();
+                    ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: match status.as_u16() { 401 => "unauthorized", 429 => "rate_limited", 404 => "unsupported", 500..=599 => "server_error", _ => "network" }.to_string(), message: format!("HTTP {} {}", status, txt), retryable: status.as_u16()>=500 || status.as_u16()==429 }) }
                 },
                 Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message:e.to_string(), retryable:true }) }
             }
@@ -629,7 +634,7 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
     let secret = if prov.auth.as_ref().map(|a| a.method==AuthMethod::ApiKey).unwrap_or(false) { get_keyring(&prov.id).unwrap_or_default() } else { String::new() };
     // Use async reqwest for gateway (P0)
     let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
-    let (url, mut headers) = match prov.kind {
+    let (url, headers) = match prov.kind {
         ProviderKind::LocalLlamaCpp | ProviderKind::Ollama | ProviderKind::CustomOpenAI | ProviderKind::OpenAI => {
             let base = if prov.endpoint.is_empty() { format!("http://127.0.0.1:{}", cfg.local.port) } else { prov.endpoint.clone() };
             let u = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
@@ -730,24 +735,24 @@ pub async fn llm_pipeline_run(pipeline_id: String, input: String) -> Result<Stri
     // run_id for streaming future
     let run_id = format!("run-{}", chrono::Utc::now().timestamp_millis());
     let _ = run_id;
-    let mut ctx = input;
+    let mut current = input;
     let mut outputs: std::collections::HashMap<String,String> = std::collections::HashMap::new();
-    outputs.insert("input".to_string(), ctx.clone());
+    outputs.insert("input".to_string(), current.clone());
     for step in &pipe.steps {
         if !step.enabled { continue; }
-        // template with named refs: {{input}}, {{step_id}}, {{content}} backward compat
+        // template with named refs: {{input}}, {{step_id}} — primary, {{content}}/{{rag}} legacy compat
         let mut prompt = step.prompt_template.clone();
         for (k,v) in &outputs { prompt = prompt.replace(&format!("{{{{{}}}}}",k), v); }
-        prompt = prompt.replace("{{content}}", &ctx).replace("{{rag}}", &ctx);
+        prompt = prompt.replace("{{content}}", &current).replace("{{rag}}", &current);
         let msgs = vec![serde_json::json!({"role":"user","content": prompt})];
         let req = ChatRequest{ provider_id: step.provider_id.clone(), model_ref: step.model_ref.clone(), messages: msgs, task_profile_id: step.task_profile_id.clone() };
         let res = gateway_chat(req).await.unwrap_or_else(|e| format!("error: {}", e));
         let out = extract_content(&res);
         outputs.insert(step.id.clone(), out.clone());
-        ctx = out;
+        current = out;
         // cancellation would check token here
     }
-    Ok(ctx)
+    Ok(current)
 }
 fn extract_content(raw: &str) -> String {
     if let Ok(j) = serde_json::from_str::<serde_json::Value>(raw) {

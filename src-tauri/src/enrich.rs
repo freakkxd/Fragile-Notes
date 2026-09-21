@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 use walkdir::WalkDir;
 use regex::Regex;
 use once_cell::sync::Lazy;
+use crate::llm::{gateway_chat, ChatRequest};
 
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") { return PathBuf::from(custom); }
@@ -11,62 +11,35 @@ fn vault_root() -> PathBuf {
     home.join("Documents").join("FragileNotesVault")
 }
 
-fn llm_base_url(profile: &str) -> String {
-    // env override or default ports: day 8010, archive 8011
-    let port = std::env::var(format!("LLM_{}_PORT", profile.to_uppercase())).unwrap_or_else(|_| if profile=="day" {"8010".to_string()} else {"8011".to_string()});
-    format!("http://127.0.0.1:{}", port)
-}
-
-// Reuse single Client — экономит 1-2МБ на каждый запрос, не пересоздаем пул соединений
-static CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .pool_idle_timeout(Duration::from_secs(30))
-        .pool_max_idle_per_host(2)
-        .build()
-        .expect("reqwest client")
-});
-
 static RE_FRONT: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)^---\n(.*?)\n---\n").unwrap());
 static RE_TAG: Lazy<Regex> = Lazy::new(|| Regex::new(r"#([A-Za-z0-9/_\-]+)").unwrap());
 
-pub fn llm_ping(profile: &str) -> String {
-    let url = format!("{}/health", llm_base_url(profile));
-    // переиспользуем CLIENT, но с коротким таймаутом на ping
-    match CLIENT.get(&url).timeout(Duration::from_secs(5)).send() {
-        Ok(resp) if resp.status().is_success() => {
-            let txt = resp.text().unwrap_or_default();
-            format!("{{\"profile\":\"{}\",\"online\":true,\"health\":{}}}", profile, txt)
-        },
-        Ok(resp) => format!("{{\"profile\":\"{}\",\"online\":false,\"error\":\"HTTP {}\"}}", profile, resp.status()),
-        Err(e) => format!("{{\"profile\":\"{}\",\"online\":false,\"error\":\"{}\"}}", profile, e.to_string().replace('"', "'")),
+// Legacy profile -> provider mapping: day/archive both map to local provider via Gateway
+fn profile_to_provider(profile: &str) -> String {
+    match profile {
+        "day" | "archive" | "" => "local".to_string(),
+        other => other.to_string(),
     }
 }
 
 #[tauri::command]
-pub fn llm_status(profile: String) -> Result<String, String> {
-    Ok(llm_ping(&profile))
+pub async fn llm_status(profile: String) -> Result<String, String> {
+    // Unified via Gateway health: use llm_test_provider
+    let prov = profile_to_provider(&profile);
+    crate::llm::llm_test_provider(prov).await
 }
 
 #[tauri::command]
-pub fn llm_chat(profile: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
-    let url = format!("{}/v1/chat/completions", llm_base_url(&profile));
-    let body = serde_json::json!({
-        "model": "qwen3-14b",
-        "messages": messages,
-        "temperature": 0.7,
-        "stream": false
-    });
-    let resp = CLIENT.post(&url).json(&body).send().map_err(|e| format!("LLM offline {}: {}", url, e))?;
-    if !resp.status().is_success() {
-        return Err(format!("LLM HTTP {}: {}", resp.status(), resp.text().unwrap_or_default()));
-    }
-    let txt = resp.text().map_err(|e| e.to_string())?;
-    Ok(txt)
+pub async fn llm_chat(profile: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
+    let provider_id = profile_to_provider(&profile);
+    // task-enrich for legacy enrich, task-chat for generic chat — infer from profile
+    let task = if provider_id=="local" { Some("task-chat".to_string()) } else { None };
+    let req = ChatRequest { provider_id, model_ref: String::new(), messages, task_profile_id: task };
+    gateway_chat(req).await
 }
 
 #[tauri::command]
-pub fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
+pub async fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
     let vault = vault_root();
     let sort_dir = vault.join("05 Sort");
     if !sort_dir.exists() { return Err("05 Sort not found".to_string()); }
@@ -76,7 +49,6 @@ pub fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
         let p = entry.path();
         if !p.is_file() || p.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
         let content = match fs::read_to_string(p) { Ok(c) => c, Err(e) => { errors.push(e.to_string()); continue; } };
-        // skip already enriched
         if content.contains("enriched: true") || content.contains("ao_enriched:") { continue; }
         let body = if let Some(cap) = RE_FRONT.captures(&content) {
             content[cap.get(0).unwrap().end()..].to_string()
@@ -87,13 +59,12 @@ pub fn enrich_notes(limit: usize, profile: String) -> Result<String, String> {
             serde_json::json!({"role":"system","content":"Ты — помощник Archive Organism. Отвечай JSON."}),
             serde_json::json!({"role":"user","content": prompt}),
         ];
-        let llm_result = llm_chat(profile.clone(), messages);
-        match llm_result {
+        let provider_id = profile_to_provider(&profile);
+        let req = ChatRequest { provider_id: provider_id.clone(), model_ref: String::new(), messages, task_profile_id: Some("task-enrich".to_string()) };
+        match gateway_chat(req).await {
             Ok(resp) => {
-                // try to extract JSON tags
                 let tags = extract_tags(&resp);
                 let enriched_content = format!("{}\n\n---\nenriched: true\ntags: [{}]\nllm_raw: {}\n---\n", content.trim(), tags.join(", "), resp.chars().take(500).collect::<String>().replace('\n', " "));
-                // append enrichment frontmatter at end (simplified)
                 match fs::write(p, enriched_content) {
                     Ok(_) => enriched += 1,
                     Err(e) => errors.push(e.to_string()),
@@ -112,13 +83,12 @@ fn extract_tags(resp: &str) -> Vec<String> {
 
 #[tauri::command]
 pub fn embeddings_search(query: String, limit: usize) -> Result<String, String> {
-    // simple TF-IDF fallback via FTS5 already in fts_search, here we just call fts
+    // FTS5 lexical, not embeddings — keep as SearchBackend::lexical
     let vault = vault_root();
     let db = vault.join(".fragile_fts.db");
     if !db.exists() {
         return Ok("{\"results\":[],\"note\":\"fts db not found, run FTS index\"}".to_string());
     }
-    // reuse fts_search logic via direct rusqlite
     let conn = rusqlite::Connection::open(&db).map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT path FROM fts WHERE fts MATCH ?1 LIMIT ?2").map_err(|e| e.to_string())?;
     let rows = stmt.query_map(rusqlite::params![query, limit as i64], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
