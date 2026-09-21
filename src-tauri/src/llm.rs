@@ -766,34 +766,75 @@ fn extract_content(raw: &str) -> String {
     raw.to_string()
 }
 
-// ---------- runtime manager stub ----------
+// ---------- runtime manager P1.2 ----------
+use std::sync::Arc;
+static RUNTIME_MANAGER: Lazy<Arc<runtime::manager::RuntimeManager>> = Lazy::new(|| {
+    Arc::new(runtime::manager::RuntimeManager::new(runtime_state_path()))
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct RuntimeStatus { pub id: String, pub pid: Option<u32>, pub port: u16, pub status: String }
+
 #[tauri::command]
 pub fn llm_runtime_list() -> Result<String, String> {
-    let path = runtime_state_path();
-    if !path.exists() { return Ok("[]".to_string()); }
-    let txt = fs::read_to_string(&path).unwrap_or("[]".to_string());
-    Ok(txt)
-}
-#[tauri::command]
-pub fn llm_runtime_start(profile_id: String) -> Result<String, String> {
-    // P0: only resolve executable, don't actually spawn sidecar packaging yet
-    let cfg = load_config_inner();
-    let rp = cfg.runtime_profiles.iter().find(|r| r.id==profile_id).ok_or("profile not found")?;
-    // resolve executable: SystemPath > BundledSidecar > PATH
-    let exe = if !rp.binary_path.is_empty() { PathBuf::from(&rp.binary_path) } else { PathBuf::from("llama-server") };
-    // check exists — PATH search will be in P1 ExecutableResolver
-    if !exe.exists() && !PathBuf::from("llama-server").exists() {
-        // don't fail hard in P0, just warn if not found at path, but try PATH existence via direct check
-        // we avoid `which` crate to keep deps minimal — P1 will add proper resolver
+    // P1.2: via RuntimeManager list with typed status
+    let mgr = RUNTIME_MANAGER.clone();
+    match mgr.list() {
+        Ok(list) => serde_json::to_string(&list).map_err(|e| e.to_string()),
+        Err(_) => {
+            // fallback to file read for compat
+            let path = runtime_state_path();
+            if !path.exists() { return Ok("[]".to_string()); }
+            let txt = fs::read_to_string(&path).unwrap_or("[]".to_string());
+            Ok(txt)
+        }
     }
-    // For P0, don't spawn, just return resolved port
-    Ok(format!("{{\"profile\":\"{}\",\"port\":{},\"executable\":\"{}\",\"note\":\"sidecar spawn will be in P1\"}}", profile_id, rp.port, exe.display()))
 }
+
 #[tauri::command]
-pub fn llm_runtime_stop(profile_id: String) -> Result<String, String> {
-    let _ = profile_id;
-    Ok("stopped (stub)".to_string())
+pub async fn llm_runtime_start(profile_id: String) -> Result<String, String> {
+    let cfg = load_config_inner();
+    let rp = cfg.runtime_profiles.iter().find(|r| r.id==profile_id).cloned().ok_or("profile not found")?;
+    // For P1.2, use RuntimeManager with model path resolution
+    let model_path = if rp.model_id.is_empty() { cfg.local.active_model.clone() } else {
+        cfg.models.iter().find(|m| m.id==rp.model_id).map(|m| m.path.clone()).unwrap_or(rp.model_id.clone())
+    };
+    if model_path.is_empty() {
+        return Err("model path missing for profile".to_string());
+    }
+    let mgr = RUNTIME_MANAGER.clone();
+    let res = mgr.start(&profile_id, &model_path, &rp.binary_path, &rp.settings).await;
+    match res {
+        Ok(info) => serde_json::to_string(&info).map_err(|e| e.to_string()),
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
+pub async fn llm_runtime_stop(runtime_id: String) -> Result<String, String> {
+    let mgr = RUNTIME_MANAGER.clone();
+    mgr.stop(&runtime_id).await?;
+    Ok("stopped".to_string())
+}
+
+#[tauri::command]
+pub async fn llm_runtime_health(runtime_id: String) -> Result<String, String> {
+    let mgr = RUNTIME_MANAGER.clone();
+    let info = mgr.status(&runtime_id).await?;
+    serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn llm_runtime_logs(runtime_id: String, tail: Option<u32>) -> Result<String, String> {
+    let mgr = RUNTIME_MANAGER.clone();
+    let n = tail.unwrap_or(200) as usize;
+    let logs = mgr.logs(&runtime_id, n)?;
+    serde_json::to_string(&logs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn llm_runtime_restart(runtime_id: String) -> Result<String, String> {
+    // P1.2 RestartPolicy Never only — manual restart = stop + start
+    Err("restart OnCrash not enabled in P1.2 — use stop then start (Never policy)".to_string())
 }
 
 #[cfg(test)]

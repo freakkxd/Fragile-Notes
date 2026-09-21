@@ -209,4 +209,7 @@ export async function llmDeleteProviderCredential(providerId: string): Promise<v
 }
 export async function llmRuntimeList(): Promise<string> { const inv=getInvoke(); if(!inv) return '[]'; return await inv('llm_runtime_list') as string }
 export async function llmRuntimeStart(profileId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_start', { profileId }) as string }
-export async function llmRuntimeStop(profileId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_stop', { profileId }) as string }
+export async function llmRuntimeStop(runtimeId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_stop', { runtimeId }) as string }
+export async function llmRuntimeHealth(runtimeId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_health', { runtimeId }) as string }
+export async function llmRuntimeLogs(runtimeId: string, tail?: number): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_logs', { runtimeId, tail: tail ?? 200 }) as string }
+export async function llmRuntimeRestart(runtimeId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_restart', { runtimeId }) as string }

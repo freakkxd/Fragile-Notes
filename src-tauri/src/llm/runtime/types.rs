@@ -47,10 +47,56 @@ pub struct RuntimeStateFile {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LogStream { Stdout, Stderr }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LogLevel { Info, Warn, Error, Debug, Unknown }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogLine {
     pub ts: DateTime<Utc>,
     pub runtime_id: String,
-    pub source: String, // stdout | stderr
+    pub stream: LogStream,
+    pub level: LogLevel,
+    pub text: String,
+    pub timestamp: DateTime<Utc>,
+    // legacy alias for compat
+    pub source: String,
     pub line: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthPolicy {
+    pub poll_interval_ms: u64,
+    pub startup_timeout_ms: u64,
+    pub request_timeout_ms: u64,
+    pub consecutive_failures: u32,
+    pub shutdown_grace_ms: u64,
+}
+impl Default for HealthPolicy {
+    fn default() -> Self {
+        Self { poll_interval_ms: 500, startup_timeout_ms: 120_000, request_timeout_ms: 1500, consecutive_failures: 3, shutdown_grace_ms: 5000 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RestartPolicy { Never, OnCrash }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExitInfo {
+    pub runtime_id: String,
+    pub pid: u32,
+    pub exit_code: Option<i32>,
+    pub signal: Option<i32>,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeEvent {
+    pub runtime_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub state: Option<HealthState>,
+    pub health: Option<HealthState>,
+    pub log: Option<LogLine>,
+    pub error: Option<String>,
 }

@@ -11,8 +11,9 @@ use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
 use llm::{
     llm_chat_universal, llm_delete_pipeline, llm_delete_provider_credential, llm_download_model,
     llm_get_config, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
-    llm_runtime_list, llm_runtime_start, llm_runtime_stop, llm_save_config, llm_save_pipeline,
-    llm_scan_models, llm_set_active_model, llm_set_provider_credential, llm_test_provider,
+    llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
+    llm_runtime_stop, llm_save_config, llm_save_pipeline, llm_scan_models, llm_set_active_model,
+    llm_set_provider_credential, llm_test_provider,
 };
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use once_cell::sync::Lazy;
@@ -247,7 +248,10 @@ fn main() {
             llm_delete_provider_credential,
             llm_runtime_list,
             llm_runtime_start,
-            llm_runtime_stop
+            llm_runtime_stop,
+            llm_runtime_health,
+            llm_runtime_logs,
+            llm_runtime_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

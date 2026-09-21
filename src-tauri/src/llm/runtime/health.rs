@@ -9,9 +9,32 @@ pub struct HealthCheckResult {
     pub error: Option<String>,
 }
 
+pub fn combine_health(process_state: &str, http: &HealthCheckResult) -> HealthState {
+    let is_running = process_state == "running";
+    let is_exited = process_state == "exited";
+    if is_exited {
+        if http.error.as_deref().map(|e| e.contains("exit code 0")).unwrap_or(false) {
+            return HealthState::Exited;
+        }
+        return HealthState::Failed;
+    }
+    if !is_running {
+        return HealthState::Stopped;
+    }
+    match http.state {
+        HealthState::Ready => HealthState::Ready,
+        HealthState::NoSlots => HealthState::NoSlots,
+        HealthState::Loading => HealthState::Loading,
+        HealthState::Starting => HealthState::Starting,
+        HealthState::Failed => HealthState::Failed,
+        HealthState::Exited => HealthState::Exited,
+        _ => HealthState::Unknown,
+    }
+}
+
 pub async fn check_health(base_url: &str) -> HealthCheckResult {
     let url = format!("{}/health", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(3)).build();
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build();
     let client = match client {
         Ok(c) => c,
         Err(e) => return HealthCheckResult{ state: HealthState::Unknown, http_status: None, body: None, error: Some(e.to_string()) },
@@ -20,18 +43,20 @@ pub async fn check_health(base_url: &str) -> HealthCheckResult {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            // llama.cpp /health returns JSON with status, slots, etc.
-            // We distinguish: 200 with {"status":"ok"} -> Ready, 503 -> Loading/NoSlots, 500 -> Failed
             if status == 200 {
-                if text.contains("no slots") || text.contains("NoSlots") {
+                if text.contains("no slots") || text.contains("NoSlots") || text.contains("slots") && text.contains("0") {
                     HealthCheckResult{ state: HealthState::NoSlots, http_status: Some(status), body: Some(text), error: None }
                 } else if text.contains("loading") || text.contains("Loading") {
                     HealthCheckResult{ state: HealthState::Loading, http_status: Some(status), body: Some(text), error: None }
                 } else {
-                    HealthCheckResult{ state: HealthState::Ready, http_status: Some(status), body: Some(text), error: None }
+                    // 200 without loading marker -> Ready, but verify body not error
+                    if text.contains("error") || text.contains("Error") {
+                        HealthCheckResult{ state: HealthState::Failed, http_status: Some(status), body: Some(text.clone()), error: Some(text) }
+                    } else {
+                        HealthCheckResult{ state: HealthState::Ready, http_status: Some(status), body: Some(text), error: None }
+                    }
                 }
             } else if status == 503 {
-                // often loading
                 HealthCheckResult{ state: HealthState::Loading, http_status: Some(status), body: Some(text), error: None }
             } else if status >= 500 {
                 HealthCheckResult{ state: HealthState::Failed, http_status: Some(status), body: Some(text), error: Some(format!("HTTP {}", status)) }
@@ -40,7 +65,6 @@ pub async fn check_health(base_url: &str) -> HealthCheckResult {
             }
         }
         Err(e) => {
-            // connection refused -> Starting/Loading or Exited
             let msg = e.to_string();
             if msg.contains("Connection refused") || msg.contains(" refused") {
                 HealthCheckResult{ state: HealthState::Starting, http_status: None, body: None, error: Some(msg) }

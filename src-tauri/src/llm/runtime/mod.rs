@@ -4,6 +4,7 @@ pub mod allocator;
 pub mod process;
 pub mod health;
 pub mod manager;
+pub mod logs;
 
 pub use types::{HealthState, ManagedProcess, RuntimeInfo, LogLine};
 pub use manager::RuntimeManager;
