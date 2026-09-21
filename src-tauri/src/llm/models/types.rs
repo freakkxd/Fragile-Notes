@@ -16,6 +16,9 @@ pub enum MetadataSource { Gguf, Filename, Manual }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ModelSource { LocalFile, HuggingFace, Manual }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum IdentityStatus { #[default] Unchecked, Verified, Changed, Ambiguous, Error }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelMetadata {
     pub architecture: Option<String>,
@@ -34,9 +37,11 @@ impl Default for MetadataSource { fn default() -> Self { MetadataSource::Gguf } 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelRecord {
-    pub id: String, // stable: canonical_path + size + mtime -> hash, verified via sha256
+    pub id: String, // persisted application identity — created on first discovery, preserved by canonical_path
     pub provider_id: String,
     pub path: std::path::PathBuf,
+    #[serde(default)]
+    pub canonical_path: String, // canonical absolute path for identity preservation
     pub filename: String,
     pub format: ModelFormat,
     pub size_bytes: u64,
@@ -46,6 +51,8 @@ pub struct ModelRecord {
     pub roles: Vec<ModelRole>,
     pub source: ModelSource,
     pub state: ModelState,
+    #[serde(default)]
+    pub identity_status: IdentityStatus,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub diagnostics: Vec<ModelDiagnostic>,

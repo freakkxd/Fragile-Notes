@@ -63,7 +63,10 @@ impl StartupManager {
 
     pub async fn clear(&self, key: &str) {
         let mut map = self.map.lock().await;
-        map.remove(key);
+        if let Some(entry) = map.remove(key) {
+            // Wake any waiters so they don't hang on old Notify
+            entry.notify.notify_waiters();
+        }
     }
 
     pub async fn wait(&self, key: &str, notify: Arc<Notify>) {

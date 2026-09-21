@@ -73,10 +73,12 @@ impl Scanner {
             }
         };
         let now = chrono::Utc::now();
+        let identity_status = if identity.sha256.is_some() { super::types::IdentityStatus::Verified } else { super::types::IdentityStatus::Unchecked };
         Ok(ModelRecord{
             id,
             provider_id: "local".to_string(),
             path: path.to_path_buf(),
+            canonical_path: identity.canonical_path.clone(),
             filename,
             format,
             size_bytes: identity.file_size,
@@ -86,6 +88,7 @@ impl Scanner {
             roles: vec![super::types::ModelRole::General],
             source: ModelSource::LocalFile,
             state: ModelState::Present,
+            identity_status,
             first_seen_at: now,
             last_seen_at: now,
             diagnostics: vec![],

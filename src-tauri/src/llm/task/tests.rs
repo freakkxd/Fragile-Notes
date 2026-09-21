@@ -132,4 +132,112 @@ mod task_tests {
             assert!(should2, "after Failed should allow retry");
         });
     }
+
+    #[tokio::test]
+    async fn test_start_ready_stop_cleared() {
+        let mgr = StartupManager::new();
+        let key = "test-restart";
+        let (should, _) = mgr.should_start(key).await;
+        assert!(should);
+        mgr.mark_ready(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Ready);
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+        let (should2, _) = mgr.should_start(key).await;
+        assert!(should2);
+        mgr.mark_ready(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Ready);
+    }
+
+    #[tokio::test]
+    async fn test_failed_cleared_retry() {
+        let mgr = StartupManager::new();
+        let key = "test-failed";
+        let (should, _) = mgr.should_start(key).await;
+        assert!(should);
+        mgr.mark_failed(key, "fail".to_string()).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Failed("fail".to_string()));
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+        let (should2, _) = mgr.should_start(key).await;
+        assert!(should2);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_cleared() {
+        let mgr = StartupManager::new();
+        let key = "test-cancel";
+        let (should, notify) = mgr.should_start(key).await;
+        assert!(should);
+        // Simulate cancellation by clearing
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+        // Idempotent clear
+        mgr.clear(key).await;
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+        // After cancel, new start should work
+        let (should2, _) = mgr.should_start(key).await;
+        assert!(should2);
+        let _ = notify;
+    }
+
+    #[tokio::test]
+    async fn test_clear_idempotent() {
+        let mgr = StartupManager::new();
+        let key = "test-idempotent";
+        mgr.clear(key).await;
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+        let (should, _) = mgr.should_start(key).await;
+        assert!(should);
+        mgr.mark_ready(key).await;
+        mgr.clear(key).await;
+        mgr.clear(key).await;
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Idle);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_one_process() {
+        let mgr = std::sync::Arc::new(StartupManager::new());
+        let key = "test-concurrent2";
+        let m1 = mgr.clone();
+        let m2 = mgr.clone();
+        let (should1, _) = m1.should_start(key).await;
+        assert!(should1);
+        let (should2, notify2) = m2.should_start(key).await;
+        assert!(!should2);
+        // Second should wait, first marks ready
+        let mgr_clone = mgr.clone();
+        let handle = tokio::spawn(async move {
+            mgr_clone.mark_ready(key).await;
+        });
+        // Wait for second's notify
+        let wait_fut = m2.wait(key, notify2);
+        tokio::time::timeout(std::time::Duration::from_secs(1), wait_fut).await.expect("wait should complete after ready");
+        handle.await.unwrap();
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Ready);
+    }
+
+    #[tokio::test]
+    async fn test_stop_start_race() {
+        let mgr = std::sync::Arc::new(StartupManager::new());
+        let key = "test-race";
+        let (should, _) = mgr.should_start(key).await;
+        assert!(should);
+        mgr.mark_ready(key).await;
+        // Simulate stop + start simultaneously
+        let m1 = mgr.clone();
+        let m2 = mgr.clone();
+        let h1 = tokio::spawn(async move { m1.clear(key).await; });
+        let h2 = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let (should, _) = m2.should_start(key).await;
+            assert!(should, "after clear, should allow start");
+            m2.mark_ready(key).await;
+        });
+        h1.await.unwrap();
+        h2.await.unwrap();
+        assert_eq!(mgr.get_state(key).await, crate::llm::task::startup::StartupState::Ready);
+    }
 }

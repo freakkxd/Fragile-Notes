@@ -41,64 +41,165 @@ impl Registry {
         let mut updated = Vec::new();
         let mut seen_ids = HashSet::new();
 
+        // Migration: ensure existing records have canonical_path and identity_status
+        for rec in self.records.values_mut() {
+            if rec.canonical_path.is_empty() {
+                let canon = rec.path.canonicalize().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| rec.path.to_string_lossy().to_string());
+                rec.canonical_path = canon;
+            }
+            // Default identity_status already handled via serde default
+        }
+
         for mut rec in scan.discovered {
-            // Check for moved file: same sha256 but different stable id (path change)
-            let mut target_id = rec.id.clone();
+            // Ensure rec has canonical_path (scanner already sets it, but for safety)
+            let canon_new = if !rec.canonical_path.is_empty() {
+                rec.canonical_path.clone()
+            } else {
+                rec.path.canonicalize().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| rec.path.to_string_lossy().to_string())
+            };
+            rec.canonical_path = canon_new.clone();
+
+            // 1. Same canonical_path -> preserve existing id (covers mtime/size changes, delete/restore)
+            let mut target_id: Option<String> = None;
             let mut is_moved = false;
-            if !self.records.contains_key(&rec.id) {
+            let mut is_same_path = false;
+            for (eid, existing) in self.records.iter() {
+                let canon_existing = if !existing.canonical_path.is_empty() {
+                    existing.canonical_path.clone()
+                } else {
+                    existing.path.canonicalize().map(|p| p.to_string_lossy().to_string()).unwrap_or(existing.path.to_string_lossy().to_string())
+                };
+                if canon_existing == canon_new {
+                    target_id = Some(eid.clone());
+                    is_same_path = true;
+                    break;
+                }
+            }
+
+            // 2. If not found by canonical, try SHA move detection (lazy, only if sha present)
+            if target_id.is_none() {
                 if let Some(sha) = &rec.sha256 {
                     if !sha.is_empty() {
-                        for (existing_id, existing) in self.records.iter() {
+                        let mut candidates = Vec::new();
+                        for (eid, existing) in self.records.iter() {
                             if let Some(existing_sha) = &existing.sha256 {
                                 if existing_sha == sha && existing.size_bytes == rec.size_bytes {
-                                    // Same file moved: keep original id, update path
-                                    target_id = existing_id.clone();
-                                    is_moved = true;
-                                    break;
+                                    candidates.push(eid.clone());
                                 }
                             }
                         }
+                        if candidates.len() == 1 {
+                            // If candidate already seen in this scan, it's a duplicate file in same scan, not a move
+                            if seen_ids.contains(&candidates[0]) {
+                                rec.identity_status = super::types::IdentityStatus::Ambiguous;
+                                rec.diagnostics.push(super::types::ModelDiagnostic{ code: "duplicate_hash".to_string(), message: format!("same sha {} found in two files in same scan ({} and {}), manual resolution needed", sha, candidates[0], rec.path.display()), level: "warn".to_string() });
+                                target_id = None;
+                            } else {
+                                target_id = Some(candidates[0].clone());
+                                is_moved = true;
+                            }
+                        } else if candidates.len() > 1 {
+                            // Ambiguous same hash in multiple existing records
+                            rec.identity_status = super::types::IdentityStatus::Ambiguous;
+                            rec.diagnostics.push(super::types::ModelDiagnostic{ code: "ambiguous_hash".to_string(), message: format!("same sha {} found in multiple records, manual resolution needed", sha), level: "warn".to_string() });
+                            // Do not auto-merge, treat as new
+                            target_id = None;
+                        }
                     }
+                } else if rec.size_bytes < 50 * 1024 * 1024 {
+                    // For small files without sha (should not happen, but for safety) compute lazily if needed for move
+                    // This branch is rare; we keep as new
+                } else {
+                    // Large file without sha: try lazy hash for move detection if there's a Missing candidate with same size
+                    // Only if we have a Missing record with same size and same canonical parent? For now, treat as new to avoid expensive hash.
+                    // Future: background hash verification
                 }
             }
-            seen_ids.insert(target_id.clone());
-            if let Some(existing) = self.records.get_mut(&target_id) {
+
+            let final_target = if let Some(tid) = target_id.clone() {
+                seen_ids.insert(tid.clone());
+                tid
+            } else {
+                // New file
+                let new_id = rec.id.clone();
+                seen_ids.insert(new_id.clone());
+                // Set identity_status
+                if rec.sha256.is_some() {
+                    rec.identity_status = super::types::IdentityStatus::Verified;
+                } else {
+                    rec.identity_status = super::types::IdentityStatus::Unchecked;
+                }
+                self.records.insert(new_id.clone(), rec);
+                added.push(new_id);
+                continue;
+            };
+
+            // Update existing record (same canonical or moved)
+            if let Some(existing) = self.records.get_mut(&final_target) {
                 let old_roles = existing.roles.clone();
                 let old_first_seen = existing.first_seen_at;
                 let old_id = existing.id.clone();
-                // Changed detection: same path but different sha256 or size
+
+                // Changed detection: same canonical, size or sha differs
                 let is_changed = if is_moved {
-                    false // moved is not changed, it's present at new path
-                } else if existing.path == rec.path && existing.sha256.is_some() && rec.sha256.is_some() && existing.sha256 != rec.sha256 {
-                    true
-                } else if existing.size_bytes != rec.size_bytes {
-                    true
+                    false
+                } else if is_same_path {
+                    if existing.size_bytes != rec.size_bytes {
+                        true
+                    } else if existing.sha256.is_some() && rec.sha256.is_some() && existing.sha256 != rec.sha256 {
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
+
                 if is_changed {
                     existing.state = ModelState::Changed;
+                    existing.identity_status = super::types::IdentityStatus::Changed;
                     updated.push(old_id.clone());
                 } else {
+                    // Restore from Missing/Changed to Present, or keep Present
+                    if existing.state == ModelState::Missing || existing.state == ModelState::Changed {
+                        updated.push(old_id.clone());
+                    } else if is_moved {
+                        updated.push(old_id.clone());
+                    }
                     existing.state = ModelState::Present;
-                    if is_moved { updated.push(old_id.clone()); }
+                    // Update identity_status if we now have sha
+                    if existing.sha256.is_none() && rec.sha256.is_some() {
+                        existing.identity_status = super::types::IdentityStatus::Verified;
+                    } else if existing.identity_status == super::types::IdentityStatus::Unchecked && rec.sha256.is_some() {
+                        existing.identity_status = super::types::IdentityStatus::Verified;
+                    }
                 }
+
                 existing.last_seen_at = chrono::Utc::now();
-                existing.path = rec.path.clone();
+                // For moved, update path and canonical_path to new location
+                if is_moved {
+                    existing.path = rec.path.clone();
+                    existing.canonical_path = rec.canonical_path.clone();
+                } else {
+                    // Same canonical, keep path as is (may have been moved within same canonical? but canonical same, so path should be same)
+                    // Update path to new path in case of minor difference (e.g., relative vs absolute)
+                    existing.path = rec.path.clone();
+                    // Keep canonical_path as is (should be same)
+                    if existing.canonical_path.is_empty() {
+                        existing.canonical_path = rec.canonical_path.clone();
+                    }
+                }
                 existing.size_bytes = rec.size_bytes;
-                existing.sha256 = rec.sha256.clone();
+                if rec.sha256.is_some() {
+                    existing.sha256 = rec.sha256.clone();
+                }
                 existing.metadata = rec.metadata.clone();
                 if !old_roles.is_empty() { existing.roles = old_roles; }
                 existing.first_seen_at = old_first_seen;
-                // Ensure id stays stable
                 existing.id = old_id;
-            } else {
-                // New
-                let id = rec.id.clone();
-                // ensure id is stable (not verified truncated)
-                rec.id = id.clone();
-                self.records.insert(id.clone(), rec);
-                added.push(id);
+                if !rec.diagnostics.is_empty() {
+                    existing.diagnostics.extend(rec.diagnostics.clone());
+                }
             }
         }
         // Missing: those in registry but not seen
@@ -107,6 +208,7 @@ impl Registry {
             if !seen_ids.contains(id) {
                 if rec.state != ModelState::Missing {
                     rec.state = ModelState::Missing;
+                    // Keep identity_status as is (do not change to Missing status's identity)
                     missing.push(id.clone());
                 }
             }

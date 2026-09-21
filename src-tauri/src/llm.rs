@@ -846,7 +846,26 @@ pub async fn llm_runtime_start(profile_id: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn llm_runtime_stop(runtime_id: String) -> Result<String, String> {
     let mgr = RUNTIME_MANAGER.clone();
+    // Find profile_id for this runtime to clear startup entry
+    let profile_id = {
+        let list = mgr.list().unwrap_or_default();
+        list.iter().find(|r| r.runtime_id == runtime_id).map(|r| r.profile_id.clone())
+    };
     mgr.stop(&runtime_id).await?;
+    if let Some(pid) = profile_id {
+        let key = format!("runtime:{}", pid);
+        TASK_EXECUTOR.clear_startup(&key).await;
+    } else {
+        // Fallback: try to clear any startup that matches runtime_id prefix (runtime_id is runtime-<profile>-<ts>)
+        // Extract profile from runtime_id: runtime-<profile>-<timestamp> -> profile is between first and last '-'
+        if let Some(stripped) = runtime_id.strip_prefix("runtime-") {
+            if let Some(idx) = stripped.rfind('-') {
+                let profile = &stripped[..idx];
+                let key = format!("runtime:{}", profile);
+                TASK_EXECUTOR.clear_startup(&key).await;
+            }
+        }
+    }
     Ok("stopped".to_string())
 }
 
@@ -894,11 +913,12 @@ pub async fn llm_task_run(task_profile_id: String, messages: Vec<serde_json::Val
     let model_rec = reg.all().into_iter().find(|r| r.id == task.model_ref).or_else(|| {
         // fallback to LlmConfig.models for old configs
         cfg.models.iter().find(|m| m.id == task.model_ref).map(|m| crate::llm::models::types::ModelRecord{
-            id: m.id.clone(), provider_id: m.provider_id.clone(), path: std::path::PathBuf::from(&m.path), filename: m.name.clone(),
+            id: m.id.clone(), provider_id: m.provider_id.clone(), path: std::path::PathBuf::from(&m.path), canonical_path: m.path.clone(), filename: m.name.clone(),
             format: crate::llm::models::types::ModelFormat::Gguf, size_bytes: m.metadata.size_bytes, sha256: Some(m.metadata.sha256.clone()).filter(|s| !s.is_empty()),
             metadata: crate::llm::models::types::ModelMetadata{ architecture: Some(m.metadata.arch.clone()).filter(|s| !s.is_empty()), ..Default::default() },
             capabilities: vec![crate::llm::Capability::Chat], roles: vec![crate::llm::models::types::ModelRole::General],
             source: crate::llm::models::types::ModelSource::LocalFile, state: crate::llm::models::types::ModelState::Present,
+            identity_status: Default::default(),
             first_seen_at: chrono::Utc::now(), last_seen_at: chrono::Utc::now(), diagnostics: vec![]
         })
     }).ok_or_else(|| {

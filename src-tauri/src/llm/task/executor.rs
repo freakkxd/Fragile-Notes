@@ -150,6 +150,10 @@ impl TaskExecutor {
                             let wait_fut = self.startup.wait(&key, notify);
                             tokio::select! {
                                 _ = wait_fut => {
+                                    let state = self.startup.get_state(&key).await;
+                                    if let super::startup::StartupState::Failed(msg) = state {
+                                        return Err(format!("runtime_start_failed: {}", msg));
+                                    }
                                     let list2 = self.runtime_manager.list().unwrap_or_default();
                                     if let Some(e2) = list2.iter().find(|r| r.profile_id == rp.id) {
                                         Some(e2.runtime_id.clone())
@@ -158,6 +162,7 @@ impl TaskExecutor {
                                     }
                                 },
                                 _ = token.cancelled() => {
+                                    self.startup.clear(&key).await;
                                     return Err("cancelled: startup wait cancelled".to_string());
                                 }
                             }
@@ -168,6 +173,10 @@ impl TaskExecutor {
                     let wait_fut = self.startup.wait(&key, notify);
                     tokio::select! {
                         _ = wait_fut => {
+                            let state = self.startup.get_state(&key).await;
+                            if let super::startup::StartupState::Failed(msg) = state {
+                                return Err(format!("runtime_start_failed: {}", msg));
+                            }
                             let list2 = self.runtime_manager.list().unwrap_or_default();
                             if let Some(e2) = list2.iter().find(|r| r.profile_id == rp.id) {
                                 Some(e2.runtime_id.clone())
@@ -176,6 +185,7 @@ impl TaskExecutor {
                             }
                         },
                         _ = token.cancelled() => {
+                            self.startup.clear(&key).await;
                             return Err("cancelled: startup wait cancelled".to_string());
                         }
                     }

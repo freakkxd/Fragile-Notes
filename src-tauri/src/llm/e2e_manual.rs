@@ -28,9 +28,15 @@ mod e2e_manual_tests {
         let _ = reg.load();
         let result = reg.update_with_scan(scan);
         reg.save().expect("save");
-        println!("registry saved: discovered={} added={:?}", result.discovered.len(), result.added);
-        let stored = result.discovered.iter().find(|r| r.id == rec.id).unwrap();
+        println!("registry saved: discovered={} added={:?} updated={:?} missing={:?}", result.discovered.len(), result.added, result.updated, result.missing);
+        // With new identity preservation, rec.id (stable_id with mtime) may not match stored's preserved id.
+        // Find by canonical_path/path and check Present.
+        let stored = result.discovered.iter().find(|r| r.path == rec.path && r.state == ModelState::Present)
+            .or_else(|| result.discovered.iter().find(|r| r.path == rec.path))
+            .expect("stored not found");
         assert_eq!(stored.state, ModelState::Present);
+        // Also ensure TaskProfile would still point to stored.id (which is preserved)
+        println!("stored id={} vs rec.id={} (may differ due to mtime, but preserved id is stored.id)", stored.id, rec.id);
         // .part check
         let part = gguf.with_extension("gguf.part");
         assert!(!result.discovered.iter().any(|r| r.path == part), ".part should not be Present");
