@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 pub mod runtime;
 pub mod task;
 pub mod models;
+pub mod download;
 
 // ---------- helpers ----------
 pub(crate) fn config_path() -> PathBuf {

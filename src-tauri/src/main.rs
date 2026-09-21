@@ -16,6 +16,7 @@ use llm::{
     llm_set_provider_credential, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
 };
 use llm::models::{llm_models_list, llm_models_scan};
+use llm::download::{llm_download_cancel, llm_download_list, llm_download_pause, llm_download_resume, llm_download_start, llm_download_status};
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -257,7 +258,13 @@ fn main() {
             llm_task_cancel,
             llm_task_status,
             llm_models_scan,
-            llm_models_list
+            llm_models_list,
+            llm_download_start,
+            llm_download_pause,
+            llm_download_resume,
+            llm_download_cancel,
+            llm_download_status,
+            llm_download_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

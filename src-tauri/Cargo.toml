@@ -26,7 +26,10 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 keyring = "2.3"
 sha2 = "0.10"
+libc = "0.2"
 uuid = { version = "1.8", features = ["v4", "serde"] }
+futures = "0.3"
+url = "2.5"
 reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = "0.7"
