@@ -13,7 +13,7 @@ use llm::{
     llm_get_config, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
     llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
     llm_runtime_stop, llm_save_config, llm_save_pipeline, llm_scan_models, llm_set_active_model,
-    llm_set_provider_credential, llm_test_provider,
+    llm_set_provider_credential, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
 };
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
 use once_cell::sync::Lazy;
@@ -251,7 +251,10 @@ fn main() {
             llm_runtime_stop,
             llm_runtime_health,
             llm_runtime_logs,
-            llm_runtime_restart
+            llm_runtime_restart,
+            llm_task_run,
+            llm_task_cancel,
+            llm_task_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

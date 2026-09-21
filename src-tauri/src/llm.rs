@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 pub mod runtime;
+pub mod task;
 
 // ---------- helpers ----------
 fn config_path() -> PathBuf {
@@ -308,7 +309,8 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn load_config_inner() -> LlmConfig {
+pub fn load_config_for_test() -> LlmConfig { load_config_inner() }
+pub(crate) fn load_config_inner() -> LlmConfig {
     let p = config_path();
     if !p.exists() { return LlmConfig::default(); }
     let txt = match fs::read_to_string(&p) { Ok(t)=>t, Err(_)=> return LlmConfig::default() };
@@ -772,6 +774,10 @@ static RUNTIME_MANAGER: Lazy<Arc<runtime::manager::RuntimeManager>> = Lazy::new(
     Arc::new(runtime::manager::RuntimeManager::new(runtime_state_path()))
 });
 
+static TASK_EXECUTOR: Lazy<Arc<task::executor::TaskExecutor>> = Lazy::new(|| {
+    Arc::new(task::executor::TaskExecutor::new(RUNTIME_MANAGER.clone(), Arc::new(task::executor::RealGateway)))
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct RuntimeStatus { pub id: String, pub pid: Option<u32>, pub port: u16, pub status: String }
 
 #[tauri::command]
@@ -835,6 +841,63 @@ pub fn llm_runtime_logs(runtime_id: String, tail: Option<u32>) -> Result<String,
 pub fn llm_runtime_restart(runtime_id: String) -> Result<String, String> {
     // P1.2 RestartPolicy Never only — manual restart = stop + start
     Err("restart OnCrash not enabled in P1.2 — use stop then start (Never policy)".to_string())
+}
+
+// ---------- P1.4 TaskExecutor ----------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskErrorDto {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+#[tauri::command]
+pub async fn llm_task_run(task_profile_id: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
+    let executor = TASK_EXECUTOR.clone();
+    match executor.run_chat(&task_profile_id, messages).await {
+        Ok((run, response)) => {
+            let out = serde_json::json!({ "run_id": run.run_id.to_string(), "provider_id": run.provider_id, "model_id": run.model_id, "runtime_id": run.runtime_id, "response": response });
+            Ok(out.to_string())
+        },
+        Err(e) => {
+            let msg = e.clone();
+            let (code, retryable) = if e.contains("task_not_found") { ("task_not_found", false) }
+            else if e.contains("provider_not_found") { ("provider_not_found", false) }
+            else if e.contains("model_not_found") { ("model_not_found", false) }
+            else if e.contains("runtime_not_found") { ("runtime_not_found", false) }
+            else if e.contains("PrivacyPolicyViolation") || e.contains("privacy_violation") { ("privacy_violation", false) }
+            else if e.contains("unsupported_capability") { ("unsupported_capability", false) }
+            else if e.contains("runtime_start_failed") { ("runtime_start_failed", true) }
+            else if e.contains("timeout") { ("runtime_timeout", true) }
+            else if e.contains("cancelled") { ("cancelled", false) }
+            else { ("provider_error", true) };
+            let dto = TaskErrorDto{ code: code.to_string(), message: msg, retryable };
+            Err(serde_json::to_string(&dto).unwrap_or_else(|_| e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn llm_task_cancel(run_id: String) -> Result<String, String> {
+    let executor = TASK_EXECUTOR.clone();
+    let uuid = uuid::Uuid::parse_str(&run_id).map_err(|e| format!("invalid run_id: {}", e))?;
+    executor.cancel(uuid).await.map(|_| "cancelled".to_string()).map_err(|e| {
+        let dto = TaskErrorDto{ code: "cancelled".to_string(), message: e, retryable: false };
+        serde_json::to_string(&dto).unwrap()
+    })
+}
+
+#[tauri::command]
+pub async fn llm_task_status(run_id: String) -> Result<String, String> {
+    let executor = TASK_EXECUTOR.clone();
+    let uuid = uuid::Uuid::parse_str(&run_id).map_err(|e| format!("invalid run_id: {}", e))?;
+    match executor.status(uuid).await {
+        Ok(run) => Ok(serde_json::to_string(&run).unwrap_or("{}".to_string())),
+        Err(e) => {
+            let dto = TaskErrorDto{ code: "task_not_found".to_string(), message: e, retryable: false };
+            Err(serde_json::to_string(&dto).unwrap())
+        }
+    }
 }
 
 #[cfg(test)]

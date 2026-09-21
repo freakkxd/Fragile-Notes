@@ -213,3 +213,6 @@ export async function llmRuntimeStop(runtimeId: string): Promise<string> { const
 export async function llmRuntimeHealth(runtimeId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_health', { runtimeId }) as string }
 export async function llmRuntimeLogs(runtimeId: string, tail?: number): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_logs', { runtimeId, tail: tail ?? 200 }) as string }
 export async function llmRuntimeRestart(runtimeId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_runtime_restart', { runtimeId }) as string }
+export async function llmTaskRun(taskProfileId: string, messages: {role:string,content:string}[]): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_run', { taskProfileId, messages }) as string }
+export async function llmTaskCancel(runId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_cancel', { runId }) as string }
+export async function llmTaskStatus(runId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_status', { runId }) as string }
