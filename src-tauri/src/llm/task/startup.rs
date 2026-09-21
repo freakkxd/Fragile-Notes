@@ -56,7 +56,26 @@ impl StartupManager {
         }
     }
 
+    pub async fn get_state(&self, key: &str) -> StartupState {
+        let map = self.map.lock().await;
+        map.get(key).map(|e| e.state.clone()).unwrap_or(StartupState::Idle)
+    }
+
+    pub async fn clear(&self, key: &str) {
+        let mut map = self.map.lock().await;
+        map.remove(key);
+    }
+
     pub async fn wait(&self, key: &str, notify: Arc<Notify>) {
+        // If already Ready, don't wait — immediate return. Check state first.
+        {
+            let map = self.map.lock().await;
+            if let Some(entry) = map.get(key) {
+                if entry.state == StartupState::Ready {
+                    return;
+                }
+            }
+        }
         // Wait for the startup entry's notify
         let entry_notify = {
             let map = self.map.lock().await;

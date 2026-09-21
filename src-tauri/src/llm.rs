@@ -12,6 +12,8 @@ pub mod runtime;
 pub mod task;
 pub mod models;
 pub mod download;
+#[cfg(test)]
+mod e2e_manual;
 
 // ---------- helpers ----------
 pub(crate) fn config_path() -> PathBuf {
@@ -780,9 +782,13 @@ static RUNTIME_MANAGER: Lazy<Arc<runtime::manager::RuntimeManager>> = Lazy::new(
     Arc::new(runtime::manager::RuntimeManager::new(runtime_state_path()))
 });
 
-static TASK_EXECUTOR: Lazy<Arc<task::executor::TaskExecutor>> = Lazy::new(|| {
+pub(crate) static TASK_EXECUTOR: Lazy<Arc<task::executor::TaskExecutor>> = Lazy::new(|| {
     Arc::new(task::executor::TaskExecutor::new(RUNTIME_MANAGER.clone(), Arc::new(task::executor::RealGateway)))
 });
+
+pub async fn clear_startup_for_test(key: &str) {
+    TASK_EXECUTOR.clear_startup(key).await;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct RuntimeStatus { pub id: String, pub pid: Option<u32>, pub port: u16, pub status: String }
 

@@ -23,14 +23,16 @@ pub fn spawn_llama_server(
     model_id: &str,
     instance_id: &str,
 ) -> Result<(Child, ManagedProcess), String> {
-    // Whitelist: forbid --host, --port, --model override via runtime_args (manager controls)
+    // Security: only check shell metas here. Forbidden --host/--port/--model for runtime_args is already filtered
+    // in RuntimeManager::build_args (manager controls these). The final args must contain --model/--port.
     for a in &args {
-        if a == "--host" || a == "--port" || a == "--model" {
-            return Err(format!("runtime_args contains forbidden arg: {} — managed by RuntimeManager", a));
-        }
         if a.contains(';') || a.contains('|') || a.contains('`') || a.contains('$') {
             return Err(format!("runtime_args contains shell meta: {}", a));
         }
+    }
+    // Ensure required managed args are present
+    if !args.contains(&"--model".to_string()) || !args.contains(&"--port".to_string()) {
+        return Err("missing required --model/--port args".to_string());
     }
 
     let mut cmd = Command::new(executable);
@@ -135,8 +137,13 @@ mod tests {
     }
     #[test]
     fn test_forbidden_args() {
-        let res = spawn_llama_server(&PathBuf::from("/bin/false"), vec!["--port".to_string()], HashMap::new(), "r1", 8010, "p1", "m1", "inst1");
+        // Shell meta should be rejected
+        let res = spawn_llama_server(&PathBuf::from("/bin/false"), vec!["--model".to_string(), "a.gguf".to_string(), "--port".to_string(), "8010".to_string(), "; rm -rf".to_string()], HashMap::new(), "r1", 8010, "p1", "m1", "inst1");
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("forbidden"));
+        assert!(res.unwrap_err().contains("shell meta"));
+        // Missing required args should also fail
+        let res2 = spawn_llama_server(&PathBuf::from("/bin/false"), vec!["--model".to_string(), "a.gguf".to_string()], HashMap::new(), "r1", 8010, "p1", "m1", "inst1");
+        assert!(res2.is_err());
+        assert!(res2.unwrap_err().contains("missing required"));
     }
 }

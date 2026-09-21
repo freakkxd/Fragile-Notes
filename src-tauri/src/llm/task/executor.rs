@@ -120,18 +120,64 @@ impl TaskExecutor {
                     }
                 }
             } else {
-                // Wait for existing startup
-                // Use timeout
-                let wait_fut = self.startup.wait(&key, notify);
-                tokio::select! {
-                    _ = wait_fut => {
-                        // Check if ready
-                        // For now, assume ready and return existing runtime id
-                        // In full impl, check state
-                        Some(rp.id.clone())
-                    },
-                    _ = token.cancelled() => {
-                        return Err("cancelled: startup wait cancelled".to_string());
+                // If already Ready but no runtime exists (e.g., after Stop), clear and restart
+                let state = self.startup.get_state(&key).await;
+                if state == super::startup::StartupState::Ready {
+                    let list = self.runtime_manager.list().unwrap_or_default();
+                    if let Some(existing) = list.iter().find(|r| r.profile_id == rp.id) {
+                        // Existing runtime still present — reuse its runtime_id (not profile_id)
+                        Some(existing.runtime_id.clone())
+                    } else {
+                        // Stale Ready after Stop — clear and become starter
+                        self.startup.clear(&key).await;
+                        let (should_restart, _) = self.startup.should_start(&key).await;
+                        if should_restart {
+                            let mut model_for_runtime = sel.model.clone();
+                            model_for_runtime.path = effective_model_path.clone();
+                            let res = self.ensure_runtime(&rp, &model_for_runtime, &scope).await;
+                            match res {
+                                Ok(rid) => {
+                                    self.startup.mark_ready(&key).await;
+                                    Some(rid)
+                                },
+                                Err(e) => {
+                                    self.startup.mark_failed(&key, e.clone()).await;
+                                    return Err(format!("runtime_start_failed: {}", e));
+                                }
+                            }
+                        } else {
+                            // Another task became starter in the meantime — wait for it
+                            let wait_fut = self.startup.wait(&key, notify);
+                            tokio::select! {
+                                _ = wait_fut => {
+                                    let list2 = self.runtime_manager.list().unwrap_or_default();
+                                    if let Some(e2) = list2.iter().find(|r| r.profile_id == rp.id) {
+                                        Some(e2.runtime_id.clone())
+                                    } else {
+                                        Some(rp.id.clone())
+                                    }
+                                },
+                                _ = token.cancelled() => {
+                                    return Err("cancelled: startup wait cancelled".to_string());
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Starting — wait for existing startup
+                    let wait_fut = self.startup.wait(&key, notify);
+                    tokio::select! {
+                        _ = wait_fut => {
+                            let list2 = self.runtime_manager.list().unwrap_or_default();
+                            if let Some(e2) = list2.iter().find(|r| r.profile_id == rp.id) {
+                                Some(e2.runtime_id.clone())
+                            } else {
+                                Some(rp.id.clone())
+                            }
+                        },
+                        _ = token.cancelled() => {
+                            return Err("cancelled: startup wait cancelled".to_string());
+                        }
                     }
                 }
             }
@@ -223,5 +269,9 @@ impl TaskExecutor {
         } else {
             Err("run_not_found".to_string())
         }
+    }
+
+    pub async fn clear_startup(&self, key: &str) {
+        self.startup.clear(key).await;
     }
 }
