@@ -12,6 +12,7 @@ pub mod runtime;
 pub mod task;
 pub mod models;
 pub mod download;
+pub mod embeddings;
 #[cfg(test)]
 mod e2e_manual;
 

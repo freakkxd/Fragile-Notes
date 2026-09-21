@@ -72,8 +72,14 @@ mod tests {
         // port is occupied by listener
         assert!(!PortAllocator::is_free(port));
         drop(listener);
-        // after drop, should be free
-        assert!(PortAllocator::is_free(port));
+        // Port may take a moment to be released (TIME_WAIT), retry
+        for _ in 0..10 {
+            if PortAllocator::is_free(port) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(PortAllocator::is_free(port), "port {} should be free after drop", port);
     }
 
     #[test]
