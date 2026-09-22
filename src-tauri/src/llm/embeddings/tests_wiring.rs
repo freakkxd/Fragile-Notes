@@ -328,3 +328,29 @@ fn find_record_matches_by_path() {
     m.path = String::new();
     assert!(find_record_for_model(&reg, &m).is_none());
 }
+
+#[test]
+fn scope_resolved_without_credentials() {
+    use super::wiring::resolve_scope_for_model;
+    use crate::llm::task::policy::ProviderScope;
+    // Cloud model with ApiKey but no keyring entry: scope still resolves
+    // (credential errors surface only at full resolution time).
+    let p = provider(
+        "openai",
+        ProviderKind::OpenAI,
+        "https://api.openai.com",
+        Some(AuthMethod::ApiKey),
+    );
+    let m = model("e1", "openai", "r1", vec![Capability::Embeddings]);
+    let cfg = config_with(p, m);
+    assert_eq!(
+        resolve_scope_for_model(&cfg, "e1"),
+        Some(ProviderScope::Cloud)
+    );
+    assert_eq!(resolve_scope_for_model(&cfg, "missing"), None);
+    let mut p2 = provider("o", ProviderKind::Ollama, "http://127.0.0.1:11434", None);
+    p2.enabled = false;
+    let m2 = model("e2", "o", "", vec![Capability::Embeddings]);
+    let cfg2 = config_with(p2, m2);
+    assert_eq!(resolve_scope_for_model(&cfg2, "e2"), None);
+}
