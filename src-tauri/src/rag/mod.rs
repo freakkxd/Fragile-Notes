@@ -1,6 +1,7 @@
 pub mod context;
 pub mod retrieval;
 pub mod types;
+pub mod untrusted;
 
 #[cfg(test)]
 mod tests;
@@ -8,6 +9,7 @@ mod tests;
 pub use context::ContextBuilder;
 pub use retrieval::{RagRetriever, RagSearchBackend};
 pub use types::{ContextLimits, RagContext, RagReference, RagRequest, RagRetrievalResult};
+pub use untrusted::{serialize_untrusted_context, untrusted_blocks, UntrustedBlock, UntrustedContext};
 
 /// Demo Tauri flow: lexical-only retrieval.
 ///

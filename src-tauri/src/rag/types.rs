@@ -65,8 +65,11 @@ pub struct RagReference {
     pub note_id: String,
     pub path: Option<String>,
     pub heading_path: Vec<String>,
-    pub start_offset: usize,
-    pub end_offset: usize,
+    /// UTF-8 byte offsets into the original full chunk content.
+    /// `Some` only when the search result carried real chunk offsets;
+    /// `None` (unknown) for lexical FTS rows — never synthetic `0..len()`.
+    pub start_offset: Option<usize>,
+    pub end_offset: Option<usize>,
     pub score: Option<f32>,
     pub source: crate::search::types::SearchSource,
 }

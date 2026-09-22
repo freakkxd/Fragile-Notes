@@ -9,8 +9,9 @@ use crate::search::types::SearchResult;
 /// - Limits are validated BEFORE any allocation by [`ContextLimits::validate`].
 /// - `max_chars` / `max_chars_per_chunk` are counted in **Unicode scalar values**
 ///   (`char` count), NOT bytes. Safe for multi-byte UTF-8, emoji, CJK.
-/// - `start_offset` / `end_offset` in references are **UTF-8 byte offsets**
-///   into the ORIGINAL full chunk content (not the truncated preview).
+/// - `start_offset` / `end_offset` in references are copied VERBATIM from
+///   the search result: real **UTF-8 byte offsets** for chunk-based rows,
+///   `None` when unknown (lexical FTS rows). Never synthesized.
 /// - Context builder only formats data. No prompt assembly, no LLM calls.
 /// - Metadata (headers) never interpolates user content: headers are built
 ///   solely from `note_id` / sanitized `path` / `heading_path` / `chunk_id`.
@@ -93,9 +94,9 @@ impl ContextBuilder {
                 total_chars += block_chars;
             }
 
-            // Reference preserves FULL original byte offsets, even when the
-            // preview text was truncated. `SearchResult` carries no stored
-            // offsets, so lexical rows report 0..content.len() (UTF-8 bytes).
+            // Reference carries the search result's offsets verbatim:
+            // real chunk offsets when known, None when unknown (lexical rows).
+            // Never synthesize 0..content.len().
             let reference = RagReference {
                 chunk_id: res.chunk_id.clone().unwrap_or_else(|| {
                     format!("{}-block-{}", res.note_id, block_no)
@@ -103,8 +104,8 @@ impl ContextBuilder {
                 note_id: res.note_id.clone(),
                 path: display_path,
                 heading_path: res.heading_path.clone(),
-                start_offset: 0,
-                end_offset: res.content.len(),
+                start_offset: res.start_offset,
+                end_offset: res.end_offset,
                 score: Some(res.raw_score),
                 source: res.source.clone(),
             };
@@ -188,6 +189,8 @@ mod tests {
             rank: 0,
             raw_score: 0.0,
             normalized_score: None,
+            start_offset: None,
+            end_offset: None,
             source: SearchSource::Lexical,
         }
     }
