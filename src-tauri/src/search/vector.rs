@@ -11,6 +11,7 @@ pub trait VectorStore: Send + Sync {
     async fn upsert(&self, records: &[EmbeddingRecord]) -> Result<(), SearchError>;
     async fn delete_for_chunks(&self, chunk_ids: &[String]) -> Result<(), SearchError>;
     async fn search(&self, query: VectorQuery) -> Result<Vec<VectorSearchResult>, SearchError>;
+    async fn has_vectors(&self, model: &VectorModelFilter) -> Result<bool, SearchError>;
 }
 
 pub struct SqliteVectorStore {
@@ -228,6 +229,18 @@ impl VectorStore for SqliteVectorStore {
         tx.commit()
             .map_err(|e| SearchError::Internal(e.to_string()))?;
         Ok(())
+    }
+
+    async fn has_vectors(&self, model: &VectorModelFilter) -> Result<bool, SearchError> {
+        let conn = self.open()?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM embedding_vectors WHERE model_id = ?1 AND model_fingerprint = ?2",
+                params![model.model_id, model.model_fingerprint],
+                |r| r.get(0),
+            )
+            .map_err(|e| SearchError::Internal(e.to_string()))?;
+        Ok(count > 0)
     }
 
     async fn search(&self, query: VectorQuery) -> Result<Vec<VectorSearchResult>, SearchError> {

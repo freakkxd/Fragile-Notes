@@ -133,6 +133,9 @@ impl VectorStore for FakeVectorStore {
             None => Ok(vec![]),
         }
     }
+    async fn has_vectors(&self, _model: &VectorModelFilter) -> Result<bool, SearchError> {
+        Ok(self.exists)
+    }
 }
 
 fn model(m: &str, fp: &str) -> VectorModelFilter {

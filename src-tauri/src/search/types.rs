@@ -112,6 +112,9 @@ pub enum FallbackReason {
     EmbeddingIndexMissing,
     EmbeddingRequestFailed,
     UnsupportedSemanticSearch,
+    SemanticUnavailable,
+    LexicalUnavailable,
+    LexicalIndexUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,4 +307,72 @@ impl Default for VectorSearchLimits {
             max_vector_bytes: 50 * 1024 * 1024,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HybridSearchConfig {
+    pub lexical_weight: f32,
+    pub semantic_weight: f32,
+    pub candidate_limit: usize,
+    pub result_limit: usize,
+    pub rrf_k: usize,
+}
+
+impl Default for HybridSearchConfig {
+    fn default() -> Self {
+        Self {
+            lexical_weight: 0.5,
+            semantic_weight: 0.5,
+            candidate_limit: 20,
+            result_limit: 10,
+            rrf_k: 60,
+        }
+    }
+}
+
+impl HybridSearchConfig {
+    pub fn validate(&self) -> Result<(), SearchError> {
+        if !self.lexical_weight.is_finite() || self.lexical_weight < 0.0 {
+            return Err(SearchError::InvalidQuery(
+                "lexical_weight must be finite >=0".to_string(),
+            ));
+        }
+        if !self.semantic_weight.is_finite() || self.semantic_weight < 0.0 {
+            return Err(SearchError::InvalidQuery(
+                "semantic_weight must be finite >=0".to_string(),
+            ));
+        }
+        if self.lexical_weight + self.semantic_weight <= 0.0 {
+            return Err(SearchError::InvalidQuery(
+                "weights sum must be >0".to_string(),
+            ));
+        }
+        if self.candidate_limit == 0 || self.candidate_limit > 100 {
+            return Err(SearchError::InvalidQuery(
+                "candidate_limit must be 1..100".to_string(),
+            ));
+        }
+        if self.result_limit == 0 || self.result_limit > 100 {
+            return Err(SearchError::InvalidQuery(
+                "result_limit must be 1..100".to_string(),
+            ));
+        }
+        if self.candidate_limit < self.result_limit {
+            return Err(SearchError::InvalidQuery(
+                "candidate_limit must be >= result_limit".to_string(),
+            ));
+        }
+        if self.rrf_k == 0 || self.rrf_k > 1000 {
+            return Err(SearchError::InvalidQuery("rrf_k must be 1..1000".to_string()));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HybridResult {
+    pub result: SearchResult,
+    pub lexical_rank: Option<usize>,
+    pub semantic_rank: Option<usize>,
+    pub fused_score: f32,
 }

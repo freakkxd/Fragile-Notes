@@ -50,6 +50,17 @@ where
             return self.lexical_direct(&req).await;
         }
 
+        // Preflight: if no vectors for this model and fallback is Lexical, avoid embedding request
+        if req.fallback == FallbackPolicy::Lexical {
+            if let Ok(has) = self.vector_store.has_vectors(&req.embedding_model).await {
+                if !has {
+                    return self
+                        .lexical_fallback(&req, Some(FallbackReason::EmbeddingIndexMissing))
+                        .await;
+                }
+            }
+        }
+
         // Preflight: check if index exists for this model
         // Lightweight exists check via vector_store: we do a probe search with limit 0? Instead we check via helper
         // For now, we attempt to check via vector_store.search with a dummy vector? No.

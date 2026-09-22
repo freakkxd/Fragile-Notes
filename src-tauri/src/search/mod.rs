@@ -1,3 +1,4 @@
+pub mod hybrid;
 pub mod lexical;
 pub mod query;
 pub mod semantic;
@@ -8,17 +9,20 @@ pub mod vector;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod tests_vector;
+mod tests_hybrid;
 #[cfg(test)]
 mod tests_query;
+#[cfg(test)]
+mod tests_vector;
 
+pub use hybrid::{HybridSearchService, RankedId, reference_rrf};
 pub use lexical::LexicalSearchBackend;
-pub use query::TextSearchRequest;
 pub use semantic::SemanticSearchService;
 pub use service::{SearchService, UnavailableSemanticBackend};
 pub use types::{
-    FallbackPolicy, FallbackReason, SearchError, SearchMode, SearchQuery, SearchQueryMode, SearchResponse,
-    SearchResult, SearchSource, VectorModelFilter, VectorQuery, VectorSearchLimits, VectorSearchResult,
+    FallbackPolicy, FallbackReason, HybridResult, HybridSearchConfig, SearchError, SearchMode, SearchQuery,
+    SearchQueryMode, SearchResponse, SearchResult, SearchSource, TextSearchRequest, VectorModelFilter,
+    VectorQuery, VectorSearchLimits, VectorSearchResult,
 };
 pub use vector::{SqliteVectorStore, VectorStore};
 
@@ -90,10 +94,78 @@ pub async fn search_vector(
 
 #[tauri::command]
 pub async fn search_hybrid(
-    _query: String,
-    _limit: Option<usize>,
+    text: String,
+    embedding_model_id: String,
+    embedding_model_fingerprint: String,
+    limit: Option<usize>,
+    candidate_limit: Option<usize>,
+    lexical_weight: Option<f32>,
+    semantic_weight: Option<f32>,
+    rrf_k: Option<usize>,
+    note_filter: Option<String>,
+    min_score: Option<f32>,
 ) -> Result<String, String> {
-    Err("hybrid search not implemented in Stage 6 — use search_lexical or search_vector".to_string())
+    use crate::search::hybrid::HybridSearchService;
+    use crate::search::types::{HybridSearchConfig, TextSearchRequest, VectorModelFilter, FallbackPolicy, SearchMode};
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    let lim = limit.unwrap_or(10).clamp(1, 100);
+    let cand = candidate_limit.unwrap_or(20).clamp(lim, 100);
+    let lw = lexical_weight.unwrap_or(0.5);
+    let sw = semantic_weight.unwrap_or(0.5);
+    let k = rrf_k.unwrap_or(60);
+    let cfg = HybridSearchConfig {
+        lexical_weight: lw,
+        semantic_weight: sw,
+        candidate_limit: cand,
+        result_limit: lim,
+        rrf_k: k,
+    };
+    cfg.validate().map_err(|e| e.to_string())?;
+    let req = TextSearchRequest {
+        text: text.clone(),
+        embedding_model: VectorModelFilter {
+            model_id: embedding_model_id.clone(),
+            model_fingerprint: embedding_model_fingerprint.clone(),
+        },
+        limit: lim,
+        note_filter: note_filter.clone(),
+        min_score,
+        mode: SearchMode::Hybrid,
+        fallback: FallbackPolicy::Lexical,
+    };
+    req.validate().map_err(|e| e.to_string())?;
+
+    let vault = vault_root_for_search();
+    let lexical = Arc::new(crate::search::LexicalSearchBackend::from_vault(&vault));
+    let db_path = vault.join(".fragile").join("embeddings.db");
+    let vector_store = Arc::new(crate::search::vector::SqliteVectorStore::new(
+        db_path,
+        crate::search::types::VectorSearchLimits::default(),
+    ));
+    // Real provider wiring: try to use configured provider, fallback to unavailable for Stage 8 demo
+    struct UnavailableProvider;
+    #[async_trait::async_trait]
+    impl crate::llm::embeddings::provider::EmbeddingProvider for UnavailableProvider {
+        async fn embed(
+            &self,
+            _request: crate::llm::embeddings::types::EmbeddingRequest,
+            _cancel: CancellationToken,
+        ) -> Result<crate::llm::embeddings::types::EmbeddingResponse, crate::llm::embeddings::types::EmbeddingError> {
+            Err(crate::llm::embeddings::types::EmbeddingError::Provider(
+                "hybrid provider not configured".to_string(),
+            ))
+        }
+    }
+    let provider = Arc::new(UnavailableProvider);
+    let svc = HybridSearchService::new(provider, vector_store, lexical);
+    let cancel = CancellationToken::new();
+    let res = svc
+        .search_hybrid(req, cfg, cancel)
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&res).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
