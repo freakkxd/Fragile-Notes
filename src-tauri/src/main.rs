@@ -7,6 +7,7 @@ mod enrich;
 mod tasks;
 mod llm;
 mod search;
+mod rag;
 use collect::{collect_sources, web_clip};
 use enrich::{enrich_notes, llm_chat, llm_status};
 use search::{LexicalSearchBackend, SearchBackend, SearchQuery, SearchQueryMode};
@@ -345,7 +346,8 @@ fn main() {
             llm_download_resume,
             llm_download_cancel,
             llm_download_status,
-            llm_download_list
+            llm_download_list,
+            rag::rag_retrieve
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
