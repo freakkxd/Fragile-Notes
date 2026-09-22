@@ -82,4 +82,68 @@ mod tests {
         assert!(!r.contains("sk-abc123"));
         assert!(r.contains("REDACTED"));
     }
+
+    /// Regression test for the Stage 9 hang: `?key=` survives redaction as a
+    /// prefix, so the match loop MUST terminate (cursor advances past each
+    /// replacement). This test completing at all IS the assertion; the
+    /// output checks below pin the masking behaviour.
+    #[test]
+    fn redact_key_url_terminates_and_masks() {
+        let s = "https://api.openai.com/v1/embeddings?key=sk-abc123&foo=bar";
+        let r = redact_secrets(s);
+        assert!(!r.contains("sk-abc123"), "secret leaked: {}", r);
+        assert!(r.contains("?key=***REDACTED***"), "prefix kept, value masked: {}", r);
+        assert!(r.contains("&foo=bar"), "trailing params preserved: {}", r);
+    }
+
+    #[test]
+    fn redact_all_key_variants() {
+        for (input, secret) in [
+            ("POST /x?key=sk-111&y=1", "sk-111"),
+            ("POST /x?a=1&key=sk-222", "sk-222"),
+            ("POST /x?api_key=sk-333&y=1", "sk-333"),
+            ("POST /x?a=1&api_key=sk-444", "sk-444"),
+        ] {
+            let r = redact_secrets(input);
+            assert!(!r.contains(secret), "secret leaked for {:?}: {}", input, r);
+            assert!(r.contains("REDACTED"), "no mask for {:?}: {}", input, r);
+        }
+    }
+
+    #[test]
+    fn redact_multiple_keys_all_masked() {
+        let s = "?key=sk-aaa1&x=1&key=sk-bbb2";
+        let r = redact_secrets(s);
+        assert!(!r.contains("sk-aaa1"), "first key leaked: {}", r);
+        assert!(!r.contains("sk-bbb2"), "second key leaked: {}", r);
+    }
+
+    #[test]
+    fn redact_x_api_key_header() {
+        let s = "x-api-key: sk-xyz789\nnext-line kept";
+        let r = redact_secrets(s);
+        assert!(!r.contains("sk-xyz789"), "header key leaked: {}", r);
+        assert!(r.contains("next-line kept"), "unrelated line damaged: {}", r);
+    }
+
+    #[test]
+    fn redact_bearer_standalone() {
+        let s = "request failed with Bearer sk-ant-aaa321, retry later";
+        let r = redact_secrets(s);
+        assert!(!r.contains("sk-ant-aaa321"), "bearer token leaked: {}", r);
+    }
+
+    #[test]
+    fn redact_bare_provider_key_prefixes_via_log_mask() {
+        // Bare sk-/sk-ant-/AIza patterns (no header/query prefix) are masked
+        // by the runtime log masker, which shares the secret boundary duty
+        // for log sinks. Pin that coverage here so the pattern matrix in the
+        // 10A checklist stays green in one place.
+        let m = crate::llm::runtime::logs::mask_secrets(
+            "saw sk-abc123DEF456ghi789jkl and sk-ant-xyz1234567890abcdef and AIzaSyD-test1234567890 in output",
+        );
+        assert!(!m.contains("sk-abc123DEF456ghi789jkl"), "bare sk- leaked: {}", m);
+        assert!(!m.contains("sk-ant-xyz1234567890abcdef"), "bare sk-ant- leaked: {}", m);
+        assert!(!m.contains("AIzaSyD-test1234567890"), "bare AIza leaked: {}", m);
+    }
 }

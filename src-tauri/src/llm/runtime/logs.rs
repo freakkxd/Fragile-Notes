@@ -105,7 +105,7 @@ impl LogSink {
     }
 }
 
-fn mask_secrets(s: &str) -> String {
+pub(crate) fn mask_secrets(s: &str) -> String {
     const MASK: &str = "••••••••";
     const MASK_LEN: usize = 24; // "••••••••".len() 8*3
     let mut out = s.to_string();
