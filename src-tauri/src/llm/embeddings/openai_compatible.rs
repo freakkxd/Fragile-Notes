@@ -7,7 +7,23 @@ use tokio_util::sync::CancellationToken;
 
 const ERROR_BODY_LIMIT: usize = 8192;
 
-#[derive(Debug, Clone)]
+/// NOTE: manual `Debug` — `api_key` is NEVER printed (presence only).
+/// Debug output may land in logs; raw secrets must not.
+impl std::fmt::Debug for OpenAiCompatibleConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiCompatibleConfig")
+            .field("endpoint", &self.endpoint)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
+            .field("remote_model", &self.remote_model)
+            .field("timeout", &self.timeout)
+            .field("limits", &self.limits)
+            .field("supports_embeddings", &self.supports_embeddings)
+            .field("extra_headers", &self.extra_headers)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct OpenAiCompatibleConfig {
     pub endpoint: String,
     pub api_key: Option<String>,

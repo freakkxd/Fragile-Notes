@@ -295,7 +295,7 @@ fn set_keyring(provider_id: &str, secret: &str) -> Result<(), String> {
     entry.set_password(secret).map_err(|e| format!("keyring set failed: {}", e))?;
     Ok(())
 }
-fn get_keyring(provider_id: &str) -> Result<String, String> {
+pub(crate) fn get_keyring(provider_id: &str) -> Result<String, String> {
     let entry = keyring::Entry::new("com.fragilich.notes", provider_id).map_err(|e| format!("keyring open failed: {}", e))?;
     entry.get_password().map_err(|e| format!("keyring get failed: {}", e))
 }

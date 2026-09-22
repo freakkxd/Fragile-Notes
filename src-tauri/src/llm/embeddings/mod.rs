@@ -4,12 +4,15 @@ pub mod chunker;
 pub mod store;
 pub mod provider;
 pub mod openai_compatible;
+pub mod wiring;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_persistence;
 #[cfg(test)]
 mod tests_provider;
+#[cfg(test)]
+mod tests_wiring;
 
 pub use types::{
     ChunkDiff, EmbeddingError, EmbeddingLimits, EmbeddingModelRef, EmbeddingRecord, EmbeddingRequest, EmbeddingResponse, IndexRun, IndexStatus, NoteChunk,
@@ -19,3 +22,4 @@ pub use chunker::{ChunkingConfig, ChunkingError, ChunkedNote, chunk_markdown, no
 pub use store::{ChunkStore, EmbeddingStore, SqliteStore};
 pub use provider::{EmbeddingProvider, redact_secrets};
 pub use openai_compatible::{OpenAiCompatibleConfig, OpenAiCompatibleEmbeddingProvider};
+pub use wiring::{resolve_embedding_provider, resolve_model_fingerprint, validate_task_policy, EmbeddingWiringError, ResolvedEmbedding};
