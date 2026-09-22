@@ -42,12 +42,16 @@ pub fn redact_secrets(s: &str) -> String {
             out.replace_range(start..end.min(start + 128), &masked);
         }
     }
-    // Mask ?key= or &key=
+    // Mask ?key= or &key=. NOTE: the `?key=`/`&key=` prefix itself is kept,
+    // so the search cursor must advance past each replacement — otherwise
+    // `find` re-matches the same prefix forever (infinite loop).
     for key_pat in ["?key=", "&key=", "?api_key=", "&api_key="] {
-        while let Some(idx) = out.to_lowercase().find(key_pat) {
-            let start = idx + key_pat.len();
+        let mut search_from = 0usize;
+        while let Some(rel) = out.to_lowercase().get(search_from..).and_then(|s| s.find(key_pat)) {
+            let start = search_from + rel + key_pat.len();
             let end = out[start..].find(|c| c == '&' || c == ' ' || c == '"' || c == '\'').map(|i| start + i).unwrap_or(out.len().min(start + 64));
             out.replace_range(start..end, "***REDACTED***");
+            search_from = start + "***REDACTED***".len();
         }
     }
     // Mask Bearer token
