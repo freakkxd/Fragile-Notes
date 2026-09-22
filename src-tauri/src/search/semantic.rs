@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Orchestration layer: text -> embedding -> vector search, with fallback.
 
-pub struct SemanticSearchService<P, V, L>
+pub struct SemanticSearchService<P: ?Sized, V, L>
 where
     P: EmbeddingProvider,
     V: VectorStore,
@@ -21,7 +21,7 @@ where
     lexical: Arc<L>,
 }
 
-impl<P, V, L> SemanticSearchService<P, V, L>
+impl<P: ?Sized, V, L> SemanticSearchService<P, V, L>
 where
     P: EmbeddingProvider,
     V: VectorStore,
@@ -114,6 +114,8 @@ where
                                 rank,
                                 raw_score: r.score,
                                 normalized_score: None,
+                                start_offset: r.start_offset,
+                                end_offset: r.end_offset,
                                 source: SearchSource::Semantic,
                             })
                             .collect();

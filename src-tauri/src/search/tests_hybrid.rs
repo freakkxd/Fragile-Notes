@@ -172,6 +172,9 @@ fn lexical_result(chunk_id: &str, note_id: &str) -> SearchResult {
         rank: 0,
         raw_score: -1.0,
         normalized_score: None,
+        // Lexical helper has no chunk offsets (mirrors FTS rows).
+        start_offset: None,
+        end_offset: None,
         source: SearchSource::Lexical,
     }
 }
@@ -182,6 +185,9 @@ fn semantic_result(chunk_id: &str, note_id: &str, score: f32) -> VectorSearchRes
         note_id: note_id.to_string(),
         content: format!("content {}", chunk_id),
         heading_path: vec![],
+        // Deterministic chunk offsets for hybrid tests.
+        start_offset: Some(0),
+        end_offset: Some(format!("content {}", chunk_id).len()),
         score,
         distance: 1.0 - score,
         model: VectorModelFilter {

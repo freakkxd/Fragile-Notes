@@ -30,6 +30,50 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use types::{SearchError as SE, SearchQuery as SQ, SearchResponse as SR};
 
+/// Try to resolve a production embedding provider from the current config.
+///
+/// Returns the provider plus the AUTHORITATIVE model filter (application
+/// `model_id` + resolved fingerprint). Callers must use the returned filter
+/// for retrieval so `has_vectors` / vector search hit the index written
+/// under the installed model's fingerprint — not a stale frontend value.
+///
+/// Returns `None` when no configured model matches (command keeps the
+/// `UnavailableProvider` path with its typed degraded fallback).
+/// Privacy note: Tauri search commands carry no task context, so resolution
+/// passes `privacy = None`. Explicit local-only enforcement happens in flows
+/// that own a task profile (10B chat/RAG) via `validate_task_policy`.
+fn production_embedding_provider(
+    model_id: &str,
+) -> Option<(
+    std::sync::Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider>,
+    types::VectorModelFilter,
+)> {
+    use crate::llm::embeddings::wiring;
+    let cfg = crate::llm::load_config_inner();
+    let model = cfg.models.iter().find(|m| m.id == model_id)?;
+    // Best-effort registry record for fingerprint (missing -> fallback rules).
+    let record = (|| {
+        let mut reg = crate::llm::models::registry::Registry::new(crate::llm::registry_path());
+        reg.load().ok()?;
+        wiring::find_record_for_model(&reg, model)
+    })();
+    let resolved = wiring::resolve_embedding_provider(
+        &cfg,
+        model_id,
+        record.as_ref(),
+        &None,
+        &crate::llm::get_keyring,
+    )
+    .ok()?;
+    let filter = types::VectorModelFilter {
+        model_id: resolved.model_ref.model_id,
+        model_fingerprint: resolved.model_ref.model_fingerprint,
+    };
+    let provider: std::sync::Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider> =
+        std::sync::Arc::new(resolved.provider);
+    Some((provider, filter))
+}
+
 #[async_trait]
 pub trait SearchBackend: Send + Sync {
     async fn search(&self, query: SQ) -> Result<SR, SE>;
@@ -123,7 +167,7 @@ pub async fn search_hybrid(
         rrf_k: k,
     };
     cfg.validate().map_err(|e| e.to_string())?;
-    let req = TextSearchRequest {
+    let mut req = TextSearchRequest {
         text: text.clone(),
         embedding_model: VectorModelFilter {
             model_id: embedding_model_id.clone(),
@@ -144,7 +188,8 @@ pub async fn search_hybrid(
         db_path,
         crate::search::types::VectorSearchLimits::default(),
     ));
-    // Real provider wiring: try to use configured provider, fallback to unavailable for Stage 8 demo
+    // Production provider when configured; otherwise the unavailable stub
+    // (typed error -> existing degraded lexical fallback).
     struct UnavailableProvider;
     #[async_trait::async_trait]
     impl crate::llm::embeddings::provider::EmbeddingProvider for UnavailableProvider {
@@ -159,7 +204,15 @@ pub async fn search_hybrid(
         }
     }
     let provider = Arc::new(UnavailableProvider);
-    let svc = HybridSearchService::new(provider, vector_store, lexical);
+    let hybrid_provider: Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider> =
+        match production_embedding_provider(&embedding_model_id) {
+            Some((p, filter)) => {
+                req.embedding_model = filter;
+                p
+            }
+            None => provider,
+        };
+    let svc = HybridSearchService::new(hybrid_provider, vector_store, lexical);
     let cancel = CancellationToken::new();
     let res = svc
         .search_hybrid(req, cfg, cancel)
@@ -203,7 +256,7 @@ pub async fn search_text(
         Some("lexical") | None => FallbackPolicy::Lexical,
         _ => FallbackPolicy::Lexical,
     };
-    let req = TextSearchRequest {
+    let mut req = TextSearchRequest {
         text: text.clone(),
         embedding_model: VectorModelFilter {
             model_id: embedding_model_id.clone(),
@@ -231,8 +284,8 @@ pub async fn search_text(
         return serde_json::to_string(&res).map_err(|e| e.to_string());
     }
 
-    // For semantic/auto: try to use real embedding provider if available, else fallback
-    // For Stage 7, we use a provider that will be unavailable if no sidecar, so fallback demonstrates.
+    // For semantic/auto: production provider when configured, else the
+    // unavailable stub (typed error -> existing degraded lexical fallback).
     // Create a dummy provider that returns provider error to trigger lexical fallback when needed.
     struct UnavailableProvider;
     #[async_trait::async_trait]
@@ -256,7 +309,15 @@ pub async fn search_text(
         crate::search::types::VectorSearchLimits::default(),
     ));
     let provider = Arc::new(UnavailableProvider);
-    let svc = SemanticSearchService::new(provider, vector_store, lexical);
+    let text_provider: Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider> =
+        match production_embedding_provider(&embedding_model_id) {
+            Some((p, filter)) => {
+                req.embedding_model = filter;
+                p
+            }
+            None => provider,
+        };
+    let svc = SemanticSearchService::new(text_provider, vector_store, lexical);
     let cancel = CancellationToken::new();
     let res = svc.search_text(req, cancel).await.map_err(|e| e.to_string())?;
     serde_json::to_string(&res).map_err(|e| e.to_string())

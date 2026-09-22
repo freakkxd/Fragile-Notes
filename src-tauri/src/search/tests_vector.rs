@@ -545,3 +545,29 @@ async fn brute_force_reference() {
         assert!((res[i].score - score).abs() < EPS);
     }
 }
+
+#[tokio::test]
+async fn offsets_come_from_chunk_index() {
+    // Stage 10A.2: vector results carry REAL chunk offsets (UTF-8 bytes)
+    // from embedding_chunks — never synthetic values.
+    let store = make_store();
+    let mut c = chunk("note-1", "c1", "hello world");
+    c.start_offset = 7;
+    c.end_offset = 18;
+    let conn = Connection::open(store.with_path_for_test()).unwrap();
+    insert_chunk(&conn, &c);
+    drop(conn);
+    let r = rec("c1", "hello world", "m1", "fp1", vec![1.0, 0.0]);
+    store.upsert(&[r]).await.unwrap();
+    let q = VectorQuery {
+        vector: vec![1.0, 0.0],
+        model: model("m1", "fp1"),
+        limit: 10,
+        note_filter: None,
+        min_score: None,
+    };
+    let res = store.search(q).await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].start_offset, Some(7));
+    assert_eq!(res[0].end_offset, Some(18));
+}

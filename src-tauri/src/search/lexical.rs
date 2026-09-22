@@ -257,6 +257,9 @@ impl SearchBackend for LexicalSearchBackend {
                                 content: content.chars().take(500).collect(),
                                 heading_path: vec![],
                                 chunk_id: None,
+                                // FTS rows are not chunk-based: no offsets.
+                                start_offset: None,
+                                end_offset: None,
                                 rank: idx,
                                 raw_score: score,
                                 normalized_score: None,
@@ -298,6 +301,9 @@ impl SearchBackend for LexicalSearchBackend {
                                 content: content.chars().take(500).collect(),
                                 heading_path: vec![],
                                 chunk_id: None,
+                                // FTS rows are not chunk-based: no offsets.
+                                start_offset: None,
+                                end_offset: None,
                                 rank: idx,
                                 raw_score: score,
                                 normalized_score: None,

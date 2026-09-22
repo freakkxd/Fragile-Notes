@@ -303,12 +303,14 @@ impl VectorStore for SqliteVectorStore {
             heading_json: String,
             dims: usize,
             blob: Vec<u8>,
+            start_offset: i64,
+            end_offset: i64,
         }
         let mut rows: Vec<Row> = Vec::new();
         if let Some(ref like) = filter_like {
             let mut stmt = conn
                 .prepare(
-                    "SELECT v.chunk_id, c.note_id, c.content, c.heading_path_json, v.dimensions, v.vector_blob
+                    "SELECT v.chunk_id, c.note_id, c.content, c.heading_path_json, v.dimensions, v.vector_blob, c.start_offset, c.end_offset
                      FROM embedding_vectors v JOIN embedding_chunks c ON v.chunk_id = c.chunk_id
                      WHERE v.model_id = ?1 AND v.model_fingerprint = ?2 AND c.note_id LIKE ?3 ESCAPE '\\'",
                 )
@@ -324,6 +326,8 @@ impl VectorStore for SqliteVectorStore {
                             heading_json: row.get(3)?,
                             dims: row.get::<_, i64>(4)? as usize,
                             blob: row.get(5)?,
+                            start_offset: row.get(6)?,
+                            end_offset: row.get(7)?,
                         })
                     },
                 )
@@ -334,7 +338,7 @@ impl VectorStore for SqliteVectorStore {
         } else {
             let mut stmt = conn
                 .prepare(
-                    "SELECT v.chunk_id, c.note_id, c.content, c.heading_path_json, v.dimensions, v.vector_blob
+                    "SELECT v.chunk_id, c.note_id, c.content, c.heading_path_json, v.dimensions, v.vector_blob, c.start_offset, c.end_offset
                      FROM embedding_vectors v JOIN embedding_chunks c ON v.chunk_id = c.chunk_id
                      WHERE v.model_id = ?1 AND v.model_fingerprint = ?2",
                 )
@@ -350,6 +354,8 @@ impl VectorStore for SqliteVectorStore {
                             heading_json: row.get(3)?,
                             dims: row.get::<_, i64>(4)? as usize,
                             blob: row.get(5)?,
+                            start_offset: row.get(6)?,
+                            end_offset: row.get(7)?,
                         })
                     },
                 )
@@ -405,6 +411,9 @@ impl VectorStore for SqliteVectorStore {
                 note_id: row.note_id,
                 content: row.content,
                 heading_path,
+                // Real chunk offsets from the index (UTF-8 bytes).
+                start_offset: Some(row.start_offset.max(0) as usize),
+                end_offset: Some(row.end_offset.max(0) as usize),
                 score,
                 distance,
                 model: query.model.clone(),

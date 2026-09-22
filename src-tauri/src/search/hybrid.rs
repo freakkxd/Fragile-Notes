@@ -43,7 +43,7 @@ pub fn reference_rrf(
     fused
 }
 
-pub struct HybridSearchService<P, V, L>
+pub struct HybridSearchService<P: ?Sized, V, L>
 where
     P: EmbeddingProvider,
     V: VectorStore,
@@ -54,7 +54,7 @@ where
     lexical: Arc<L>,
 }
 
-impl<P, V, L> HybridSearchService<P, V, L>
+impl<P: ?Sized, V, L> HybridSearchService<P, V, L>
 where
     P: EmbeddingProvider,
     V: VectorStore,
@@ -281,6 +281,8 @@ where
                     rank: 0, // will be overwritten after sort
                     raw_score: fused_score,
                     normalized_score: Some(fused_score),
+                    start_offset: sr.start_offset,
+                    end_offset: sr.end_offset,
                     source: SearchSource::Hybrid,
                 }
             } else if let Some(lr) = lex_map.get(&chunk_id) {
@@ -294,6 +296,8 @@ where
                     rank: 0,
                     raw_score: fused_score,
                     normalized_score: Some(fused_score),
+                    start_offset: lr.start_offset,
+                    end_offset: lr.end_offset,
                     source: SearchSource::Hybrid,
                 }
             } else {
@@ -353,6 +357,8 @@ where
                 rank,
                 raw_score: r.score,
                 normalized_score: None,
+                start_offset: r.start_offset,
+                end_offset: r.end_offset,
                 source: SearchSource::Semantic,
             })
             .collect();

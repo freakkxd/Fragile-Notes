@@ -75,6 +75,11 @@ pub struct SearchResult {
     pub content: String,
     pub heading_path: Vec<String>,
     pub chunk_id: Option<String>,
+    /// UTF-8 byte offsets into the ORIGINAL full chunk content.
+    /// `Some` only for chunk-based results (from `NoteChunk` via the vector
+    /// index); lexical FTS rows carry `None` — never synthetic `0..len()`.
+    pub start_offset: Option<usize>,
+    pub end_offset: Option<usize>,
     /// rank 0 is best, higher is worse (ORDER BY bm25)
     pub rank: usize,
     /// raw bm25 score (negative in SQLite, more negative = more relevant)
@@ -289,6 +294,10 @@ pub struct VectorSearchResult {
     pub note_id: String,
     pub content: String,
     pub heading_path: Vec<String>,
+    /// UTF-8 byte offsets of this chunk in the original note (from
+    /// `embedding_chunks`). Always `Some` for index-backed results.
+    pub start_offset: Option<usize>,
+    pub end_offset: Option<usize>,
     pub score: f32,
     pub distance: f32,
     pub model: VectorModelFilter,
