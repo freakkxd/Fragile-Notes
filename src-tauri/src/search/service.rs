@@ -3,12 +3,6 @@ use super::SearchBackend;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FallbackPolicy {
-    Deny,
-    Lexical,
-}
-
 pub struct SearchService {
     lexical: Arc<dyn SearchBackend>,
     semantic: Option<Arc<dyn SearchBackend>>,

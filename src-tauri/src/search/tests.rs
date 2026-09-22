@@ -1,6 +1,6 @@
 use super::lexical::LexicalSearchBackend;
-use super::service::{FallbackPolicy, SearchService, UnavailableSemanticBackend};
-use super::types::*;
+use super::service::{SearchService, UnavailableSemanticBackend};
+use super::types::{FallbackPolicy, FallbackReason, SearchError, SearchMode, SearchQuery, SearchQueryMode, SearchSource};
 use super::SearchBackend;
 use std::sync::Arc;
 

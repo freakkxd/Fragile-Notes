@@ -303,6 +303,7 @@ fn main() {
             search_lexical,
             search::search_vector,
             search::search_hybrid,
+            search::search_text,
             get_links,
             collect_sources,
             web_clip,

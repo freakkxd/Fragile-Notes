@@ -100,6 +100,12 @@ pub enum SearchMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FallbackPolicy {
+    Deny,
+    Lexical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FallbackReason {
     EmbeddingProviderUnavailable,
     EmbeddingModelMissing,
@@ -126,6 +132,19 @@ pub enum SearchError {
     DimensionMismatch { expected: usize, actual: usize },
     CorruptVectorBlob(String),
     LimitExceeded(String),
+    Cancelled,
+}
+
+impl SearchError {
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+    pub fn is_fallback_eligible(&self) -> bool {
+        matches!(
+            self,
+            Self::SemanticUnavailable { .. } | Self::IndexUnavailable(_)
+        )
+    }
 }
 
 impl std::fmt::Display for SearchError {
@@ -143,11 +162,60 @@ impl std::fmt::Display for SearchError {
             }
             Self::CorruptVectorBlob(msg) => write!(f, "corrupt vector blob: {}", msg),
             Self::LimitExceeded(msg) => write!(f, "limit exceeded: {}", msg),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
 
 impl std::error::Error for SearchError {}
+
+// Text query orchestration (Stage 7)
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextSearchRequest {
+    pub text: String,
+    pub embedding_model: VectorModelFilter,
+    pub limit: usize,
+    pub note_filter: Option<String>,
+    pub min_score: Option<f32>,
+    pub mode: SearchMode,
+    pub fallback: FallbackPolicy,
+}
+
+impl TextSearchRequest {
+    pub fn validate(&self) -> Result<(), SearchError> {
+        if self.text.trim().is_empty() {
+            return Err(SearchError::InvalidQuery("text is empty".to_string()));
+        }
+        if self.text.chars().count() > 2000 {
+            return Err(SearchError::InvalidQuery("text too long".to_string()));
+        }
+        if self.limit == 0 || self.limit > 100 {
+            return Err(SearchError::InvalidQuery("limit must be 1..100".to_string()));
+        }
+        if self.embedding_model.model_id.trim().is_empty() {
+            return Err(SearchError::InvalidQuery("model_id is empty".to_string()));
+        }
+        if self.embedding_model.model_fingerprint.trim().is_empty() {
+            return Err(SearchError::InvalidQuery(
+                "model_fingerprint is empty".to_string(),
+            ));
+        }
+        if let Some(f) = &self.note_filter {
+            if f.contains("..") || f.contains('\0') {
+                return Err(SearchError::InvalidQuery("invalid note_filter".to_string()));
+            }
+        }
+        if let Some(min) = self.min_score {
+            if !min.is_finite() || min < -1.0 || min > 1.0 {
+                return Err(SearchError::InvalidQuery(
+                    "min_score must be in [-1,1]".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
 
 // Vector search types (Stage 6)
 
