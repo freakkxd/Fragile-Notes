@@ -45,6 +45,10 @@ impl SearchService {
         match mode {
             SearchMode::Lexical => self.lexical_search(query).await,
             SearchMode::Semantic => self.semantic_search(query).await,
+            SearchMode::Hybrid => Err(SearchError::SemanticUnavailable {
+                reason: FallbackReason::UnsupportedSemanticSearch,
+                message: "hybrid search not implemented in Stage 6".to_string(),
+            }),
             SearchMode::Auto => self.auto_search(query).await,
         }
     }

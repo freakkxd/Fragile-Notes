@@ -301,6 +301,8 @@ fn main() {
             write_note,
             fts_search,
             search_lexical,
+            search::search_vector,
+            search::search_hybrid,
             get_links,
             collect_sources,
             web_clip,

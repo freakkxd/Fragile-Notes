@@ -95,6 +95,7 @@ pub enum SearchSource {
 pub enum SearchMode {
     Lexical,
     Semantic,
+    Hybrid,
     Auto,
 }
 
@@ -121,6 +122,10 @@ pub enum SearchError {
     IndexUnavailable(String),
     Internal(String),
     SemanticUnavailable { reason: FallbackReason, message: String },
+    InvalidVector(String),
+    DimensionMismatch { expected: usize, actual: usize },
+    CorruptVectorBlob(String),
+    LimitExceeded(String),
 }
 
 impl std::fmt::Display for SearchError {
@@ -132,8 +137,103 @@ impl std::fmt::Display for SearchError {
             Self::SemanticUnavailable { reason, message } => {
                 write!(f, "semantic unavailable {:?}: {}", reason, message)
             }
+            Self::InvalidVector(msg) => write!(f, "invalid vector: {}", msg),
+            Self::DimensionMismatch { expected, actual } => {
+                write!(f, "dimension mismatch: expected {} actual {}", expected, actual)
+            }
+            Self::CorruptVectorBlob(msg) => write!(f, "corrupt vector blob: {}", msg),
+            Self::LimitExceeded(msg) => write!(f, "limit exceeded: {}", msg),
         }
     }
 }
 
 impl std::error::Error for SearchError {}
+
+// Vector search types (Stage 6)
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorModelFilter {
+    pub model_id: String,
+    pub model_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VectorQuery {
+    pub vector: Vec<f32>,
+    pub model: VectorModelFilter,
+    pub limit: usize,
+    pub note_filter: Option<String>,
+    pub min_score: Option<f32>,
+}
+
+impl VectorQuery {
+    pub fn validate(&self) -> Result<(), SearchError> {
+        if self.vector.is_empty() {
+            return Err(SearchError::InvalidVector("query vector is empty".to_string()));
+        }
+        if self.limit == 0 || self.limit > 100 {
+            return Err(SearchError::InvalidQuery(
+                "limit must be 1..100".to_string(),
+            ));
+        }
+        if self.model.model_id.trim().is_empty() {
+            return Err(SearchError::InvalidQuery("model_id is empty".to_string()));
+        }
+        if self.model.model_fingerprint.trim().is_empty() {
+            return Err(SearchError::InvalidQuery(
+                "model_fingerprint is empty".to_string(),
+            ));
+        }
+        for (i, v) in self.vector.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(SearchError::InvalidVector(format!(
+                    "non-finite at pos {}",
+                    i
+                )));
+            }
+        }
+        let norm: f32 = self.vector.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm == 0.0 || !norm.is_finite() {
+            return Err(SearchError::InvalidVector("zero-norm vector".to_string()));
+        }
+        if let Some(f) = &self.note_filter {
+            if f.contains("..") || f.contains('\0') {
+                return Err(SearchError::InvalidQuery("invalid note_filter".to_string()));
+            }
+        }
+        if let Some(min) = self.min_score {
+            if !min.is_finite() || min < -1.0 || min > 1.0 {
+                return Err(SearchError::InvalidQuery(
+                    "min_score must be finite in [-1,1]".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorSearchResult {
+    pub chunk_id: String,
+    pub note_id: String,
+    pub content: String,
+    pub heading_path: Vec<String>,
+    pub score: f32,
+    pub distance: f32,
+    pub model: VectorModelFilter,
+}
+
+#[derive(Debug, Clone)]
+pub struct VectorSearchLimits {
+    pub max_candidates: usize,
+    pub max_vector_bytes: usize,
+}
+
+impl Default for VectorSearchLimits {
+    fn default() -> Self {
+        Self {
+            max_candidates: 10000,
+            max_vector_bytes: 50 * 1024 * 1024,
+        }
+    }
+}
