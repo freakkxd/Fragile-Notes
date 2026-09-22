@@ -6,8 +6,10 @@ mod collect;
 mod enrich;
 mod tasks;
 mod llm;
+mod search;
 use collect::{collect_sources, web_clip};
-use enrich::{embeddings_search, enrich_notes, llm_chat, llm_status};
+use enrich::{enrich_notes, llm_chat, llm_status};
+use search::{LexicalSearchBackend, SearchBackend, SearchQuery, SearchQueryMode};
 use llm::{
     llm_chat_universal, llm_delete_pipeline, llm_delete_provider_credential, llm_download_model,
     llm_get_config, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
@@ -158,8 +160,23 @@ fn fts_index(db: &Path, file: &Path, content: &str) -> rusqlite::Result<()> {
 
 #[tauri::command]
 fn fts_search(query: String) -> Vec<String> {
+    // Deprecated alias — delegates to lexical backend with literal mode
     let db = vault_root().join(".fragile_fts.db");
-    if !db.exists() {
+    let backend = LexicalSearchBackend::new(db);
+    let q = SearchQuery {
+        text: query.clone(),
+        limit: 50,
+        note_filter: None,
+        mode: SearchQueryMode::Literal,
+    };
+    if let Ok(rt) = tokio::runtime::Handle::try_current() {
+        if let Ok(res) = rt.block_on(backend.search(q)) {
+            return res.results.into_iter().filter_map(|r| r.path).collect();
+        }
+    }
+    // Fallback to old logic if no runtime
+    let db2 = vault_root().join(".fragile_fts.db");
+    if !db2.exists() {
         return list_notes()
             .into_iter()
             .filter(|p| {
@@ -169,19 +186,79 @@ fn fts_search(query: String) -> Vec<String> {
             })
             .collect();
     }
-    let conn = match Connection::open(&db) {
+    let conn = match Connection::open(&db2) {
         Ok(c) => c,
         Err(_) => return vec![],
     };
+    let safe_query = LexicalSearchBackend::build_fts_query(&query, &SearchQueryMode::Literal)
+        .unwrap_or(query.clone());
     let mut stmt = match conn.prepare("SELECT path FROM fts WHERE fts MATCH ?1") {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    let rows = stmt.query_map(params![query], |row| row.get::<_, String>(0));
+    let rows = stmt.query_map(params![safe_query], |row| row.get::<_, String>(0));
     match rows {
         Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
         Err(_) => vec![],
     }
+}
+
+#[tauri::command]
+async fn search_lexical(
+    query: String,
+    limit: Option<usize>,
+    note_filter: Option<String>,
+    mode: Option<String>,
+) -> Result<String, String> {
+    let lim = limit.unwrap_or(20).clamp(1, 100);
+    if query.trim().is_empty() {
+        return Err("query is empty".to_string());
+    }
+    if query.chars().count() > 1000 {
+        return Err("query too long".to_string());
+    }
+    let qmode = match mode.as_deref() {
+        Some("advanced") => SearchQueryMode::Advanced,
+        _ => SearchQueryMode::Literal,
+    };
+    let q = SearchQuery {
+        text: query,
+        limit: lim,
+        note_filter,
+        mode: qmode,
+    };
+    let backend = LexicalSearchBackend::from_vault(&vault_root());
+    let res = backend
+        .search(q)
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&res).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn embeddings_search(query: String, limit: usize) -> Result<String, String> {
+    // Legacy name — now lexical fallback, not embeddings
+    let lim = limit.clamp(1, 100);
+    let backend = LexicalSearchBackend::from_vault(&vault_root());
+    let q = SearchQuery {
+        text: query,
+        limit: lim,
+        note_filter: None,
+        mode: SearchQueryMode::Literal,
+    };
+    // Try to run with current runtime, fallback to sync
+    if let Ok(rt) = tokio::runtime::Handle::try_current() {
+        if let Ok(res) = rt.block_on(backend.search(q)) {
+            return serde_json::to_string(&serde_json::json!({
+                "results": res.results.iter().filter_map(|r| r.path.clone()).collect::<Vec<_>>(),
+                "mode": "lexical",
+                "degraded": true,
+                "fallback_reason": "UnsupportedSemanticSearch"
+            }))
+            .map_err(|e| e.to_string());
+        }
+    }
+    Err("search unavailable".to_string())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,6 +300,7 @@ fn main() {
             read_note,
             write_note,
             fts_search,
+            search_lexical,
             get_links,
             collect_sources,
             web_clip,

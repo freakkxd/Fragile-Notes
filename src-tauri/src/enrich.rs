@@ -81,9 +81,9 @@ fn extract_tags(resp: &str) -> Vec<String> {
     RE_TAG.captures_iter(resp).map(|c| format!("#{}", &c[1])).take(3).collect()
 }
 
-#[tauri::command]
-pub fn embeddings_search(query: String, limit: usize) -> Result<String, String> {
-    // FTS5 lexical, not embeddings — keep as SearchBackend::lexical
+// Deprecated FTS5 stub — replaced by search::LexicalSearchBackend.
+// Kept for internal use only, not a Tauri command.
+pub fn legacy_embeddings_search(query: String, limit: usize) -> Result<String, String> {
     let vault = vault_root();
     let db = vault.join(".fragile_fts.db");
     if !db.exists() {
