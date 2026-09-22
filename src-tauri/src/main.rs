@@ -347,7 +347,8 @@ fn main() {
             llm_download_cancel,
             llm_download_status,
             llm_download_list,
-            rag::rag_retrieve
+            rag::rag_retrieve,
+            rag::rag_answer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

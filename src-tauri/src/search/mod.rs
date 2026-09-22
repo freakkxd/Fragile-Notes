@@ -42,7 +42,7 @@ use types::{SearchError as SE, SearchQuery as SQ, SearchResponse as SR};
 /// Privacy note: Tauri search commands carry no task context, so resolution
 /// passes `privacy = None`. Explicit local-only enforcement happens in flows
 /// that own a task profile (10B chat/RAG) via `validate_task_policy`.
-fn production_embedding_provider(
+pub(crate) fn production_embedding_provider(
     model_id: &str,
 ) -> Option<(
     std::sync::Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider>,

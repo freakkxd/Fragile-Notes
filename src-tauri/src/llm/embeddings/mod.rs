@@ -22,4 +22,4 @@ pub use chunker::{ChunkingConfig, ChunkingError, ChunkedNote, chunk_markdown, no
 pub use store::{ChunkStore, EmbeddingStore, SqliteStore};
 pub use provider::{EmbeddingProvider, redact_secrets};
 pub use openai_compatible::{OpenAiCompatibleConfig, OpenAiCompatibleEmbeddingProvider};
-pub use wiring::{resolve_embedding_provider, resolve_model_fingerprint, validate_task_policy, EmbeddingWiringError, ResolvedEmbedding};
+pub use wiring::{resolve_embedding_provider, resolve_model_fingerprint, resolve_scope_for_model, validate_task_policy, EmbeddingWiringError, ResolvedEmbedding};

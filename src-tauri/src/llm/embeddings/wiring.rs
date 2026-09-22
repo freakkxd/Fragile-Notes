@@ -130,6 +130,23 @@ pub fn resolve_model_fingerprint(
     Err(EmbeddingWiringError::FingerprintUnavailable(model.id.clone()))
 }
 
+/// Scope of the configured embedding model WITHOUT touching credentials.
+/// Used by commands to feed the retrieval privacy gate (`Some` = cloud or
+/// local embedding path, `None` = model not configured -> lexical only).
+/// Never fails on missing credentials — credential errors surface at
+/// `resolve_embedding_provider` time.
+pub fn resolve_scope_for_model(
+    config: &LlmConfig,
+    model_id: &str,
+) -> Option<ProviderScope> {
+    let model = config.models.iter().find(|m| m.id == model_id)?;
+    let provider = config.providers.iter().find(|p| p.id == model.provider_id)?;
+    if !provider.enabled {
+        return None;
+    }
+    Some(scope_of(&provider.kind, &provider.endpoint))
+}
+
 /// Find the registry record belonging to a config model (by path identity).
 pub fn find_record_for_model(registry: &Registry, model: &Model) -> Option<ModelRecord> {
     if model.path.trim().is_empty() {
