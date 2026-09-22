@@ -716,3 +716,25 @@ async fn no_raw_provider_error_in_response() {
     assert!(!reason_str.contains("sk-secret"));
     assert!(!reason_str.contains("Bearer"));
 }
+
+#[tokio::test]
+async fn hybrid_preserves_note_path_semantics() {
+    // Regression: semantic_to_response must not put chunk_id into path.
+    // path = vault-relative note path, note_id = note identity,
+    // chunk_id = chunk identity.
+    let lexical = Arc::new(FakeLexical::err(SearchError::IndexUnavailable("no fts".to_string())));
+    let provider = Arc::new(FakeProvider::success("m1", vec![1.0, 0.0]));
+    let vector = Arc::new(FakeVector::ok(vec![semantic_result("chunk-9", "notes/real.md", 0.9)]));
+    let svc = HybridSearchService::new(provider, vector, lexical);
+    let cfg = hybrid_config(0.5, 0.5, 60, 10, 10);
+    let res = svc
+        .search_hybrid(req(SearchMode::Hybrid, FallbackPolicy::Lexical), cfg, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(res.results.len(), 1);
+    let r = &res.results[0];
+    assert_eq!(r.note_id, "notes/real.md");
+    assert_eq!(r.path, Some("notes/real.md".to_string()));
+    assert_eq!(r.chunk_id, Some("chunk-9".to_string()));
+    assert_ne!(r.path, Some("chunk-9".to_string()));
+}

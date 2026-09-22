@@ -348,8 +348,11 @@ where
             .into_iter()
             .enumerate()
             .map(|(rank, r)| SearchResult {
-                note_id: r.note_id,
-                path: Some(r.chunk_id.clone()),
+                note_id: r.note_id.clone(),
+                // Path semantics: vault-relative NOTE path, never chunk_id.
+                // Vector rows carry no separate path column; note_id is the
+                // note identity used as path by convention (cf. semantic.rs).
+                path: Some(r.note_id.clone()),
                 title: None,
                 content: r.content,
                 heading_path: r.heading_path,
