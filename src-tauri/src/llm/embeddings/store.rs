@@ -1,7 +1,7 @@
-use super::types::{ChunkDiff, EmbeddingError, EmbeddingRecord, IndexRun, IndexStatus, NoteChunk};
+use super::types::{ChunkDiff, EmbeddingError, EmbeddingModelRef, EmbeddingRecord, IndexRun, IndexStatus, NoteChunk};
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ChunkStore and EmbeddingStore are intentionally separate:
 // chunks can exist without vectors, vectors are optional and model-specific.
@@ -16,39 +16,68 @@ pub trait ChunkStore: Send + Sync {
 
 #[async_trait]
 pub trait EmbeddingStore: Send + Sync {
-    async fn get(&self, chunk_id: &str, model_id: &str) -> Result<Option<EmbeddingRecord>, EmbeddingError>;
+    async fn get(
+        &self,
+        chunk_id: &str,
+        model: &EmbeddingModelRef,
+    ) -> Result<Option<EmbeddingRecord>, EmbeddingError>;
+    async fn get_any(
+        &self,
+        chunk_id: &str,
+        model_id: &str,
+    ) -> Result<Vec<EmbeddingRecord>, EmbeddingError>;
     async fn upsert(&self, records: &[EmbeddingRecord]) -> Result<(), EmbeddingError>;
     async fn delete_for_chunks(&self, chunk_ids: &[String]) -> Result<(), EmbeddingError>;
+    async fn delete_for_model(
+        &self,
+        chunk_id: &str,
+        model: &EmbeddingModelRef,
+    ) -> Result<(), EmbeddingError>;
 }
 
 pub struct SqliteStore {
     pub(crate) path: PathBuf,
+    // RAII temp dir for test stores — auto-cleanup on Drop
+    _temp_dir: Option<tempfile::TempDir>,
 }
 
 impl SqliteStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            _temp_dir: None,
+        }
     }
 
-    /// In-memory store for tests. Uses temp file (shared across connections)
-    /// to avoid shared-memory lifetime issues (DB disappears when last connection closes).
+    /// In-memory store for tests. Uses temp file with TempDir for auto-cleanup.
     pub fn new_in_memory() -> Result<Self, EmbeddingError> {
-        let mut p = std::env::temp_dir();
-        let id = uuid::Uuid::new_v4().to_string().replace('-', "");
-        p.push(format!("fragile_test_mem_{}.db", id));
-        let store = Self { path: p };
+        let dir = tempfile::tempdir().map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        let path = dir.path().join("embeddings.db");
+        let store = Self {
+            path,
+            _temp_dir: Some(dir),
+        };
         store.migrate()?;
         Ok(store)
     }
 
-    /// File-backed store for production: path is a file on disk.
     pub fn new_temp_file() -> Result<Self, EmbeddingError> {
-        let mut p = std::env::temp_dir();
-        let id = uuid::Uuid::new_v4().to_string();
-        p.push(format!("fragile_test_{}.db", id));
-        let store = Self { path: p };
+        let dir = tempfile::tempdir().map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        let path = dir.path().join("embeddings.db");
+        let store = Self {
+            path,
+            _temp_dir: Some(dir),
+        };
         store.migrate()?;
         Ok(store)
+    }
+
+    /// For tests that need to reopen same DB path (shared view). Clones path without TempDir.
+    pub(crate) fn reopen_shared(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            _temp_dir: None,
+        }
     }
 
     fn is_memory_uri(&self) -> bool {
@@ -61,12 +90,10 @@ impl SqliteStore {
         let conn = if path_str == ":memory:" {
             Connection::open_in_memory().map_err(|e| EmbeddingError::Provider(e.to_string()))?
         } else {
-            // Both file paths and file: URI work with open
             Connection::open(&self.path).map_err(|e| EmbeddingError::Provider(e.to_string()))?
         };
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
-        // WAL only for file DBs, memory DBs use MEMORY journal
         if !self.is_memory_uri() {
             let _ = conn.execute_batch("PRAGMA journal_mode = WAL;");
         } else {
@@ -77,56 +104,144 @@ impl SqliteStore {
 
     pub fn migrate(&self) -> Result<(), EmbeddingError> {
         let conn = self.open()?;
-        conn.execute_batch(
-            r#"
-            create table if not exists embedding_chunks (
-                chunk_id text primary key,
-                note_id text not null,
-                content text not null,
-                content_hash text not null,
-                heading_path_json text not null,
-                start_offset integer not null,
-                end_offset integer not null,
-                created_at text not null,
-                updated_at text not null
-            );
-            create index if not exists idx_embedding_chunks_note on embedding_chunks(note_id);
+        // Check existing schema to decide if migration needed
+        let needs_recreate = {
+            let mut needs = false;
+            if let Ok(mut stmt) = conn.prepare(
+                "select sql from sqlite_master where type='table' and name='embedding_vectors'",
+            ) {
+                if let Ok(mut rows) = stmt.query([]) {
+                    if let Ok(Some(row)) = rows.next() {
+                        let sql: Option<String> = row.get(0).unwrap_or(None);
+                        if let Some(s) = sql {
+                            // old PK is 2-col, new is 3-col with fingerprint
+                            if s.contains("primary key (chunk_id, model_id)")
+                                && !s.contains("model_fingerprint")
+                            {
+                                needs = true;
+                            }
+                            if s.contains("primary key (chunk_id, model_id)")
+                                && !s.contains("primary key (chunk_id, model_id, model_fingerprint)")
+                            {
+                                // if it's 2-col PK, needs recreate
+                                // detect by exact string
+                                if s.contains("\"chunk_id\", \"model_id\"") || s.contains("(chunk_id, model_id)") {
+                                    // check if fingerprint is part of PK
+                                    if !s.contains("model_fingerprint") || !s.contains("(chunk_id, model_id, model_fingerprint)") {
+                                        // For old DB with 2-col PK, mark needs
+                                        // We check more precisely below
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // More robust: check via table_info + index for PK columns
+            if !needs {
+                if let Ok(sql) = conn
+                    .query_row(
+                        "select sql from sqlite_master where type='table' and name='embedding_vectors'",
+                        [],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                {
+                    if let Some(s) = sql {
+                        let has_fp_in_pk = s.contains("model_fingerprint") && s.contains("primary key") && {
+                            // crude: PK line contains fingerprint
+                            s.to_lowercase().contains("model_fingerprint")
+                                && s.to_lowercase().contains("primary key (chunk_id, model_id, model_fingerprint)")
+                        };
+                        if !has_fp_in_pk && s.contains("embedding_vectors") {
+                            // If table exists but not composite PK, need recreate
+                            // We consider any existing table with 2-col PK as needing migration
+                            // Only if table was created by old code (2-col)
+                            // We'll verify by checking if table exists and PK is 2-col via pragma
+                            needs = s.contains("primary key (chunk_id, model_id)") && !s.contains("primary key (chunk_id, model_id, model_fingerprint)");
+                        }
+                    }
+                }
+            }
+            needs
+        };
 
-            create table if not exists embedding_vectors (
-                chunk_id text not null,
-                model_id text not null,
-                model_fingerprint text not null default '',
-                dimensions integer not null,
-                vector_blob blob not null,
-                content_hash text not null,
-                created_at text not null,
-                updated_at text not null,
-                primary key (chunk_id, model_id),
-                foreign key (chunk_id) references embedding_chunks(chunk_id) on delete cascade
-            );
-            create index if not exists idx_embedding_vectors_model on embedding_vectors(model_id);
+        if needs_recreate {
+            // Migrate 2-col PK -> 3-col PK
+            conn.execute_batch(
+                r#"
+                create table if not exists embedding_vectors_new (
+                    chunk_id text not null,
+                    model_id text not null,
+                    model_fingerprint text not null,
+                    dimensions integer not null,
+                    vector_blob blob not null,
+                    content_hash text not null,
+                    created_at text not null,
+                    updated_at text not null,
+                    primary key (chunk_id, model_id, model_fingerprint),
+                    foreign key (chunk_id) references embedding_chunks(chunk_id) on delete cascade
+                );
+                insert or ignore into embedding_vectors_new
+                    (chunk_id, model_id, model_fingerprint, dimensions, vector_blob, content_hash, created_at, updated_at)
+                    select chunk_id, model_id, coalesce(model_fingerprint,''), dimensions, vector_blob, content_hash, created_at, updated_at from embedding_vectors;
+                drop table embedding_vectors;
+                alter table embedding_vectors_new rename to embedding_vectors;
+                create index if not exists idx_embedding_vectors_model on embedding_vectors(model_id);
+                "#,
+            )
+            .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        } else {
+            conn.execute_batch(
+                r#"
+                create table if not exists embedding_chunks (
+                    chunk_id text primary key,
+                    note_id text not null,
+                    content text not null,
+                    content_hash text not null,
+                    heading_path_json text not null,
+                    start_offset integer not null,
+                    end_offset integer not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_embedding_chunks_note on embedding_chunks(note_id);
 
-            create table if not exists embedding_index_runs (
-                id text primary key,
-                note_id text not null,
-                source_hash text not null,
-                status text not null,
-                processed_chunks integer not null,
-                total_chunks integer not null,
-                error text,
-                created_at text not null,
-                updated_at text not null
-            );
+                create table if not exists embedding_vectors (
+                    chunk_id text not null,
+                    model_id text not null,
+                    model_fingerprint text not null,
+                    dimensions integer not null,
+                    vector_blob blob not null,
+                    content_hash text not null,
+                    created_at text not null,
+                    updated_at text not null,
+                    primary key (chunk_id, model_id, model_fingerprint),
+                    foreign key (chunk_id) references embedding_chunks(chunk_id) on delete cascade
+                );
+                create index if not exists idx_embedding_vectors_model on embedding_vectors(model_id);
 
-            create table if not exists schema_migrations (
-                version text primary key,
-                applied_at text not null
-            );
-            "#,
-        )
-        .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+                create table if not exists embedding_index_runs (
+                    id text primary key,
+                    note_id text not null,
+                    source_hash text not null,
+                    status text not null,
+                    processed_chunks integer not null,
+                    total_chunks integer not null,
+                    error text,
+                    created_at text not null,
+                    updated_at text not null
+                );
 
-        // Ensure model_fingerprint column exists for DBs created before it
+                create table if not exists schema_migrations (
+                    version text primary key,
+                    applied_at text not null
+                );
+                "#,
+            )
+            .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        }
+
+        // Ensure model_fingerprint column exists (for very old DBs)
         {
             let mut has_fp = false;
             if let Ok(mut stmt) = conn.prepare("pragma table_info(embedding_vectors)") {
@@ -155,6 +270,12 @@ impl SqliteStore {
             params!["v0.5.8-embeddings-1", now],
         )
         .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        // Bump to v2 for composite PK
+        conn.execute(
+            "insert or ignore into schema_migrations (version, applied_at) values (?1, ?2)",
+            params!["v0.5.8-embeddings-2", now],
+        )
+        .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
         Ok(())
     }
 
@@ -177,11 +298,12 @@ impl SqliteStore {
         let dimensions_i64: i64 = row.get(3)?;
         let dimensions = dimensions_i64 as usize;
         let vector = blob_to_f32_vec(&blob).map_err(|e| {
-            rusqlite::Error::InvalidParameterName(format!("blob corrupt: {}", e))
+            // Use InvalidParameterName as carrier for corrupt blob; will be mapped to CorruptVectorBlob in get()
+            rusqlite::Error::InvalidParameterName(format!("corrupt_vector_blob: {}", e))
         })?;
         if vector.len() != dimensions {
             return Err(rusqlite::Error::InvalidParameterName(format!(
-                "dimension mismatch: stored {} vs blob {}",
+                "corrupt_vector_blob: dimension mismatch stored {} vs blob {}",
                 dimensions,
                 vector.len()
             )));
@@ -194,6 +316,14 @@ impl SqliteStore {
             dimensions,
             vector,
         })
+    }
+
+    fn map_corrupt(e: String) -> EmbeddingError {
+        if e.contains("corrupt_vector_blob") {
+            EmbeddingError::CorruptVectorBlob(e)
+        } else {
+            EmbeddingError::Provider(e)
+        }
     }
 }
 
@@ -221,6 +351,21 @@ fn blob_to_f32_vec(blob: &[u8]) -> Result<Vec<f32>, String> {
     Ok(vec)
 }
 
+impl Drop for SqliteStore {
+    fn drop(&mut self) {
+        // TempDir auto-cleans via _temp_dir. For legacy /tmp files without TempDir, clean explicitly.
+        if self._temp_dir.is_none() && self.path.starts_with("/tmp") {
+            let fname = self.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if fname.starts_with("fragile_test") {
+                let _ = std::fs::remove_file(&self.path);
+                // Also try WAL/shm
+                let _ = std::fs::remove_file(self.path.with_extension("db-wal"));
+                let _ = std::fs::remove_file(self.path.with_extension("db-shm"));
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl ChunkStore for SqliteStore {
     async fn get_chunks(&self, note_id: &str) -> Result<Vec<NoteChunk>, EmbeddingError> {
@@ -233,7 +378,7 @@ impl ChunkStore for SqliteStore {
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
         let mut out = Vec::new();
         for r in rows {
-            out.push(r.map_err(|e| EmbeddingError::Provider(e.to_string()))?);
+            out.push(r.map_err(|e| Self::map_corrupt(e.to_string()))?);
         }
         Ok(out)
     }
@@ -247,7 +392,6 @@ impl ChunkStore for SqliteStore {
                 deleted_ids: vec![],
             });
         }
-        // Validate all chunks first (outside transaction)
         for c in chunks {
             c.validate().map_err(|e| EmbeddingError::Provider(format!("chunk validate: {}", e)))?;
         }
@@ -259,7 +403,6 @@ impl ChunkStore for SqliteStore {
                 ));
             }
         }
-        // Check duplicate IDs before transaction
         {
             let mut id_set = std::collections::HashSet::new();
             for c in chunks {
@@ -274,7 +417,6 @@ impl ChunkStore for SqliteStore {
             .transaction()
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
 
-        // Load existing for this note
         let existing: Vec<NoteChunk> = {
             let mut stmt = tx
                 .prepare("select chunk_id, note_id, content, content_hash, heading_path_json, start_offset, end_offset from embedding_chunks where note_id = ?1")
@@ -284,7 +426,7 @@ impl ChunkStore for SqliteStore {
                 .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
             let mut v = Vec::new();
             for r in rows {
-                v.push(r.map_err(|e| EmbeddingError::Provider(e.to_string()))?);
+                v.push(r.map_err(|e| Self::map_corrupt(e.to_string()))?);
             }
             v
         };
@@ -315,7 +457,6 @@ impl ChunkStore for SqliteStore {
             .cloned()
             .collect();
 
-        // Atomic: upsert current chunks, delete removed, clean stale vectors
         let now = chrono::Utc::now().to_rfc3339();
         for chunk in chunks {
             let heading_json = serde_json::to_string(&chunk.heading_path).unwrap();
@@ -345,7 +486,6 @@ impl ChunkStore for SqliteStore {
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
         }
 
-        // Delete embeddings for changed chunks (stale vectors)
         for ch in &changed {
             tx.execute(
                 "delete from embedding_vectors where chunk_id = ?1",
@@ -353,7 +493,6 @@ impl ChunkStore for SqliteStore {
             )
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
         }
-        // deleted chunks cascade via FK, but explicit delete is idempotent
 
         tx.commit()
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
@@ -389,16 +528,42 @@ impl ChunkStore for SqliteStore {
 
 #[async_trait]
 impl EmbeddingStore for SqliteStore {
-    async fn get(&self, chunk_id: &str, model_id: &str) -> Result<Option<EmbeddingRecord>, EmbeddingError> {
+    async fn get(
+        &self,
+        chunk_id: &str,
+        model: &EmbeddingModelRef,
+    ) -> Result<Option<EmbeddingRecord>, EmbeddingError> {
+        let conn = self.open()?;
+        let mut stmt = conn
+            .prepare("select chunk_id, model_id, model_fingerprint, dimensions, vector_blob, content_hash from embedding_vectors where chunk_id = ?1 and model_id = ?2 and model_fingerprint = ?3")
+            .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        let row = stmt
+            .query_row(
+                params![chunk_id, model.model_id, model.model_fingerprint],
+                |row| Self::record_from_row(row),
+            )
+            .optional()
+            .map_err(|e| Self::map_corrupt(e.to_string()))?;
+        Ok(row)
+    }
+
+    async fn get_any(
+        &self,
+        chunk_id: &str,
+        model_id: &str,
+    ) -> Result<Vec<EmbeddingRecord>, EmbeddingError> {
         let conn = self.open()?;
         let mut stmt = conn
             .prepare("select chunk_id, model_id, model_fingerprint, dimensions, vector_blob, content_hash from embedding_vectors where chunk_id = ?1 and model_id = ?2")
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
-        let row = stmt
-            .query_row(params![chunk_id, model_id], |row| Self::record_from_row(row))
-            .optional()
+        let rows = stmt
+            .query_map(params![chunk_id, model_id], |row| Self::record_from_row(row))
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
-        Ok(row)
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| Self::map_corrupt(e.to_string()))?);
+        }
+        Ok(out)
     }
 
     async fn upsert(&self, records: &[EmbeddingRecord]) -> Result<(), EmbeddingError> {
@@ -421,7 +586,7 @@ impl EmbeddingStore for SqliteStore {
             tx.execute(
                 "insert into embedding_vectors (chunk_id, model_id, model_fingerprint, dimensions, vector_blob, content_hash, created_at, updated_at)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-                 on conflict(chunk_id, model_id) do update set model_fingerprint=excluded.model_fingerprint, dimensions=excluded.dimensions, vector_blob=excluded.vector_blob, content_hash=excluded.content_hash, updated_at=excluded.updated_at",
+                 on conflict(chunk_id, model_id, model_fingerprint) do update set dimensions=excluded.dimensions, vector_blob=excluded.vector_blob, content_hash=excluded.content_hash, updated_at=excluded.updated_at",
                 params![
                     rec.chunk_id,
                     rec.model_id,
@@ -456,6 +621,20 @@ impl EmbeddingStore for SqliteStore {
         }
         tx.commit()
             .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete_for_model(
+        &self,
+        chunk_id: &str,
+        model: &EmbeddingModelRef,
+    ) -> Result<(), EmbeddingError> {
+        let conn = self.open()?;
+        conn.execute(
+            "delete from embedding_vectors where chunk_id = ?1 and model_id = ?2 and model_fingerprint = ?3",
+            params![chunk_id, model.model_id, model.model_fingerprint],
+        )
+        .map_err(|e| EmbeddingError::Provider(e.to_string()))?;
         Ok(())
     }
 }
@@ -533,7 +712,6 @@ mod unit_blob {
         assert_eq!(blob.len(), v.len() * 4);
         let out = blob_to_f32_vec(&blob).unwrap();
         assert_eq!(out, v);
-        // little-endian check: first value bytes
         assert_eq!(&blob[0..4], &v[0].to_le_bytes());
     }
 
@@ -546,7 +724,6 @@ mod unit_blob {
     #[test]
     fn blob_rejects_non_finite() {
         let mut blob = f32_vec_to_blob(&[1.0, 2.0]);
-        // overwrite second f32 with NaN
         let nan_bytes = f32::NAN.to_le_bytes();
         blob[4..8].copy_from_slice(&nan_bytes);
         assert!(blob_to_f32_vec(&blob).is_err());

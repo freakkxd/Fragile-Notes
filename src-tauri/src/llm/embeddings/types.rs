@@ -33,8 +33,53 @@ pub enum EmbeddingError {
     VectorTooLarge { max_bytes: usize, actual_bytes: usize },
     ModelMismatch { expected: String, actual: String },
     MaxDimensionsExceeded { max: usize, actual: usize },
+    CorruptVectorBlob(String),
+    Unauthorized(String),
+    NotFound(String),
+    RateLimited(String),
+    Timeout(String),
+    Server { status: u16, message: String },
+    MalformedResponse(String),
+    InvalidResponse(String),
+    UnsupportedCapability(String),
     Provider(String),
     Cancelled,
+}
+
+impl EmbeddingError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::RateLimited(_) | Self::Timeout(_) | Self::Server { .. }
+        )
+    }
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::EmptyModelId => "empty_model_id",
+            Self::EmptyInput => "empty_input",
+            Self::BatchTooLarge { .. } => "batch_too_large",
+            Self::InputTooLarge { .. } => "input_too_large",
+            Self::EmptyResponse => "empty_response",
+            Self::CountMismatch { .. } => "count_mismatch",
+            Self::InvalidDimensions { .. } => "invalid_dimensions",
+            Self::DimensionMismatch { .. } => "dimension_mismatch",
+            Self::NonFiniteValue { .. } => "non_finite",
+            Self::VectorTooLarge { .. } => "vector_too_large",
+            Self::ModelMismatch { .. } => "model_mismatch",
+            Self::MaxDimensionsExceeded { .. } => "max_dimensions_exceeded",
+            Self::CorruptVectorBlob(_) => "corrupt_vector_blob",
+            Self::Unauthorized(_) => "unauthorized",
+            Self::NotFound(_) => "not_found",
+            Self::RateLimited(_) => "rate_limited",
+            Self::Timeout(_) => "timeout",
+            Self::Server { .. } => "server_error",
+            Self::MalformedResponse(_) => "malformed_response",
+            Self::InvalidResponse(_) => "invalid_response",
+            Self::UnsupportedCapability(_) => "unsupported_capability",
+            Self::Provider(_) => "provider_error",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 impl std::fmt::Display for EmbeddingError {
@@ -52,6 +97,15 @@ impl std::fmt::Display for EmbeddingError {
             Self::VectorTooLarge { max_bytes, actual_bytes } => write!(f, "vector too large: max {} bytes actual {}", max_bytes, actual_bytes),
             Self::ModelMismatch { expected, actual } => write!(f, "model mismatch: expected {} actual {}", expected, actual),
             Self::MaxDimensionsExceeded { max, actual } => write!(f, "max dimensions exceeded: max {} actual {}", max, actual),
+            Self::CorruptVectorBlob(reason) => write!(f, "corrupt vector blob: {}", reason),
+            Self::Unauthorized(msg) => write!(f, "unauthorized: {}", msg),
+            Self::NotFound(msg) => write!(f, "not found: {}", msg),
+            Self::RateLimited(msg) => write!(f, "rate limited: {}", msg),
+            Self::Timeout(msg) => write!(f, "timeout: {}", msg),
+            Self::Server { status, message } => write!(f, "server error {}: {}", status, message),
+            Self::MalformedResponse(msg) => write!(f, "malformed response: {}", msg),
+            Self::InvalidResponse(msg) => write!(f, "invalid response: {}", msg),
+            Self::UnsupportedCapability(cap) => write!(f, "unsupported capability: {}", cap),
             Self::Provider(msg) => write!(f, "provider error: {}", msg),
             Self::Cancelled => write!(f, "cancelled"),
         }
