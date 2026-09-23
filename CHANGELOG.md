@@ -32,7 +32,7 @@
 
 ### Known limitations
 > ⚠️ v0.5.8 — foundation-релиз. Некоторые AI-возможности пока являются экспериментальными.
-- Полноценный semantic E2E на реальной embedding-модели не подтверждён.
+- Semantic E2E verified locally in Stage 1 (`nomic-embed-text-v1.5` Q4_K_M, 768 dims, `llama-server --embedding`; see `docs/E2E-Stage1-embeddings-report.md`).
 - Production cloud E2E не подтверждён.
 - Streaming UI отсутствует; OAuth/account login отсутствует; tools и agents отсутствуют.
 - Reranker/cross-encoder отсутствует; sqlite-vec не подключён; query rewriting отсутствует.

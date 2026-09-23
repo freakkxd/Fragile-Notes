@@ -69,7 +69,7 @@ Windows:
 1. Установить или собрать совместимый `llama-server`.
 2. Открыть LLM settings в Fragile Notes и указать runtime executable.
 3. Просканировать GGUF models, выбрать model/task profile.
-4. Для embeddings использовать отдельную embedding-capable модель с поддерживаемым `/v1/embeddings` endpoint.
+4. Для embeddings использовать отдельную embedding-capable модель с поддерживаемым `/v1/embeddings` endpoint (проверено: `nomic-embed-text-v1.5` GGUF + `llama-server --embedding`, 768 dims).
 5. Credentials для cloud providers хранить только через системный keyring.
 
 > Chat model не обязательно является embedding model. Для semantic search нужна embedding-capable модель и поддерживаемый `/v1/embeddings` endpoint.
@@ -78,7 +78,7 @@ Windows:
 
 ### Ограничения
 
-> ⚠️ v0.5.8 — foundation-релиз. Semantic E2E на реальной embedding-модели не подтверждён; production cloud E2E не подтверждён. Отсутствуют: streaming UI, OAuth, tools/agents, reranker, sqlite-vec, query rewriting, background indexing, on-save/scheduled pipelines, parallel runtimes, удаление моделей через UI, vision/audio workflows.
+> ⚠️ v0.5.8 — foundation-релиз. Semantic E2E подтверждён локально (Stage 1: `nomic-embed-text-v1.5` Q4_K_M, 768 dims, `llama-server --embedding` — см. `docs/E2E-Stage1-embeddings-report.md`); production cloud E2E не подтверждён. Отсутствуют: streaming UI, OAuth, tools/agents, reranker, sqlite-vec, query rewriting, background indexing, on-save/scheduled pipelines, parallel runtimes, удаление моделей через UI, vision/audio workflows.
 
 Детали — [CHANGELOG.md](CHANGELOG.md) (раздел `[0.5.8]`) и [GitHub Release](https://github.com/freakkxd/Fragile-Notes/releases/tag/v0.5.8).
 
