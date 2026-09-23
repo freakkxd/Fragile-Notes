@@ -5,7 +5,7 @@
  */
 
 const REPO = 'freakkxd/Fragile-Notes'
-const CURRENT = '0.5.7'
+const CURRENT = '0.5.8'
 
 function compareVersions(a: string, b: string): number {
   const pa = a.replace(/^v/, '').split('.').map(Number)
