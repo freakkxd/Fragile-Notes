@@ -1,56 +1,47 @@
 # Changelog
 
-## Unreleased — v0.5.8 scope: Local AI Embeddings and RAG Foundation (no tag yet)
+## [0.5.8] — 2026-09-23 — Local AI Embeddings and RAG Foundation
 
-> Версия не поднята, tag не создан. Этот раздел фиксирует scope до `chore: bump version to 0.5.8`.
+> RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
 
-**Формулировка релиза:** RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
+### Added
+- `EmbeddingProvider` contract (`EmbeddingRequest`/`EmbeddingResponse`), OpenAI-compatible `/v1/embeddings` provider с timeout/cancellation и normalized errors.
+- Deterministic Markdown chunking: UTF-8-safe offsets, CRLF-normalized content hashes.
+- Incremental chunk persistence: `ChunkDiff` (`added/changed/unchanged/deleted`), vector BLOB persistence в SQLite (`LE f32`, не JSON), composite identity `(chunk_id, model_id, model_fingerprint)`, transaction rollback и foreign-key cleanup.
+- FTS5 lexical search с literal query mode (русский, японский, code-like queries) и explicit degraded fallback.
+- Fingerprint-aware vector search (cosine similarity, deterministic ranking, tie-breaking, candidate/result limits, model/fingerprint isolation).
+- Semantic text-query orchestration и weighted Reciprocal Rank Fusion для hybrid search (deduplication по `chunk_id`, typed fallback reasons, cancellation без скрытого fallback).
+- Bounded RAG context: лимиты по chunks и Unicode scalar values, Unicode-safe truncation, source references (`note_id`, `chunk_id`, path, heading, offsets).
+- Untrusted retrieved content boundary: сериализация через `<retrieved_data>`, prompt assembly с system/user roles, `NoEvidence` policy.
+- Generation settings из `TaskProfile` (`temperature/top_p/max_tokens` → provider-specific parameters: OpenAI-compatible `max_tokens`, Gemini `generationConfig.maxOutputTokens`, Claude `max_tokens`).
+- Identity hardening: стабильный `ModelRecord.id`, сохранение identity при изменении `mtime/size`, состояния `Present/Missing/Changed/Invalid`, безопасный move detection, startup single-flight cleanup.
+- Hugging Face credentials через `token_ref` (`keychain://`), downloader с `.part`, pause/resume, HTTP Range, checksum и atomic install.
 
-**Включено — Identity и runtime hardening:**
-- стабильный `ModelRecord.id`, сохранение identity при изменении `mtime/size`;
-- `Missing/restore` без потери model ID, безопасный move detection;
-- startup single-flight cleanup, корректный повторный запуск runtime;
-- generation settings из `TaskProfile` (`temperature/top_p/max_tokens` → provider-specific payloads).
+### Improved
+- RuntimeManager: health states, exit watcher, process ownership, port allocation, executable resolver, bounded logs, запуск без shell.
+- Model registry с GGUF metadata; корректный повторный запуск runtime.
+- Исправлена семантика note path в hybrid results; production provider resolution для search/commands.
+- CI: внешний timeout для test suite, local lexical RAG E2E на маленькой GGUF chat-модели, mock-покрытие semantic path.
+- Проверки релиза: `cargo check` после clean build, `cargo test` (346 passed, 0 failed), `cargo clippy --all-targets --all-features -- -D warnings`, frontend typecheck/build, `git diff --check`.
 
-**Включено — Embeddings:**
-- `EmbeddingProvider` contract, deterministic Markdown chunking, CRLF-normalized content hashes;
-- incremental chunk persistence (`ChunkDiff added/changed/unchanged/deleted`), vector BLOB persistence (`LE f32`, не JSON);
-- model fingerprint isolation, composite PK `(chunk_id, model_id, model_fingerprint)`;
-- OpenAI-compatible `/v1/embeddings`, timeout/cancellation, normalized provider errors, keyring-only credentials.
+### Security
+- Credentials только через системный keyring; raw secrets не попадают в config, logs, frontend state или export.
+- Local/cloud privacy checks перед network/spawn; `Cloud Deny` блокирует облачные вызовы.
+- Secret redaction tests; API keys не попадают в persistence/logs/errors.
+- Защита от prompt injection в retrieved content (untrusted boundary + verbatim offsets).
 
-**Включено — Search:**
-- FTS5 lexical search, literal query escaping, degraded fallback;
-- fingerprint-aware cosine search, semantic text-query orchestration;
-- weighted RRF hybrid search, stable ranking and deduplication, model/fingerprint filtering.
-
-**Включено — RAG:**
-- bounded retrieval context, Unicode-safe truncation, source references, correct note path/offset handling;
-- untrusted retrieved data boundary, safe prompt assembly, local/cloud privacy checks;
-- `NoEvidence` policy, answer generation через TaskProfile/Gateway, degraded state propagation;
-- cancellation within invocation, provider-specific generation settings.
-
-**Включено — Testing and CI:**
-- 346+ Rust tests, clean build verification, `clippy -D warnings`;
-- frontend typecheck/build, external test timeout, local lexical RAG E2E;
-- mock semantic/provider coverage, secret redaction tests.
-
-**Явно НЕ production-ready (не заявлять готовым):**
-- полноценный semantic E2E на реальной embedding-модели;
-- production cloud E2E;
-- streaming UI;
-- OAuth/account login;
-- tools/agents;
-- reranker/cross-encoder;
-- sqlite-vec;
-- query rewriting;
-- автоматическая индексация;
-- on-save pipelines;
-- scheduled pipelines;
-- background indexing;
-- parallel runtimes;
-- auto-update моделей;
-- удаление моделей через UI;
-- vision/audio workflows.
+### Known limitations
+> ⚠️ v0.5.8 — foundation-релиз. Некоторые AI-возможности пока являются экспериментальными.
+- Полноценный semantic E2E на реальной embedding-модели не подтверждён.
+- Production cloud E2E не подтверждён.
+- Streaming UI отсутствует; OAuth/account login отсутствует; tools и agents отсутствуют.
+- Reranker/cross-encoder отсутствует; sqlite-vec не подключён; query rewriting отсутствует.
+- Background/automatic indexing отсутствует; on-save и scheduled pipelines отсутствуют.
+- Parallel runtimes отсутствуют; auto-update моделей отсутствует; удаление моделей через UI отсутствует.
+- Vision/audio workflows отсутствуют.
+- RAG references генерируются из retrieval, а не из текста ответа модели.
+- Demo `rag_retrieve` остаётся lexical-only совместимым сценарием.
+- Полный cross-call cancellation registry ещё не реализован.
 
 ---
 
