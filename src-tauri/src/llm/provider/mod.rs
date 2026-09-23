@@ -5,6 +5,7 @@
 
 pub mod openai;
 pub mod openai_native;
+pub mod gemini;
 pub mod types;
 
 pub use types::{
@@ -17,6 +18,7 @@ pub use openai::{
     ProviderAdapter, ResponseFormat, SecretStore, build_chat_body, detect_layout, join_api_path,
 };
 pub use openai_native::{OpenAiNativeAdapter, build_native_chat_body};
+pub use gemini::{GeminiNativeAdapter, build_gemini_body, capabilities_from_methods};
 
 #[cfg(test)]
 mod tests;
