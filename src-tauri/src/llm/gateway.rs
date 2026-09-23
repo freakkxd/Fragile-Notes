@@ -38,7 +38,9 @@ pub fn build_chat_http_request(
         ProviderKind::LocalLlamaCpp
         | ProviderKind::Ollama
         | ProviderKind::CustomOpenAI
-        | ProviderKind::OpenAI => {
+        | ProviderKind::OpenAI
+        | ProviderKind::DeepSeek
+        | ProviderKind::OpenRouter => {
             let base = if endpoint.is_empty() {
                 format!("http://127.0.0.1:{}", default_port)
             } else {

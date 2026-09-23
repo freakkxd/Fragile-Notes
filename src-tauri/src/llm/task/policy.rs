@@ -1,6 +1,6 @@
 use crate::llm::{Capability, Privacy, ProviderKind};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProviderScope { LocalManaged, LocalExternal, Cloud }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +25,11 @@ pub fn scope_of(kind: &ProviderKind, endpoint: &str) -> ProviderScope {
                 ProviderScope::Cloud
             }
         },
-        ProviderKind::OpenAI | ProviderKind::Gemini | ProviderKind::Claude => ProviderScope::Cloud,
+        ProviderKind::OpenAI
+        | ProviderKind::Gemini
+        | ProviderKind::Claude
+        | ProviderKind::DeepSeek
+        | ProviderKind::OpenRouter => ProviderScope::Cloud,
     }
 }
 

@@ -14,6 +14,7 @@ pub mod models;
 pub mod download;
 pub mod embeddings;
 pub mod gateway;
+pub mod provider;
 #[cfg(test)]
 mod e2e_manual;
 
@@ -67,9 +68,9 @@ pub enum Privacy { LocalOnly, CloudAllowed }
 pub enum CloudPolicy { Deny, AskOnce, Allow }
 
 // ---------- provider / model / runtime / task ----------
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderKind { LocalLlamaCpp, Ollama, OpenAI, Gemini, Claude, CustomOpenAI }
+pub enum ProviderKind { LocalLlamaCpp, Ollama, OpenAI, Gemini, Claude, CustomOpenAI, DeepSeek, OpenRouter }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod { ApiKey, OAuth, None }
@@ -359,6 +360,8 @@ fn migrate_to_v2(old: serde_json::Value) -> Result<serde_json::Value, String> {
                 "open_ai" => ProviderKind::OpenAI,
                 "gemini" => ProviderKind::Gemini,
                 "claude" => ProviderKind::Claude,
+                "deep_seek" => ProviderKind::DeepSeek,
+                "open_router" => ProviderKind::OpenRouter,
                 _ => ProviderKind::CustomOpenAI,
             };
             let enabled = pv.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
