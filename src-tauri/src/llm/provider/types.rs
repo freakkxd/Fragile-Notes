@@ -135,9 +135,13 @@ fn validate_endpoint_for_scope(scope: &ProviderScope, endpoint: &str) -> Result<
     }
     match scope {
         ProviderScope::Cloud => {
-            if !endpoint.starts_with("https://") {
+            // Credentials must not travel plaintext to remote hosts.
+            // Loopback http is allowed for local test doubles (mock servers).
+            if !(endpoint.starts_with("https://")
+                || (endpoint.starts_with("http://") && is_loopback(endpoint)))
+            {
                 return Err(ProviderError::InvalidConfig(
-                    "cloud provider requires https endpoint".to_string(),
+                    "cloud provider requires https endpoint (loopback http only for tests)".to_string(),
                 ));
             }
         }

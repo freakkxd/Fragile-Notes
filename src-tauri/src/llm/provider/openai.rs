@@ -141,7 +141,7 @@ pub enum ChatRole {
 }
 
 impl ChatRole {
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::System => "system",
             Self::User => "user",
@@ -425,6 +425,46 @@ fn map_reqwest_err(e: reqwest::Error) -> ProviderError {
         return ProviderError::Cancelled;
     }
     ProviderError::Network(msg)
+}
+
+// Shared with the native adapter (same normalization, one definition).
+pub(crate) fn map_http_status_for(status: u16, body: &str) -> ProviderError {
+    map_http_status(status, body)
+}
+
+pub(crate) fn map_reqwest_err_for(e: reqwest::Error) -> ProviderError {
+    map_reqwest_err(e)
+}
+
+/// Reject oversized success bodies before parsing.
+pub(crate) fn truncate_capped(bytes: &[u8]) -> Result<&[u8], ProviderError> {
+    if bytes.len() > ERROR_BODY_LIMIT * 128 {
+        return Err(ProviderError::MalformedResponse(
+            "response too large".to_string(),
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Race a request future against cancellation and timeout.
+/// No auto-retry — only classification via `retryable`.
+pub(crate) async fn race_with<T, F, Fut>(
+    client: reqwest::Client,
+    timeout: Duration,
+    cancel: CancellationToken,
+    f: F,
+) -> Result<T, ProviderError>
+where
+    F: FnOnce(reqwest::Client) -> Fut,
+    Fut: std::future::Future<Output = Result<T, ProviderError>>,
+{
+    tokio::select! {
+        _ = cancel.cancelled() => Err(ProviderError::Cancelled),
+        res = tokio::time::timeout(timeout, f(client)) => match res {
+            Ok(r) => r,
+            Err(_) => Err(ProviderError::Timeout(format!("timeout after {:?}", timeout))),
+        },
+    }
 }
 
 #[async_trait]
