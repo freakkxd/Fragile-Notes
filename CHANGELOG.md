@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased — v0.5.8 scope: Local AI Embeddings and RAG Foundation (no tag yet)
+
+> Версия не поднята, tag не создан. Этот раздел фиксирует scope до `chore: bump version to 0.5.8`.
+
+**Формулировка релиза:** RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
+
+**Включено — Identity и runtime hardening:**
+- стабильный `ModelRecord.id`, сохранение identity при изменении `mtime/size`;
+- `Missing/restore` без потери model ID, безопасный move detection;
+- startup single-flight cleanup, корректный повторный запуск runtime;
+- generation settings из `TaskProfile` (`temperature/top_p/max_tokens` → provider-specific payloads).
+
+**Включено — Embeddings:**
+- `EmbeddingProvider` contract, deterministic Markdown chunking, CRLF-normalized content hashes;
+- incremental chunk persistence (`ChunkDiff added/changed/unchanged/deleted`), vector BLOB persistence (`LE f32`, не JSON);
+- model fingerprint isolation, composite PK `(chunk_id, model_id, model_fingerprint)`;
+- OpenAI-compatible `/v1/embeddings`, timeout/cancellation, normalized provider errors, keyring-only credentials.
+
+**Включено — Search:**
+- FTS5 lexical search, literal query escaping, degraded fallback;
+- fingerprint-aware cosine search, semantic text-query orchestration;
+- weighted RRF hybrid search, stable ranking and deduplication, model/fingerprint filtering.
+
+**Включено — RAG:**
+- bounded retrieval context, Unicode-safe truncation, source references, correct note path/offset handling;
+- untrusted retrieved data boundary, safe prompt assembly, local/cloud privacy checks;
+- `NoEvidence` policy, answer generation через TaskProfile/Gateway, degraded state propagation;
+- cancellation within invocation, provider-specific generation settings.
+
+**Включено — Testing and CI:**
+- 346+ Rust tests, clean build verification, `clippy -D warnings`;
+- frontend typecheck/build, external test timeout, local lexical RAG E2E;
+- mock semantic/provider coverage, secret redaction tests.
+
+**Явно НЕ production-ready (не заявлять готовым):**
+- полноценный semantic E2E на реальной embedding-модели;
+- production cloud E2E;
+- streaming UI;
+- OAuth/account login;
+- tools/agents;
+- reranker/cross-encoder;
+- sqlite-vec;
+- query rewriting;
+- автоматическая индексация;
+- on-save pipelines;
+- scheduled pipelines;
+- background indexing;
+- parallel runtimes;
+- auto-update моделей;
+- удаление моделей через UI;
+- vision/audio workflows.
+
+---
+
 ## v0.5.7 — P1 local model lifecycle — E2E gate passed (2026-09-22)
 
 > **Почему отдельная версия от v0.5.6:** `v0.5.6` дал Foundation P0 (schema v2, keyring, Gateway, RuntimeManager), но P1.1–P1.6 (Runtime Core, Health+Logs, Resolver, TaskExecutor, Registry, Downloader) были в development-ветке без реального запуска. `v0.5.7` — первый проверенный локальный цикл с реальной GGUF. Не `v0.6.0` — схема `x.x.x+1`: `0.5.6 → 0.5.7 → 0.5.8`.

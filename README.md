@@ -36,6 +36,17 @@ cargo tauri dev
 - `v0.5.5` — LLM Hub прототип
 - `v0.5.6` — **Foundation P0: schema v2 + keyring + Gateway + RuntimeManager**
 - `v0.5.7` — **P1 local model lifecycle: scan → registry → ResolvedModel → RuntimeManager → Ready → Gateway** (текущий, E2E пройден)
+- `v0.5.8` — **Local AI Embeddings and RAG Foundation** (planned, tag отсутствует)
+
+## Unreleased — v0.5.8 scope (без tag)
+
+RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
+
+Включено: `EmbeddingProvider` contract, deterministic Markdown chunking, incremental chunk/vector persistence (`LE f32 BLOB`, fingerprint isolation), FTS5 lexical fallback, fingerprint-aware cosine search, RRF hybrid, bounded RAG retrieval с `NoEvidence` policy, generation settings из `TaskProfile`.
+
+Явно НЕ production-ready: полноценный semantic E2E на реальной embedding-модели, production cloud E2E, streaming UI, OAuth/account login, tools/agents, reranker, sqlite-vec, query rewriting, автоматическая индексация, on-save/scheduled pipelines, background indexing, parallel runtimes, auto-update моделей, удаление моделей через UI, vision/audio workflows.
+
+Детали — `CHANGELOG.md` (раздел `Unreleased`).
 
 ## Лицензия
 MIT — `LICENSE`
