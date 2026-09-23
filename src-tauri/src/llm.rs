@@ -632,14 +632,54 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
 
 // ---------- gateway + privacy ----------
 pub struct ChatRequest { pub provider_id: String, pub model_ref: String, pub messages: Vec<serde_json::Value>, pub task_profile_id: Option<String> }
+
+/// Effective chat generation settings. Source of truth is ALWAYS the
+/// `TaskProfile.generation` map — `ChatRequest` carries NO generation
+/// fields, so frontend raw input can never override the profile.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatGeneration {
+    pub temperature: f32,
+    pub top_p: f32,
+    pub max_tokens: u32,
+}
+
+impl Default for ChatGeneration {
+    fn default() -> Self {
+        Self { temperature: 0.7, top_p: 0.9, max_tokens: 2048 }
+    }
+}
+
+/// Pure resolver: profile map -> effective settings.
+/// Invalid/absent values fall back to defaults (never fail the call).
+pub fn resolve_chat_generation(generation: &HashMap<String, String>) -> ChatGeneration {
+    let mut out = ChatGeneration::default();
+    if let Some(t) = generation.get("temperature").and_then(|s| s.parse::<f32>().ok()) {
+        if t.is_finite() && (0.0..=2.0).contains(&t) {
+            out.temperature = t;
+        }
+    }
+    if let Some(p) = generation.get("top_p").and_then(|s| s.parse::<f32>().ok()) {
+        if p.is_finite() && (0.0..=1.0).contains(&p) {
+            out.top_p = p;
+        }
+    }
+    if let Some(n) = generation.get("max_tokens").and_then(|s| s.parse::<u32>().ok()) {
+        if n > 0 && n <= 1_000_000 {
+            out.max_tokens = n;
+        }
+    }
+    out
+}
 pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
     let cfg = load_config_inner();
-    // privacy guard
+    // privacy guard + profile generation (single lookup)
+    let mut gen = ChatGeneration::default();
     if let Some(tpid) = &req.task_profile_id {
         if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
             let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
             check_privacy(&tp.privacy, &prov.kind)?;
             if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
+            gen = resolve_chat_generation(&tp.generation);
         }
     }
     // route via provider + model
@@ -678,18 +718,18 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
                 let g_role = if role=="assistant" {"model"} else {"user"};
                 serde_json::json!({"role": g_role, "parts":[{"text": text}]})
             }).collect();
-            serde_json::json!({"contents": parts, "generationConfig": {"temperature": 0.7, "topP": 0.9}})
+            serde_json::json!({"contents": parts, "generationConfig": {"temperature": gen.temperature, "topP": gen.top_p, "maxOutputTokens": gen.max_tokens}})
         }
         ProviderKind::Claude => {
             let sys = req.messages.iter().find(|m| m.get("role").and_then(|r| r.as_str())==Some("system")).and_then(|m| m.get("content").and_then(|c| c.as_str())).unwrap_or("");
             let msgs: Vec<serde_json::Value> = req.messages.iter().filter(|m| m.get("role").and_then(|r| r.as_str())!=Some("system")).map(|m| serde_json::json!({"role": m.get("role").unwrap_or(&serde_json::Value::String("user".to_string())), "content": m.get("content").unwrap_or(&serde_json::Value::String("".to_string()))})).collect();
-            let mut j = serde_json::json!({"model": if !req.model_ref.is_empty() { req.model_ref.clone()} else { prov.default_model.clone()}, "max_tokens":2048, "messages": msgs});
+            let mut j = serde_json::json!({"model": if !req.model_ref.is_empty() { req.model_ref.clone()} else { prov.default_model.clone()}, "max_tokens": gen.max_tokens, "temperature": gen.temperature, "messages": msgs});
             if !sys.is_empty() { j["system"] = serde_json::Value::String(sys.to_string()); }
             j
         }
         _ => {
             let mdl = if !req.model_ref.is_empty() { req.model_ref.clone()} else if !prov.default_model.is_empty() { prov.default_model.clone()} else {"local".to_string()};
-            serde_json::json!({"model": mdl, "messages": req.messages, "temperature": 0.7, "stream": false})
+            serde_json::json!({"model": mdl, "messages": req.messages, "temperature": gen.temperature, "top_p": gen.top_p, "max_tokens": gen.max_tokens, "stream": false})
         }
     };
     let mut r = client.post(&url).json(&body);
@@ -1159,6 +1199,54 @@ mod tests {
         assert!(empty.is_ok() || empty.is_err()); // just ensure no panic
         let _ = delete_keyring("test-empty");
         let _ = delete_keyring("non-existent-provider-xyz-123");
+    }
+
+    #[test]
+    fn test_chat_generation_defaults_without_profile() {
+        let gen = resolve_chat_generation(&HashMap::new());
+        assert_eq!(gen, ChatGeneration::default());
+        assert_eq!(gen.temperature, 0.7);
+        assert_eq!(gen.top_p, 0.9);
+        assert_eq!(gen.max_tokens, 2048);
+    }
+
+    #[test]
+    fn test_chat_generation_from_profile() {
+        let mut m = HashMap::new();
+        m.insert("temperature".to_string(), "0.2".to_string());
+        m.insert("top_p".to_string(), "0.5".to_string());
+        m.insert("max_tokens".to_string(), "512".to_string());
+        let gen = resolve_chat_generation(&m);
+        assert_eq!(gen.temperature, 0.2);
+        assert_eq!(gen.top_p, 0.5);
+        assert_eq!(gen.max_tokens, 512);
+    }
+
+    #[test]
+    fn test_chat_generation_invalid_ignored() {
+        // Invalid values fall back to defaults — never fail the call,
+        // never accept frontend injection (ChatRequest has no such fields).
+        for (k, v) in [
+            ("temperature", "banana"),
+            ("temperature", "NaN"),
+            ("temperature", "5.0"),
+            ("temperature", "-1.0"),
+            ("top_p", "2.0"),
+            ("top_p", "oops"),
+            ("max_tokens", "0"),
+            ("max_tokens", "-10"),
+            ("max_tokens", "99999999999"),
+        ] {
+            let mut m = HashMap::new();
+            m.insert(k.to_string(), v.to_string());
+            let gen = resolve_chat_generation(&m);
+            let d = ChatGeneration::default();
+            match k {
+                "temperature" => assert_eq!(gen.temperature, d.temperature, "case {k}={v}"),
+                "top_p" => assert_eq!(gen.top_p, d.top_p, "case {k}={v}"),
+                _ => assert_eq!(gen.max_tokens, d.max_tokens, "case {k}={v}"),
+            }
+        }
     }
 }
 
