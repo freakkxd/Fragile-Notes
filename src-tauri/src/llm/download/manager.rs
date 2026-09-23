@@ -69,6 +69,22 @@ impl DownloadManager {
         Ok(dest)
     }
 
+    /// True if `flag` is still the current worker for `id`.
+    /// A stale worker (superseded by pause→resume) must not touch shared state.
+    /// `pub(crate)` for the Stage 1 regression test.
+    pub(crate) fn is_current_worker(
+        cancels: &Arc<Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
+        id: Uuid,
+        flag: &Arc<AtomicBool>,
+    ) -> bool {
+        cancels
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|f| Arc::ptr_eq(f, flag))
+            .unwrap_or(false)
+    }
+
     pub fn start(&self, source: DownloadSource) -> Result<Uuid, String> {
         // Harden: reject raw HF token, only allow secret ref
         source.validate_token_ref()?;
@@ -107,6 +123,7 @@ impl DownloadManager {
             cancels.insert(id, Arc::clone(&cancel_flag));
         }
         let state_path = self.state_path.clone();
+        let worker_flag = Arc::clone(&cancel_flag);
         tokio::spawn(async move {
             // Update status to Downloading
             {
@@ -118,7 +135,10 @@ impl DownloadManager {
                 let jobs = jobs_clone.lock().unwrap();
                 jobs.get(&id).cloned().unwrap()
             };
+            let progress_flag = Arc::clone(&worker_flag);
             let res = downloader.download(&mut job_clone, cancel_flag.clone(), |ev| {
+                // Stale worker (superseded by resume) must not touch shared state.
+                if !Self::is_current_worker(&cancels_clone, id, &progress_flag) { return; }
                 // Throttled progress already in downloader, here we just update job
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
@@ -130,6 +150,11 @@ impl DownloadManager {
                     j.updated_at = Utc::now();
                 }
             }).await;
+            // Stale worker: a newer task owns this job now — do not clobber state,
+            // do not persist, and do not remove the newer task's cancel flag.
+            if !Self::is_current_worker(&cancels_clone, id, &worker_flag) {
+                return;
+            }
             {
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
@@ -140,6 +165,9 @@ impl DownloadManager {
                     } else {
                     match res {
                         Ok(_) => {
+                            // Sync exact byte count: throttled progress events lag
+                            // the stream tail, job_clone holds the true total.
+                            j.bytes_downloaded = job_clone.bytes_downloaded;
                             j.status = DownloadStatus::Verifying;
                             j.updated_at = Utc::now();
                             // Verify and install
@@ -216,13 +244,17 @@ impl DownloadManager {
         let jobs_clone = Arc::clone(&self.jobs);
         let cancels_clone = Arc::clone(&self.cancels);
         let state_path = self.state_path.clone();
+        let worker_flag = Arc::clone(&cancel_flag);
         tokio::spawn(async move {
             let downloader = Downloader::new().unwrap();
             let mut job_clone = {
                 let jobs = jobs_clone.lock().unwrap();
                 jobs.get(&id).cloned().unwrap()
             };
+            let progress_flag = Arc::clone(&worker_flag);
             let res = downloader.download(&mut job_clone, cancel_flag.clone(), |ev| {
+                // Stale worker (superseded by a newer resume) must not touch shared state.
+                if !Self::is_current_worker(&cancels_clone, id, &progress_flag) { return; }
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
                     if j.status == DownloadStatus::Paused || j.status == DownloadStatus::Cancelled { return; }
@@ -231,6 +263,11 @@ impl DownloadManager {
                     j.updated_at = Utc::now();
                 }
             }).await;
+            // Stale worker: a newer task owns this job now — do not clobber state,
+            // do not persist, and do not remove the newer task's cancel flag.
+            if !Self::is_current_worker(&cancels_clone, id, &worker_flag) {
+                return;
+            }
             {
                 let mut jobs = jobs_clone.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id) {
@@ -238,7 +275,7 @@ impl DownloadManager {
                         j.updated_at = Utc::now();
                     } else {
                     match res {
-                        Ok(_) => { j.status = DownloadStatus::Verifying; let install_res = install_downloaded(&*j, j.sha256.clone()); match install_res {
+                        Ok(_) => { j.bytes_downloaded = job_clone.bytes_downloaded; j.status = DownloadStatus::Verifying; let install_res = install_downloaded(&*j, j.sha256.clone()); match install_res {
                             Ok(p) => { j.status = DownloadStatus::Completed; j.destination = p; },
                             Err(e) => { j.status = DownloadStatus::Failed; j.error = Some(DownloadError{ code: "install_failed".to_string(), message: e, retryable: false}); }
                         }},

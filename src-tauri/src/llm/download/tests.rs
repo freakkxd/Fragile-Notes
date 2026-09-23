@@ -56,3 +56,36 @@ fn completed_file_enters_registry_only_after_parse() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Stage 1 regression: a worker superseded by pause→resume must be stale,
+/// so its late exit cannot clobber the resumed job's shared state.
+/// Pins `is_current_worker` semantics relied upon by start()/resume() guards.
+#[test]
+fn stale_worker_is_not_current_after_resume() {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, atomic::AtomicBool};
+    use uuid::Uuid;
+
+    let cancels: Arc<Mutex<HashMap<Uuid, Arc<AtomicBool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let id = Uuid::new_v4();
+
+    // First worker (from start()): current while registered.
+    let first = Arc::new(AtomicBool::new(false));
+    cancels.lock().unwrap().insert(id, Arc::clone(&first));
+    assert!(DownloadManager::is_current_worker(&cancels, id, &first));
+
+    // Resume registers a new flag: first worker is now stale.
+    let second = Arc::new(AtomicBool::new(false));
+    cancels.lock().unwrap().insert(id, Arc::clone(&second));
+    assert!(!DownloadManager::is_current_worker(&cancels, id, &first));
+    assert!(DownloadManager::is_current_worker(&cancels, id, &second));
+
+    // Unknown job id is never current.
+    assert!(!DownloadManager::is_current_worker(&cancels, Uuid::new_v4(), &second));
+
+    // After the entry is gone, nobody is current (no clobber, no flag removal).
+    cancels.lock().unwrap().remove(&id);
+    assert!(!DownloadManager::is_current_worker(&cancels, id, &first));
+    assert!(!DownloadManager::is_current_worker(&cancels, id, &second));
+}
