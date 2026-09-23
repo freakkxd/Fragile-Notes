@@ -48,11 +48,17 @@ pub fn detect_layout(base: &str) -> EndpointLayout {
 }
 
 /// Join `base` with an operation path (`/v1/chat/completions`,
-/// `/v1/embeddings`, `/v1/models`).
+/// `/v1/embeddings`, `/v1/models`, `/v1beta/...`).
 ///
-/// * `OpenAiV1` bases already end with `/v1` — the operation's `/v1` prefix
-///   is replaced, never doubled (legacy gateway doubled it; frozen there).
-/// * `Root`/`Custom` bases get the full operation path appended.
+/// A version prefix shared by base and operation (`/v1`, `/v1beta`) is
+/// replaced, never doubled (legacy gateway doubled it; frozen there).
+/// Longest prefix wins: `/v1beta` is checked before `/v1`, since the former
+/// starts with the latter. All other bases get the full operation path.
+///
+/// Intentional: a base ending in one version with an operation from another
+/// (e.g. base `.../v1` + op `/v1beta/...`) is appended verbatim. Such mixes
+/// never occur in adapter configurations — each adapter only ever joins its
+/// own operation paths — so no silent normalization is applied there.
 pub fn join_api_path(base: &str, op: &str) -> Result<String, ProviderError> {
     if base.trim().is_empty() {
         return Err(ProviderError::InvalidConfig("base endpoint is empty".to_string()));
@@ -63,9 +69,12 @@ pub fn join_api_path(base: &str, op: &str) -> Result<String, ProviderError> {
         ));
     }
     let b = base.trim_end_matches('/');
-    let path = match detect_layout(b) {
-        EndpointLayout::OpenAiV1 => op.strip_prefix("/v1").unwrap_or(op),
-        EndpointLayout::Root | EndpointLayout::Custom => op,
+    let path = if op.starts_with("/v1beta") && b.ends_with("/v1beta") {
+        op.strip_prefix("/v1beta").unwrap_or(op)
+    } else if op.starts_with("/v1/") && b.ends_with("/v1") {
+        op.strip_prefix("/v1").unwrap_or(op)
+    } else {
+        op
     };
     Ok(format!("{}{}", b, path))
 }

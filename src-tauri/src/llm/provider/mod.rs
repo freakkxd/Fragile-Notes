@@ -18,7 +18,7 @@ pub use openai::{
     ProviderAdapter, ResponseFormat, SecretStore, build_chat_body, detect_layout, join_api_path,
 };
 pub use openai_native::{OpenAiNativeAdapter, build_native_chat_body};
-pub use gemini::{GeminiNativeAdapter, build_gemini_body, capabilities_from_methods};
+pub use gemini::{GeminiEmbedBridge, GeminiEmbedParams, GeminiNativeAdapter, GeminiTaskType, build_gemini_body, capabilities_from_methods};
 
 #[cfg(test)]
 mod tests;
