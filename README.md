@@ -1,4 +1,4 @@
-# Fragile Notes — v0.5.7 (P1 local model lifecycle)
+# Fragile Notes — v0.5.8 (Local AI Embeddings and RAG Foundation)
 
 > **Подпись v0.5.6 — почему отделили эту версию:**
 > - **Сделано в 0.5.5:** `LLM Hub` прототип с `base64` ключами, `extra_args String`, `blocking reqwest`, `single active_model`, `fake download`.
@@ -10,7 +10,7 @@
 > - **Почему 0.5.7 отдельно:** ручной E2E с реальной GGUF `Qwen2-0.5B` (397M) выявил 3 бага: `spawn --model` как forbidden, `single-flight Ready` hang, `executor` возвращал `profile_id` вместо `runtime_id` и `Missing`/`Changed` для >50MB. Исправлено и покрыто 60 тестами.
 > - **Цель 0.5.7:** зафиксировать проверенный локальный цикл `scan → registry → ResolvedModel → RuntimeManager --model → Ready → Gateway → Stop` как релиз, без embeddings.
 
-**Obsidian-like vault.** `Task Manager v2` + `Tauri` `C++` + `LLM Hub v2` + `P1 E2E готов (v0.5.7)`.
+**Obsidian-like vault.** `Task Manager v2` + `Tauri` `C++` + `LLM Hub v2` + `local AI search и RAG foundation (v0.5.8)`.
 
 ## Быстрый старт
 ```bash
@@ -35,18 +35,52 @@ cargo tauri dev
 - `v0.5.4` — оптимизация RAM `lazy + reuse`
 - `v0.5.5` — LLM Hub прототип
 - `v0.5.6` — **Foundation P0: schema v2 + keyring + Gateway + RuntimeManager**
-- `v0.5.7` — **P1 local model lifecycle: scan → registry → ResolvedModel → RuntimeManager → Ready → Gateway** (текущий, E2E пройден)
-- `v0.5.8` — **Local AI Embeddings and RAG Foundation** (planned, tag отсутствует)
+- `v0.5.7` — **P1 local model lifecycle: scan → registry → ResolvedModel → RuntimeManager → Ready → Gateway** (E2E пройден)
+- `v0.5.8` — **Local AI Embeddings and RAG Foundation** (текущий релиз)
 
-## Unreleased — v0.5.8 scope (без tag)
+## Latest release
 
-RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
+[Fragile Notes v0.5.8](https://github.com/freakkxd/Fragile-Notes/releases/tag/v0.5.8)
 
-Включено: `EmbeddingProvider` contract, deterministic Markdown chunking, incremental chunk/vector persistence (`LE f32 BLOB`, fingerprint isolation), FTS5 lexical fallback, fingerprint-aware cosine search, RRF hybrid, bounded RAG retrieval с `NoEvidence` policy, generation settings из `TaskProfile`.
+v0.5.8 — Local AI Embeddings and RAG Foundation: управляемый lifecycle локальных моделей, embeddings pipeline, lexical/semantic/hybrid search и безопасный bounded RAG context. RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
 
-Явно НЕ production-ready: полноценный semantic E2E на реальной embedding-модели, production cloud E2E, streaming UI, OAuth/account login, tools/agents, reranker, sqlite-vec, query rewriting, автоматическая индексация, on-save/scheduled pipelines, background indexing, parallel runtimes, auto-update моделей, удаление моделей через UI, vision/audio workflows.
+### Установка
 
-Детали — `CHANGELOG.md` (раздел `Unreleased`).
+Linux (AppImage):
+
+```bash
+chmod +x fragile-notes_0.5.8_amd64.AppImage
+./fragile-notes_0.5.8_amd64.AppImage
+```
+
+- [Download AppImage](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.AppImage)
+- [Download .deb](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.deb) (`sudo apt install ./fragile-notes_0.5.8_amd64.deb`)
+
+Windows:
+
+- [Fragile.Notes_0.5.8_x64-setup.exe](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64-setup.exe)
+- [Fragile.Notes_0.5.8_x64_en-US.msi](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_en-US.msi)
+- [Fragile.Notes_0.5.8_x64_ru-RU.msi](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_ru-RU.msi)
+
+Платформы: Linux x86_64, Windows x64. macOS и ARM builds отсутствуют. `updater.json` в assets — только update metadata, не installer.
+
+### Локальный AI setup
+
+1. Установить или собрать совместимый `llama-server`.
+2. Открыть LLM settings в Fragile Notes и указать runtime executable.
+3. Просканировать GGUF models, выбрать model/task profile.
+4. Для embeddings использовать отдельную embedding-capable модель с поддерживаемым `/v1/embeddings` endpoint.
+5. Credentials для cloud providers хранить только через системный keyring.
+
+> Chat model не обязательно является embedding model. Для semantic search нужна embedding-capable модель и поддерживаемый `/v1/embeddings` endpoint.
+
+> 🔒 Privacy: API keys хранятся только в системном keyring и никогда не попадают в config, logs, frontend state или export. Проверяйте `TaskProfile` privacy перед облачными вызовами.
+
+### Ограничения
+
+> ⚠️ v0.5.8 — foundation-релиз. Semantic E2E на реальной embedding-модели не подтверждён; production cloud E2E не подтверждён. Отсутствуют: streaming UI, OAuth, tools/agents, reranker, sqlite-vec, query rewriting, background indexing, on-save/scheduled pipelines, parallel runtimes, удаление моделей через UI, vision/audio workflows.
+
+Детали — [CHANGELOG.md](CHANGELOG.md) (раздел `[0.5.8]`) и [GitHub Release](https://github.com/freakkxd/Fragile-Notes/releases/tag/v0.5.8).
 
 ## Лицензия
 MIT — `LICENSE`
