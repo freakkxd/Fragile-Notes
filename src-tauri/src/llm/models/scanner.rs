@@ -59,19 +59,22 @@ impl Scanner {
         // Try GGUF header, fallback to filename for placeholder/dev files.
         // Installer still requires valid GGUF before atomic rename, so corrupted final never becomes Present via installer.
         // This fallback keeps existing tests (filename_fallback with "not gguf" content) passing.
-        let metadata = match gguf::parse_file(path) {
+        let mut metadata = match gguf::parse_file(path) {
             Ok(meta) => meta,
             Err(_) => {
                 let mut meta = super::types::ModelMetadata::default();
-                let quant = {
-                    let re = regex::Regex::new(r"(?i)(Q[0-9]_[A-Za-z0-9_]+|f16|f32|bf16|q8_0)").unwrap();
-                    re.find(&filename).map(|m| m.as_str().to_uppercase()).unwrap_or_else(|| "unknown".to_string())
-                };
-                meta.quantization = Some(quant);
                 meta.metadata_source = super::types::MetadataSource::Filename;
                 meta
             }
         };
+        // Quantization is filename-derived, not a header field: fill it
+        // whenever parsing left it empty (Stage 1: parsed nomic-bert had None).
+        if metadata.quantization.is_none() {
+            let re = regex::Regex::new(r"(?i)(Q[0-9]_[A-Za-z0-9_]+|f16|f32|bf16|q8_0)").unwrap();
+            if let Some(m) = re.find(&filename) {
+                metadata.quantization = Some(m.as_str().to_uppercase());
+            }
+        }
         let now = chrono::Utc::now();
         let identity_status = if identity.sha256.is_some() { super::types::IdentityStatus::Verified } else { super::types::IdentityStatus::Unchecked };
         Ok(ModelRecord{
