@@ -251,6 +251,10 @@ pub enum ProviderError {
     Network(String),
     InvalidConfig(String),
     DuplicateId(String),
+    InvalidRequest(String),
+    MalformedResponse(String),
+    CredentialsMissing(String),
+    KeyringUnavailable(String),
     Cancelled,
 }
 
@@ -273,6 +277,10 @@ impl ProviderError {
             Self::Network(_) => "network",
             Self::InvalidConfig(_) => "invalid_config",
             Self::DuplicateId(_) => "duplicate_id",
+            Self::InvalidRequest(_) => "invalid_request",
+            Self::MalformedResponse(_) => "malformed_response",
+            Self::CredentialsMissing(_) => "credentials_missing",
+            Self::KeyringUnavailable(_) => "keyring_unavailable",
             Self::Cancelled => "cancelled",
         }
     }
@@ -290,6 +298,10 @@ impl std::fmt::Display for ProviderError {
             Self::Network(m) => write!(f, "network: {}", m),
             Self::InvalidConfig(m) => write!(f, "invalid config: {}", m),
             Self::DuplicateId(id) => write!(f, "duplicate id: {}", id),
+            Self::InvalidRequest(m) => write!(f, "invalid request: {}", m),
+            Self::MalformedResponse(m) => write!(f, "malformed response: {}", m),
+            Self::CredentialsMissing(m) => write!(f, "credentials missing: {}", m),
+            Self::KeyringUnavailable(m) => write!(f, "keyring unavailable: {}", m),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }

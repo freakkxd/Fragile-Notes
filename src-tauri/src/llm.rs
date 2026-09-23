@@ -59,7 +59,7 @@ static RE_GGUF_QUANT: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(Q[0-9]_[A-Za-
 pub enum Capability { Chat, Streaming, Embeddings, Vision, AudioInput, Tools, StructuredOutput }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum CapabilitySource { StaticProvider, ModelMetadata, Probed, UserOverride }
+pub enum CapabilitySource { StaticProvider, ModelMetadata, Probed, UserOverride, Manual }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Privacy { LocalOnly, CloudAllowed }
