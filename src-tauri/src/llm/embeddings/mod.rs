@@ -13,6 +13,8 @@ mod tests_persistence;
 mod tests_provider;
 #[cfg(test)]
 mod tests_wiring;
+#[cfg(test)]
+mod tests_smoke;
 
 pub use types::{
     ChunkDiff, EmbeddingError, EmbeddingLimits, EmbeddingModelRef, EmbeddingRecord, EmbeddingRequest, EmbeddingResponse, IndexRun, IndexStatus, NoteChunk,
