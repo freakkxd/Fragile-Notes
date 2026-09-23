@@ -13,6 +13,7 @@ pub mod task;
 pub mod models;
 pub mod download;
 pub mod embeddings;
+pub mod gateway;
 #[cfg(test)]
 mod e2e_manual;
 
@@ -687,51 +688,18 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
     let secret = if prov.auth.as_ref().map(|a| a.method==AuthMethod::ApiKey).unwrap_or(false) { get_keyring(&prov.id).unwrap_or_default() } else { String::new() };
     // Use async reqwest for gateway (P0)
     let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
-    let (url, headers) = match prov.kind {
-        ProviderKind::LocalLlamaCpp | ProviderKind::Ollama | ProviderKind::CustomOpenAI | ProviderKind::OpenAI => {
-            let base = if prov.endpoint.is_empty() { format!("http://127.0.0.1:{}", cfg.local.port) } else { prov.endpoint.clone() };
-            let u = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
-            let mut h = std::collections::HashMap::new();
-            if !secret.is_empty() { h.insert("Authorization".to_string(), format!("Bearer {}", secret)); }
-            (u, h)
-        }
-        ProviderKind::Gemini => {
-            let base = if prov.endpoint.is_empty() { "https://generativelanguage.googleapis.com".to_string() } else { prov.endpoint.clone() };
-            let mdl = if !req.model_ref.is_empty() { req.model_ref.clone() } else { prov.default_model.clone() };
-            let u = format!("{}/v1beta/models/{}:generateContent?key={}", base.trim_end_matches('/'), mdl, secret);
-            (u, std::collections::HashMap::new())
-        }
-        ProviderKind::Claude => {
-            let base = if prov.endpoint.is_empty() { "https://api.anthropic.com".to_string() } else { prov.endpoint.clone() };
-            let u = format!("{}/v1/messages", base.trim_end_matches('/'));
-            let mut h = std::collections::HashMap::new();
-            if !secret.is_empty() { h.insert("x-api-key".to_string(), secret.clone()); }
-            h.insert("anthropic-version".to_string(), "2023-06-01".to_string());
-            (u, h)
-        }
-    };
-    let body = match prov.kind {
-        ProviderKind::Gemini => {
-            let parts: Vec<serde_json::Value> = req.messages.iter().map(|m| {
-                let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-                let text = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                let g_role = if role=="assistant" {"model"} else {"user"};
-                serde_json::json!({"role": g_role, "parts":[{"text": text}]})
-            }).collect();
-            serde_json::json!({"contents": parts, "generationConfig": {"temperature": gen.temperature, "topP": gen.top_p, "maxOutputTokens": gen.max_tokens}})
-        }
-        ProviderKind::Claude => {
-            let sys = req.messages.iter().find(|m| m.get("role").and_then(|r| r.as_str())==Some("system")).and_then(|m| m.get("content").and_then(|c| c.as_str())).unwrap_or("");
-            let msgs: Vec<serde_json::Value> = req.messages.iter().filter(|m| m.get("role").and_then(|r| r.as_str())!=Some("system")).map(|m| serde_json::json!({"role": m.get("role").unwrap_or(&serde_json::Value::String("user".to_string())), "content": m.get("content").unwrap_or(&serde_json::Value::String("".to_string()))})).collect();
-            let mut j = serde_json::json!({"model": if !req.model_ref.is_empty() { req.model_ref.clone()} else { prov.default_model.clone()}, "max_tokens": gen.max_tokens, "temperature": gen.temperature, "messages": msgs});
-            if !sys.is_empty() { j["system"] = serde_json::Value::String(sys.to_string()); }
-            j
-        }
-        _ => {
-            let mdl = if !req.model_ref.is_empty() { req.model_ref.clone()} else if !prov.default_model.is_empty() { prov.default_model.clone()} else {"local".to_string()};
-            serde_json::json!({"model": mdl, "messages": req.messages, "temperature": gen.temperature, "top_p": gen.top_p, "max_tokens": gen.max_tokens, "stream": false})
-        }
-    };
+    // Pure request mapping lives in gateway:: (Stage 0 extract, behavior identical).
+    let built = gateway::build_chat_http_request(
+        &prov.kind,
+        &prov.endpoint,
+        &prov.default_model,
+        cfg.local.port,
+        &req.model_ref,
+        &req.messages,
+        &gen,
+        &secret,
+    );
+    let (url, headers, body) = (built.url, built.headers, built.body);
     let mut r = client.post(&url).json(&body);
     for (k,v) in headers { r = r.header(k, v); }
     let resp = r.send().await.map_err(|e| format!("LLM offline {}: {}", url, e))?;
