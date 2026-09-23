@@ -266,6 +266,21 @@ impl ProviderError {
         )
     }
 
+    /// Upstream HTTP status when the variant carries one. `None` means
+    /// "no status available" — never invent one from the code.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Server { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// Display through the secret redactor (defense in depth: construction
+    /// sites already redact, this guarantees the invariant for logs/errors).
+    pub fn safe_message(&self) -> String {
+        crate::llm::embeddings::provider::redact_secrets(&self.to_string())
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedCapability(_) => "unsupported_capability",

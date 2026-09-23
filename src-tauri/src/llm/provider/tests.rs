@@ -219,3 +219,17 @@ fn error_codes_not_retryable_config() {
     assert!(ProviderError::RateLimited("x".to_string()).is_retryable());
     assert_eq!(ProviderError::Cancelled.code(), "cancelled");
 }
+
+#[test]
+fn error_status_and_safe_message() {
+    let srv = ProviderError::Server {
+        status: 503,
+        message: "boom".to_string(),
+    };
+    assert_eq!(srv.status(), Some(503));
+    assert!(srv.is_retryable());
+    assert!(ProviderError::NotFound("x".to_string()).status().is_none());
+    // safe_message re-redacts even a hostile payload.
+    let hostile = ProviderError::Network("Authorization: Bearer sk-live-123".to_string());
+    assert!(!hostile.safe_message().contains("sk-live-123"));
+}
