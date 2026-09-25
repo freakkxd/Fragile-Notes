@@ -12,6 +12,8 @@
   --mono:JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 *{box-sizing:border-box}
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button:disabled, input:disabled, select:disabled, textarea:disabled{opacity:.5;cursor:not-allowed}
 html,body{height:100%}
 body{margin:0;font-family:var(--font);background:var(--bg);color:var(--fg);overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 ::-webkit-scrollbar{width:8px;height:8px}
