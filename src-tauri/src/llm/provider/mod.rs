@@ -6,6 +6,7 @@
 pub mod openai;
 pub mod openai_native;
 pub mod gemini;
+pub mod claude;
 pub mod types;
 
 pub use types::{
@@ -19,6 +20,7 @@ pub use openai::{
 };
 pub use openai_native::{OpenAiNativeAdapter, build_native_chat_body};
 pub use gemini::{GeminiEmbedBridge, GeminiEmbedParams, GeminiNativeAdapter, GeminiTaskType, build_gemini_body, capabilities_from_methods};
+pub use claude::{ClaudeChatBridge, ClaudeNativeAdapter, ANTHROPIC_VERSION, DEFAULT_MAX_TOKENS, build_claude_body};
 
 #[cfg(test)]
 mod tests;

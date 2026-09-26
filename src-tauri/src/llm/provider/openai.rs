@@ -412,7 +412,8 @@ fn map_http_status(status: u16, body: &str) -> ProviderError {
         400 => ProviderError::InvalidRequest(msg),
         401 | 403 => ProviderError::Unauthorized(msg),
         404 => ProviderError::NotFound(msg),
-        408 => ProviderError::Timeout(msg),
+        408 | 504 => ProviderError::Timeout(msg),
+        409 | 413 => ProviderError::InvalidRequest(msg),
         429 => ProviderError::RateLimited(msg),
         500..=599 => ProviderError::Server {
             status,
@@ -439,6 +440,12 @@ fn map_reqwest_err(e: reqwest::Error) -> ProviderError {
 // Shared with the native adapter (same normalization, one definition).
 pub(crate) fn map_http_status_for(status: u16, body: &str) -> ProviderError {
     map_http_status(status, body)
+}
+
+/// Test-only entry to the shared status matrix (regression pinning).
+#[cfg(test)]
+pub(crate) fn map_status_for_test(status: u16) -> ProviderError {
+    map_http_status(status, "test")
 }
 
 pub(crate) fn map_reqwest_err_for(e: reqwest::Error) -> ProviderError {
