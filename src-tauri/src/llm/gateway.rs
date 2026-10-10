@@ -67,13 +67,20 @@ pub fn build_chat_http_request(
             } else {
                 default_model.to_string()
             };
+            // Header-only auth (security: no ?key= in production URLs).
+            // The legacy branch shape (endpoint/body) is preserved; only the
+            // credential transport changed. Production chat goes through the
+            // native dispatch foundation; this builder remains for parity.
             let u = format!(
-                "{}/v1beta/models/{}:generateContent?key={}",
+                "{}/v1beta/models/{}:generateContent",
                 base.trim_end_matches('/'),
-                mdl,
-                secret
+                mdl
             );
-            (u, HashMap::new())
+            let mut h = HashMap::new();
+            if !secret.is_empty() {
+                h.insert("x-goog-api-key".to_string(), secret.to_string());
+            }
+            (u, h)
         }
         ProviderKind::Claude => {
             let base = if endpoint.is_empty() {
@@ -222,11 +229,17 @@ mod tests {
             &gen(),
             "key-123",
         );
+        // Header-only auth: no ?key= in the URL (security invariant).
         assert_eq!(
             r.url,
-            "https://generativelanguage.googleapis.com/v1beta/models/custom-model:generateContent?key=key-123"
+            "https://generativelanguage.googleapis.com/v1beta/models/custom-model:generateContent"
         );
-        assert!(r.headers.is_empty());
+        assert!(!r.url.contains("?key="), "no query auth");
+        assert!(!r.url.contains("key-123"), "no secret in URL");
+        assert_eq!(
+            r.headers.get("x-goog-api-key").map(String::as_str),
+            Some("key-123")
+        );
         assert_eq!(r.body["contents"][0]["role"], "user", "system maps to user");
         assert_eq!(r.body["contents"][1]["role"], "user");
         assert_eq!(r.body["contents"][2]["role"], "model", "assistant maps to model");

@@ -1041,6 +1041,69 @@ pub struct ConnectionTestResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionError { pub code: String, pub message: String, pub retryable: bool }
 
+/// Gemini connection test through the native adapter: header-only auth,
+/// never `?key=`. Preserves the `ConnectionTestResult` UI contract.
+/// `secrets` is injectable for tests; production passes KeyringSecretStore.
+async fn gemini_test_via_adapter(
+    prov: &Provider,
+    start: std::time::Instant,
+    secrets: std::sync::Arc<dyn provider::SecretStore>,
+) -> ConnectionTestResult {
+    use std::sync::Arc;
+    let latency = || Some(start.elapsed().as_millis() as u64);
+    let fail = |code: &str, message: String, retryable: bool| ConnectionTestResult {
+        ok: false, provider_id: prov.id.clone(), latency_ms: latency(),
+        models: None, capabilities: None,
+        error: Some(ConnectionError { code: code.to_string(), message, retryable }),
+    };
+    let auth = match &prov.auth {
+        Some(a) if a.method == AuthMethod::ApiKey => match &a.secret_ref {
+            Some(r) => match provider::AuthReference::new(r.clone()) {
+                Ok(a) => Some(a),
+                Err(_) => None,
+            },
+            None => None,
+        },
+        _ => None,
+    };
+    let connection = provider::ProviderConnection {
+        id: prov.id.clone(),
+        kind: ProviderKind::Gemini,
+        name: prov.name.clone(),
+        enabled: true,
+        scope: crate::llm::task::policy::ProviderScope::Cloud,
+        endpoint: if prov.endpoint.is_empty() { None } else { Some(prov.endpoint.clone()) },
+        auth,
+    };
+    let adapter = match provider::GeminiNativeAdapter::new(
+        connection, secrets, Duration::from_secs(8)) {
+        Ok(a) => a,
+        Err(e) => return fail("unsupported", dispatch_err(&e), false),
+    };
+    let cancel = tokio_util::sync::CancellationToken::new();
+    match adapter.health(cancel).await {
+        Ok(rep) => {
+            if rep.authenticated == Some(false) {
+                fail("unauthorized", "unauthorized".to_string(), false)
+            } else {
+                ConnectionTestResult { ok: true, provider_id: prov.id.clone(), latency_ms: latency(),
+                    models: None, capabilities: Some(vec![Capability::Chat, Capability::Streaming]), error: None }
+            }
+        }
+        Err(e) => {
+            // Legacy UI code strings preserved; messages redacted + capped.
+            let msg: String = crate::llm::embeddings::redact_secrets(&e.safe_message()).chars().take(300).collect();
+            let (code, retryable) = match e.code() {
+                "unauthorized" => ("unauthorized", false),
+                "rate_limited" => ("rate_limited", true),
+                "not_found" => ("unsupported", false),
+                _ => ("network", e.is_retryable()),
+            };
+            fail(code, format!("HTTP {}", msg), retryable)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
     let cfg = load_config_inner();
@@ -1065,10 +1128,15 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
             if !has { return Ok(serde_json::to_string(&ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"unauthorized".to_string(), message:"no api_key in keyring".to_string(), retryable:false }) }).unwrap()); }
             let secret = get_keyring(&provider_id).unwrap_or_default();
             if secret.len()<10 { return Ok(serde_json::to_string(&ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"invalid_key".to_string(), message:"api_key too short".to_string(), retryable:false }) }).unwrap()); }
+            // Gemini: header-only health via the native adapter (no ?key=).
+            if prov.kind == ProviderKind::Gemini {
+                return Ok(serde_json::to_string(
+                    &gemini_test_via_adapter(&prov, start, std::sync::Arc::new(provider::KeyringSecretStore)).await
+                ).unwrap());
+            }
             let base = if prov.endpoint.is_empty() { "https://api.openai.com/v1".to_string() } else { prov.endpoint.clone() };
             let url = match prov.kind {
                 ProviderKind::OpenAI | ProviderKind::CustomOpenAI => format!("{}/models", base.trim_end_matches('/')),
-                ProviderKind::Gemini => format!("{}/v1beta/models?key={}", base.trim_end_matches('/'), secret),
                 ProviderKind::Claude => format!("{}/v1/models", base.trim_end_matches('/')),
                 _ => base,
             };
@@ -1161,7 +1229,9 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
     let (url, headers, body) = (built.url, built.headers, built.body);
     let mut r = client.post(&url).json(&body);
     for (k,v) in headers { r = r.header(k, v); }
-    let resp = r.send().await.map_err(|e| format!("LLM offline {}: {}", url, e))?;
+    // Never leak credentials: errors carry host/path only, never the query.
+    let safe_url = safe_url_for_error(&url);
+    let resp = r.send().await.map_err(|e| format!("LLM offline {}: {}", safe_url, e))?;
     if !resp.status().is_success() {
         return Err(format!("LLM HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default().chars().take(600).collect::<String>()));
     }
@@ -1276,9 +1346,123 @@ pub async fn gateway_chat_via_registry(
     Ok(resp.content)
 }
 
+// ---------- Gemini dispatch foundation (non-breaking) ----------
+// Same shape as the Claude path: header-only auth via the native adapter,
+// assistant text out, existing gateway contract preserved. Legacy
+// gateway.rs Gemini branch stays untouched until parity is proven.
+pub async fn gateway_gemini_via_registry(
+    req: ChatRequest,
+    cancel: tokio_util::sync::CancellationToken,
+    secrets: std::sync::Arc<dyn provider::SecretStore>,
+    timeout: Duration,
+) -> Result<String, String> {
+    let cfg = load_config_inner();
+    // privacy guard + profile generation (same policy as gateway_chat)
+    let mut gen = ChatGeneration::default();
+    if let Some(tpid) = &req.task_profile_id {
+        if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
+            let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
+            check_privacy(&tp.privacy, &prov.kind)?;
+            if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
+            gen = resolve_chat_generation(&tp.generation);
+        }
+    }
+    let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).cloned().ok_or("provider not found")?;
+    if prov.kind != ProviderKind::Gemini {
+        return Err(format!("dispatch unsupported for {:?}: use gateway_chat", prov.kind));
+    }
+    if !prov.enabled {
+        return Err(format!("provider {} is disabled", prov.id));
+    }
+    // Model identity: internal id + provider ownership enforced here;
+    // only remote_id ever goes upstream (adapter prefixes models/ itself).
+    // A catalog hit resolves an internal id to its remote_id.
+    let mut remote = if !req.model_ref.is_empty() { req.model_ref.clone() } else { prov.default_model.clone() };
+    if remote.trim().is_empty() {
+        return Err("dispatch: no model selected (model_ref and provider default_model are empty)".to_string());
+    }
+    let mut capabilities = vec![Capability::Chat];
+    if let Some(known) = cfg.models.iter().find(|m| m.id==req.model_ref || (!m.remote_id.is_empty() && m.remote_id==remote)) {
+        if known.provider_id != prov.id {
+            return Err(format!("model {} belongs to {}, not {}", known.id, known.provider_id, prov.id));
+        }
+        if !known.capabilities.is_empty() && !known.capabilities.contains(&Capability::Chat) {
+            return Err("UnsupportedCapability: model missing Chat".to_string());
+        }
+        if !known.capabilities.is_empty() {
+            capabilities = known.capabilities.clone();
+        }
+        if !known.remote_id.is_empty() {
+            remote = known.remote_id.clone();
+        }
+    }
+    let model = provider::ProviderModel {
+        id: format!("{}:{}", prov.id, remote),
+        provider_id: prov.id.clone(),
+        remote_id: remote.clone(),
+        display_name: remote.clone(),
+        capabilities,
+        capability_source: None,
+        context_length: None,
+        dimensions: None,
+        pricing: None,
+        source: crate::llm::models::types::ModelSource::Manual,
+    };
+    let auth = match &prov.auth {
+        Some(a) if a.method == AuthMethod::ApiKey => match &a.secret_ref {
+            Some(r) => Some(provider::AuthReference::new(r.clone()).map_err(|e| format!("dispatch: {}", e))?),
+            None => None,
+        },
+        _ => None,
+    };
+    let connection = provider::ProviderConnection {
+        id: prov.id.clone(),
+        kind: ProviderKind::Gemini,
+        name: prov.name.clone(),
+        enabled: true,
+        scope: crate::llm::task::policy::ProviderScope::Cloud,
+        endpoint: if prov.endpoint.is_empty() { None } else { Some(prov.endpoint.clone()) },
+        auth,
+    };
+    let adapter = provider::GeminiNativeAdapter::new(connection, secrets, timeout)
+        .map_err(|e| dispatch_err(&e))?;
+    // Legacy role strings -> adapter roles. Assistant maps to model
+    // (parity with multi-turn history); unknown roles become user.
+    let messages = req.messages.iter().map(|m| {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+        let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let role = match role {
+            "system" => provider::ChatRole::System,
+            "assistant" => provider::ChatRole::Assistant,
+            _ => provider::ChatRole::User,
+        };
+        provider::ChatMessage { role, content }
+    }).collect::<Vec<_>>();
+    let preq = provider::ChatRequest {
+        messages,
+        temperature: Some(gen.temperature),
+        // Legacy Gemini body carries topP: parity keeps it on the wire.
+        top_p: Some(gen.top_p),
+        // Profile value with gateway default 2048 fallback.
+        max_tokens: Some(gen.max_tokens),
+        response_format: None,
+    };
+    let resp = adapter.chat(&model, preq, cancel).await.map_err(|e| dispatch_err(&e))?;
+    Ok(resp.content)
+}
+
 fn dispatch_err(e: &provider::ProviderError) -> String {
     let capped: String = e.safe_message().chars().take(600).collect();
     format!("LLM {}: {}", e.code(), capped)
+}
+
+/// Strip a request URL down to a safe host/path form for error strings:
+/// scheme + authority + path, never the query (which may carry credentials)
+/// or fragment. No allocation-heavy parsing — pure string surgery.
+fn safe_url_for_error(url: &str) -> String {
+    let no_frag = url.split('#').next().unwrap_or(url);
+    let no_query = no_frag.split('?').next().unwrap_or(no_frag);
+    no_query.to_string()
 }
 
 // ---------- Production caller router (non-breaking) ----------
@@ -1296,6 +1480,15 @@ pub async fn gateway_chat_routed(
     match kind {
         Some(ProviderKind::Claude) => {
             gateway_chat_via_registry(
+                req,
+                cancel,
+                std::sync::Arc::new(provider::KeyringSecretStore),
+                Duration::from_secs(90),
+            )
+            .await
+        }
+        Some(ProviderKind::Gemini) => {
+            gateway_gemini_via_registry(
                 req,
                 cancel,
                 std::sync::Arc::new(provider::KeyringSecretStore),
@@ -2729,6 +2922,254 @@ mod tests {
             Arc::new(EnvSecrets(key)), Duration::from_secs(90)).await.unwrap();
         assert!(!out.trim().is_empty(), "non-empty assistant text");
         assert!(!out.contains("msg_"), "text, not raw envelope");
+    }
+
+    // ---------- Gemini query-auth removal tests ----------
+    struct MapGeminiSecrets;
+    impl provider::SecretStore for MapGeminiSecrets {
+        fn get(&self, r: &str) -> Result<String, provider::ProviderError> {
+            assert_eq!(r, "keychain://fragile-notes/gld");
+            Ok("AIza-test-key-12345".to_string())
+        }
+    }
+
+    fn gemini_ok_body(text: &str) -> String {
+        format!(r#"{{"candidates":[{{"content":{{"parts":[{{"text":"{}"}}]}},"finishReason":"STOP"}}],"usageMetadata":{{"promptTokenCount":1,"candidatesTokenCount":1}}}}"#, text)
+    }
+
+    fn write_gemini_config(path: &Path, port: u16, default_model: &str) {
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "gemini") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/gld".to_string()), account_id: None });
+            p.default_model = default_model.to_string();
+        }
+        fs::write(path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+    }
+
+    fn gemini_req(model_ref: &str, task: Option<&str>) -> ChatRequest {
+        ChatRequest {
+            provider_id: "gemini".to_string(),
+            model_ref: model_ref.to_string(),
+            messages: vec![
+                serde_json::json!({"role": "system", "content": "sys"}),
+                serde_json::json!({"role": "user", "content": "hi"}),
+                serde_json::json!({"role": "assistant", "content": "hello"}),
+            ],
+            task_profile_id: task.map(|s| s.to_string()),
+        }
+    }
+
+    fn wire_request_line(wire: &Wire) -> String {
+        let lock = wire.captured.lock().unwrap();
+        let raw = lock.last().cloned().expect("request captured");
+        raw.lines().next().unwrap_or("").to_string()
+    }
+
+    #[tokio::test]
+    async fn gemini_no_query_key_in_chat_url() {
+        let env = IsolatedEnv::lock("gemurl");
+        let w = spawn_dispatch_wire(200, gemini_ok_body("hi"), 0).await;
+        write_gemini_config(&env.cfg_path(), w.port, "gemini-2.0-flash");
+        gateway_gemini_via_registry(gemini_req("", None), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        let line = wire_request_line(&w);
+        assert!(line.starts_with("POST /v1beta/models/gemini-2.0-flash:generateContent "),
+            "model path in URL, got: {}", line);
+        assert!(!line.contains('?'), "no query string at all, got: {}", line);
+        assert!(!line.contains("key="), "no query auth, got: {}", line);
+    }
+
+    #[tokio::test]
+    async fn gemini_chat_uses_header_auth() {
+        let env = IsolatedEnv::lock("gemhead");
+        let w = spawn_dispatch_wire(200, gemini_ok_body("hi"), 0).await;
+        write_gemini_config(&env.cfg_path(), w.port, "gemini-2.0-flash");
+        gateway_gemini_via_registry(gemini_req("", None), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        let raw = w.captured.lock().unwrap().join("\n").to_lowercase();
+        assert_eq!(raw.matches("x-goog-api-key: aiza-test-key-12345").count(), 1,
+            "exactly one header auth");
+    }
+
+    #[tokio::test]
+    async fn gemini_dispatch_returns_text_not_raw_json() {
+        let env = IsolatedEnv::lock("gemtext");
+        let w = spawn_dispatch_wire(200, gemini_ok_body("hello world"), 0).await;
+        write_gemini_config(&env.cfg_path(), w.port, "gemini-2.0-flash");
+        let out = gateway_gemini_via_registry(gemini_req("", None), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "hello world");
+        assert!(!out.contains("candidates"), "no raw envelope leak");
+        assert!(!out.contains("finishReason"), "no raw envelope leak");
+    }
+
+    #[tokio::test]
+    async fn gemini_dispatch_parity_with_legacy_fixture() {
+        let env = IsolatedEnv::lock("gemparity");
+        let w = spawn_dispatch_wire(200, gemini_ok_body("ok"), 0).await;
+        let endpoint = format!("http://127.0.0.1:{}", w.port);
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "gemini") {
+            p.enabled = true;
+            p.endpoint = endpoint.clone();
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/gld".to_string()), account_id: None });
+            p.default_model = "gemini-2.0-flash".to_string();
+        }
+        let mut generation = HashMap::new();
+        generation.insert("temperature".to_string(), "0.2".to_string());
+        generation.insert("top_p".to_string(), "0.5".to_string());
+        generation.insert("max_tokens".to_string(), "512".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-gem".to_string(), name: "Gem".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        // Legacy frozen mapping (now header-auth) for the same input.
+        let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
+        let legacy = gateway::build_chat_http_request(&ProviderKind::Gemini, &endpoint,
+            "gemini-2.0-flash", 8010, "", &gemini_req("", None).messages, &gen, "AIza-test-key-12345");
+        let out = gateway_gemini_via_registry(gemini_req("", Some("tp-gem")), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "ok");
+        let raw = w.captured.lock().unwrap().join("\n");
+        let target_line = raw.lines().next().unwrap_or("").to_string();
+        let legacy_path = legacy.url.split('/').skip(3).collect::<Vec<_>>().join("/");
+        assert!(target_line.contains(&format!("POST /{}", legacy_path)),
+            "same URL path as legacy builder, got: {} vs {}", target_line, legacy.url);
+        assert!(!target_line.contains('?'), "no query in either shape");
+        let body = wire_body(&w);
+        // Same model path and generation settings as the legacy builder.
+        // Known documented difference: the native adapter lifts system text
+        // into top-level systemInstruction, while legacy folds it into the
+        // first user part. Semantic content is identical.
+        assert_eq!(body["generationConfig"], legacy.body["generationConfig"]);
+        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "sys");
+        assert_eq!(legacy.body["contents"][0]["parts"][0]["text"], "sys");
+        assert_eq!(body["contents"].as_array().unwrap().len(), 2);
+        assert_eq!(body["contents"][0]["role"], "user");
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "hi");
+        assert_eq!(body["contents"][1]["role"], "model");
+        assert_eq!(body["contents"][1]["parts"][0]["text"], "hello");
+    }
+
+    #[tokio::test]
+    async fn gemini_test_provider_uses_header_auth() {
+        let env = IsolatedEnv::lock("gemhealth");
+        let w = spawn_dispatch_wire(200, r#"{"models":[]}"#.to_string(), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "gemini") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/gld".to_string()), account_id: None });
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let prov = load_config_inner().providers.into_iter().find(|p| p.id == "gemini").unwrap();
+        let res = gemini_test_via_adapter(&prov, std::time::Instant::now(), Arc::new(MapGeminiSecrets)).await;
+        assert!(res.ok, "health ok: {:?}", res.error);
+        assert_eq!(res.capabilities, Some(vec![Capability::Chat, Capability::Streaming]));
+        let raw = w.captured.lock().unwrap().join("\n").to_lowercase();
+        assert!(raw.contains("get /v1beta/models "), "models probe, got headers");
+        assert_eq!(raw.matches("x-goog-api-key: aiza-test-key-12345").count(), 1);
+        assert!(!raw.contains("?key="), "no query auth in health probe");
+    }
+
+    #[tokio::test]
+    async fn gemini_offline_error_hides_secret() {
+        let evil = "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent?key=AIzaSECRET999&alt=json";
+        let safe = safe_url_for_error(evil);
+        assert!(!safe.contains("AIzaSECRET999"), "secret leaked: {}", safe);
+        assert!(!safe.contains('?'), "query stripped: {}", safe);
+        assert_eq!(safe, "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent");
+        let err = format!("LLM offline {}: {}", safe_url_for_error(evil), "conn refused");
+        assert!(!err.contains("AIzaSECRET999"));
+    }
+
+    #[tokio::test]
+    async fn gemini_rag_bounded_error_hides_secret() {
+        // Same redaction the RAG adapter applies before capping to 500 chars.
+        let evil = "LLM offline https://x.test/v1beta/models/m:generateContent?key=AIzaSECRET999: conn refused";
+        let out: String = crate::llm::embeddings::redact_secrets(&evil).chars().take(500).collect();
+        assert!(!out.contains("AIzaSECRET999"), "secret leaked: {}", out);
+    }
+
+    #[tokio::test]
+    async fn gemini_legacy_branch_still_present_until_parity() {
+        // The legacy builder branch stays alive (header-secured): same
+        // endpoint shape and body mapping as before, only auth moved.
+        let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
+        let r = gateway::build_chat_http_request(&ProviderKind::Gemini, "",
+            "gemini-2.0-flash", 8010, "custom-model", &gemini_req("", None).messages, &gen, "k");
+        assert_eq!(r.url, "https://generativelanguage.googleapis.com/v1beta/models/custom-model:generateContent");
+        // Legacy folds system text into the first user part (3 contents);
+        // the native adapter lifts it to systemInstruction instead.
+        assert_eq!(r.body["contents"].as_array().unwrap().len(), 3);
+        assert_eq!(r.body["contents"][0]["parts"][0]["text"], "sys");
+        assert_eq!(r.body["generationConfig"]["topP"], 0.5);
+        assert_eq!(r.body["generationConfig"]["maxOutputTokens"], 512);
+    }
+
+    #[tokio::test]
+    async fn gemini_profile_max_tokens_used() {
+        let env = IsolatedEnv::lock("gemmaxtok");
+        let w = spawn_dispatch_wire(200, gemini_ok_body("t"), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "gemini") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/gld".to_string()), account_id: None });
+            p.default_model = "gemini-2.0-flash".to_string();
+        }
+        let mut generation = HashMap::new();
+        generation.insert("max_tokens".to_string(), "512".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-gtok".to_string(), name: "Tok".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        gateway_gemini_via_registry(gemini_req("", Some("tp-gtok")), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(wire_body(&w)["generationConfig"]["maxOutputTokens"], 512, "profile value wins");
+        gateway_gemini_via_registry(gemini_req("", None), dispatch_cancel(),
+            Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(wire_body(&w)["generationConfig"]["maxOutputTokens"], 2048, "gateway default fallback");
+    }
+
+    /// Manual cloud E2E (ignored by default). Secret ONLY from
+    /// GEMINI_API_KEY_TEST via a mock store — never keyring, never repo,
+    /// never logs. Isolated temp config; chat only; skips cleanly.
+    #[tokio::test]
+    #[ignore]
+    async fn gemini_cloud_e2e_manual() {
+        let key = match std::env::var("GEMINI_API_KEY_TEST") {
+            Ok(k) if !k.trim().is_empty() => k,
+            _ => {
+                eprintln!("SKIP: GEMINI_API_KEY_TEST absent");
+                return;
+            }
+        };
+        struct EnvSecrets(String);
+        impl provider::SecretStore for EnvSecrets {
+            fn get(&self, _: &str) -> Result<String, provider::ProviderError> {
+                Ok(self.0.clone())
+            }
+        }
+        let env = IsolatedEnv::lock("gemcloude2e");
+        let model = std::env::var("GEMINI_E2E_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".to_string());
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "gemini") {
+            p.enabled = true;
+            p.endpoint = String::new();
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/e2e".to_string()), account_id: None });
+            p.default_model = model;
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let out = gateway_gemini_via_registry(gemini_req("", None), dispatch_cancel(),
+            Arc::new(EnvSecrets(key)), Duration::from_secs(90)).await.unwrap();
+        assert!(!out.trim().is_empty(), "non-empty assistant text");
+        assert!(!out.contains("candidates"), "text, not raw envelope");
     }
 }
 
