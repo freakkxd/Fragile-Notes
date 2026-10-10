@@ -1281,11 +1281,37 @@ fn dispatch_err(e: &provider::ProviderError) -> String {
     format!("LLM {}: {}", e.code(), capped)
 }
 
+// ---------- Production caller router (non-breaking) ----------
+// Peek provider kind from config (no network I/O): Claude goes through the
+// native dispatch foundation, every other kind keeps the legacy gateway
+// byte-for-byte. Unknown/disabled providers keep existing errors.
+pub async fn gateway_chat_routed(
+    req: ChatRequest,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<String, String> {
+    let kind = {
+        let cfg = load_config_inner();
+        cfg.providers.iter().find(|p| p.id == req.provider_id).map(|p| p.kind.clone())
+    };
+    match kind {
+        Some(ProviderKind::Claude) => {
+            gateway_chat_via_registry(
+                req,
+                cancel,
+                std::sync::Arc::new(provider::KeyringSecretStore),
+                Duration::from_secs(90),
+            )
+            .await
+        }
+        _ => gateway_chat(req).await,
+    }
+}
+
 #[tauri::command]
 pub async fn llm_chat_universal(provider_id: String, model: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
     // wrap with privacy via default task
     let req = ChatRequest{ provider_id: provider_id.clone(), model_ref: model.clone(), messages, task_profile_id: None };
-    gateway_chat(req).await
+    gateway_chat_routed(req, tokio_util::sync::CancellationToken::new()).await
 }
 
 #[tauri::command]
@@ -1327,6 +1353,7 @@ pub async fn llm_pipeline_run(pipeline_id: String, input: String) -> Result<Stri
     // run_id for streaming future
     let run_id = format!("run-{}", chrono::Utc::now().timestamp_millis());
     let _ = run_id;
+    let run_cancel = tokio_util::sync::CancellationToken::new();
     let mut current = input;
     let mut outputs: std::collections::HashMap<String,String> = std::collections::HashMap::new();
     outputs.insert("input".to_string(), current.clone());
@@ -1338,7 +1365,7 @@ pub async fn llm_pipeline_run(pipeline_id: String, input: String) -> Result<Stri
         prompt = prompt.replace("{{content}}", &current).replace("{{rag}}", &current);
         let msgs = vec![serde_json::json!({"role":"user","content": prompt})];
         let req = ChatRequest{ provider_id: step.provider_id.clone(), model_ref: step.model_ref.clone(), messages: msgs, task_profile_id: step.task_profile_id.clone() };
-        let res = gateway_chat(req).await.unwrap_or_else(|e| format!("error: {}", e));
+        let res = gateway_chat_routed(req, run_cancel.clone()).await.unwrap_or_else(|e| format!("error: {}", e));
         let out = extract_content(&res);
         outputs.insert(step.id.clone(), out.clone());
         current = out;
@@ -2466,6 +2493,242 @@ mod tests {
             .map(|m| m["role"].as_str().unwrap()).collect();
         assert_eq!(roles, vec!["user", "assistant", "user"], "assistant must not become user");
         assert_eq!(body["messages"][1]["content"], "a1", "assistant content intact");
+    }
+
+    // ---------- Caller wiring tests (router) ----------
+    fn routed_cancel() -> tokio_util::sync::CancellationToken {
+        tokio_util::sync::CancellationToken::new()
+    }
+
+    #[tokio::test]
+    async fn wiring_router_claude_uses_dispatch() {
+        // The router hardcodes the production keyring path, so a live
+        // dispatch cannot run here. With no auth configured, dispatch fails
+        // at credential resolution before any network I/O — while the legacy
+        // gateway would attempt the network ("LLM offline ..."). The error
+        // kind therefore proves router selection; text output is proven by
+        // the mock-secret dispatch tests.
+        let env = IsolatedEnv::lock("wireroute");
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = "http://127.0.0.1:1".to_string();
+            p.auth = None;
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let err = gateway_chat_routed(dispatch_req("", None), routed_cancel()).await.unwrap_err();
+        assert!(err.contains("credentials_missing"), "router must select dispatch, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn wiring_router_local_uses_legacy() {
+        let env = IsolatedEnv::lock("wirelocal");
+        let raw = r#"{"choices":[{"message":{"content":"local-hi"}}]}"#.to_string();
+        let w = spawn_dispatch_wire(200, raw.clone(), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "local") {
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let req = ChatRequest { provider_id: "local".to_string(), model_ref: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})], task_profile_id: None };
+        let out = gateway_chat_routed(req, routed_cancel()).await.unwrap();
+        assert_eq!(out, raw, "legacy path must stay byte-identical");
+    }
+
+    #[tokio::test]
+    async fn wiring_router_unknown_provider_no_network() {
+        let env = IsolatedEnv::lock("wireunknown");
+        write_valid_config(&env.cfg_path());
+        let req = ChatRequest { provider_id: "nope".to_string(), model_ref: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})], task_profile_id: None };
+        let err = gateway_chat_routed(req, routed_cancel()).await.unwrap_err();
+        assert_eq!(err, "provider not found", "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn wiring_router_disabled_claude_no_network() {
+        let env = IsolatedEnv::lock("wiredisabled");
+        // Closed port: any network attempt would fail differently.
+        write_claude_config(&env.cfg_path(), 1, "claude-sonnet-4-5");
+        let mut cfg: LlmConfig = serde_json::from_str(&fs::read_to_string(env.cfg_path()).unwrap()).unwrap();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = false;
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let err = gateway_chat_routed(dispatch_req("", None), routed_cancel()).await.unwrap_err();
+        assert!(err.contains("disabled"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn wiring_router_task_profile_passthrough() {
+        let env = IsolatedEnv::lock("wireprofile");
+        let w = spawn_dispatch_wire(200, claude_ok_body("p"), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        // RAG-shaped dispatch: model id + task profile with generation.
+        let mut generation = HashMap::new();
+        generation.insert("temperature".to_string(), "0.3".to_string());
+        generation.insert("max_tokens".to_string(), "256".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-rag".to_string(), name: "Rag".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let req = ChatRequest { provider_id: "claude".to_string(), model_ref: "claude-sonnet-4-5".to_string(),
+            messages: vec![
+                serde_json::json!({"role": "system", "content": "s"}),
+                serde_json::json!({"role": "user", "content": "q"}),
+            ],
+            task_profile_id: Some("tp-rag".to_string()) };
+        // Profile generation (the same shape RAG forwards) flows into dispatch.
+        let out = gateway_chat_via_registry(req, routed_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "p");
+        let body = wire_body(&w);
+        assert_eq!(body["max_tokens"], 256, "task profile generation flows through");
+        assert_eq!(body["system"], "s");
+    }
+
+    #[tokio::test]
+    async fn wiring_rag_claude_returns_text_not_raw_json() {
+        // Same call shape the RAG GatewayChatAdapter builds (provider +
+        // model id + task profile + system/user messages): must yield text.
+        let env = IsolatedEnv::lock("wirerag");
+        let w = spawn_dispatch_wire(200, claude_ok_body("rag answer"), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        cfg.task_profiles.push(TaskProfile { id: "task-chat".to_string(), name: "Chat".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None,
+            generation: HashMap::new() });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let req = ChatRequest { provider_id: "claude".to_string(), model_ref: "claude-sonnet-4-5".to_string(),
+            messages: vec![
+                serde_json::json!({"role": "system", "content": "ctx"}),
+                serde_json::json!({"role": "user", "content": "q"}),
+            ],
+            task_profile_id: Some("task-chat".to_string()) };
+        let out = gateway_chat_via_registry(req, routed_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "rag answer");
+        assert!(!out.contains("content"), "no raw provider JSON in RAG-shaped output");
+    }
+
+    #[tokio::test]
+    async fn wiring_pipeline_claude_step_text() {
+        // End-to-end through llm_pipeline_run: the Claude step is routed to
+        // dispatch. With no auth configured the adapter fails before any
+        // network I/O (no keyring touch: auth None short-circuits), and the
+        // pipeline preserves its error-string contract.
+        let env = IsolatedEnv::lock("wirepipe");
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = "http://127.0.0.1:1".to_string();
+            p.auth = None;
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        cfg.pipelines.push(Pipeline { id: "pipe-claude".to_string(), name: "P".to_string(),
+            description: String::new(), enabled: true, trigger: "manual".to_string(),
+            steps: vec![PipelineStep { id: "s1".to_string(), name: "S1".to_string(), kind: "llm".to_string(),
+                provider_id: "claude".to_string(), model_ref: String::new(), task_profile_id: None,
+                input_refs: vec!["input".to_string()], prompt_template: "{{input}}".to_string(),
+                output_schema: None, retry: None, timeout_ms: None, enabled: true }] });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let out = llm_pipeline_run("pipe-claude".to_string(), "hello".to_string()).await.unwrap();
+        assert!(out.starts_with("error:"), "pipeline error contract, got: {}", out);
+        assert!(out.contains("credential"), "dispatch reached (not legacy network path), got: {}", out);
+        // Anthropic text blocks extract cleanly when dispatch succeeds.
+        assert_eq!(extract_content(&claude_ok_body("piped")), "piped");
+    }
+
+    #[tokio::test]
+    async fn wiring_pipeline_error_string_behavior_unchanged() {
+        let env = IsolatedEnv::lock("wirepipeerr");
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "local") {
+            p.endpoint = "http://127.0.0.1:1".to_string();
+        }
+        cfg.pipelines.push(Pipeline { id: "pipe-err".to_string(), name: "E".to_string(),
+            description: String::new(), enabled: true, trigger: "manual".to_string(),
+            steps: vec![PipelineStep { id: "s1".to_string(), name: "S1".to_string(), kind: "llm".to_string(),
+                provider_id: "local".to_string(), model_ref: String::new(), task_profile_id: None,
+                input_refs: vec!["input".to_string()], prompt_template: "{{input}}".to_string(),
+                output_schema: None, retry: None, timeout_ms: None, enabled: true }] });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let out = llm_pipeline_run("pipe-err".to_string(), "hello".to_string()).await.unwrap();
+        assert!(out.starts_with("error:"), "error-string behavior preserved, got: {}", out);
+    }
+
+    #[tokio::test]
+    async fn wiring_enrich_claude_writes_text_not_raw_json() {
+        // enrich llm_chat with an explicit cloud profile is routed to
+        // dispatch: with no auth configured it fails before any network I/O
+        // (no keyring touch), proving the enrich path reaches dispatch and
+        // never the legacy raw-JSON branch for Claude.
+        let env = IsolatedEnv::lock("wireenrich");
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = "http://127.0.0.1:1".to_string();
+            p.auth = None;
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let out = crate::enrich::llm_chat("claude".to_string(),
+            vec![serde_json::json!({"role": "user", "content": "hi"})]).await.unwrap_err();
+        assert!(out.contains("credential"), "dispatch reached, got: {}", out);
+        assert!(!out.contains("msg_"), "no raw provider JSON leak");
+    }
+
+    /// Manual cloud E2E (ignored by default). Secret ONLY from
+    /// ANTHROPIC_API_KEY_TEST via a mock store — never keyring, never repo,
+    /// never logs. Isolated temp config; skips cleanly without credentials.
+    #[tokio::test]
+    #[ignore]
+    async fn claude_cloud_e2e_manual() {
+        let key = match std::env::var("ANTHROPIC_API_KEY_TEST") {
+            Ok(k) if !k.trim().is_empty() => k,
+            _ => {
+                eprintln!("SKIP: ANTHROPIC_API_KEY_TEST absent");
+                return;
+            }
+        };
+        struct EnvSecrets(String);
+        impl provider::SecretStore for EnvSecrets {
+            fn get(&self, _: &str) -> Result<String, provider::ProviderError> {
+                Ok(self.0.clone())
+            }
+        }
+        let env = IsolatedEnv::lock("cloude2e");
+        let model = std::env::var("ANTHROPIC_E2E_MODEL").unwrap_or_else(|_| "claude-3-5-haiku-latest".to_string());
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = String::new();
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/e2e".to_string()), account_id: None });
+            p.default_model = model;
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let req = ChatRequest { provider_id: "claude".to_string(), model_ref: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "Reply with exactly: ok"})],
+            task_profile_id: None };
+        let out = gateway_chat_via_registry(req, routed_cancel(),
+            Arc::new(EnvSecrets(key)), Duration::from_secs(90)).await.unwrap();
+        assert!(!out.trim().is_empty(), "non-empty assistant text");
+        assert!(!out.contains("msg_"), "text, not raw envelope");
     }
 }
 

@@ -295,7 +295,7 @@ pub async fn rag_answer(
             };
             tokio::select! {
                 _ = cancel.cancelled() => Err(ChatGatewayError::Cancelled),
-                r = crate::llm::gateway_chat(req) => r.map_err(|e| {
+                r = crate::llm::gateway_chat_routed(req, cancel.clone()) => r.map_err(|e| {
                     let redacted = redact_secrets(&e);
                     let capped: String = redacted.chars().take(500).collect();
                     ChatGatewayError::Transport(capped)

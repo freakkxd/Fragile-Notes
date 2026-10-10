@@ -33,7 +33,7 @@ pub struct RealGateway;
 #[async_trait::async_trait]
 impl LlmGateway for RealGateway {
     async fn chat(&self, provider_id: &str, model: &str, messages: Vec<serde_json::Value>) -> Result<String, String> {
-        crate::llm::gateway_chat(crate::llm::ChatRequest{ provider_id: provider_id.to_string(), model_ref: model.to_string(), messages, task_profile_id: None }).await
+        crate::llm::gateway_chat_routed(crate::llm::ChatRequest{ provider_id: provider_id.to_string(), model_ref: model.to_string(), messages, task_profile_id: None }, tokio_util::sync::CancellationToken::new()).await
     }
 }
 

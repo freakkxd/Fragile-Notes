@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use walkdir::WalkDir;
 use regex::Regex;
 use once_cell::sync::Lazy;
-use crate::llm::{gateway_chat, ChatRequest};
+use crate::llm::{gateway_chat_routed, ChatRequest};
 
 fn vault_root() -> PathBuf {
     if let Ok(custom) = std::env::var("FRAGILE_VAULT") { return PathBuf::from(custom); }
@@ -35,7 +35,7 @@ pub async fn llm_chat(profile: String, messages: Vec<serde_json::Value>) -> Resu
     // task-enrich for legacy enrich, task-chat for generic chat — infer from profile
     let task = if provider_id=="local" { Some("task-chat".to_string()) } else { None };
     let req = ChatRequest { provider_id, model_ref: String::new(), messages, task_profile_id: task };
-    gateway_chat(req).await
+    gateway_chat_routed(req, tokio_util::sync::CancellationToken::new()).await
 }
 
 #[tauri::command]
@@ -61,7 +61,7 @@ pub async fn enrich_notes(limit: usize, profile: String) -> Result<String, Strin
         ];
         let provider_id = profile_to_provider(&profile);
         let req = ChatRequest { provider_id: provider_id.clone(), model_ref: String::new(), messages, task_profile_id: Some("task-enrich".to_string()) };
-        match gateway_chat(req).await {
+        match gateway_chat_routed(req, tokio_util::sync::CancellationToken::new()).await {
             Ok(resp) => {
                 let tags = extract_tags(&resp);
                 let enriched_content = format!("{}\n\n---\nenriched: true\ntags: [{}]\nllm_raw: {}\n---\n", content.trim(), tags.join(", "), resp.chars().take(500).collect::<String>().replace('\n', " "));
