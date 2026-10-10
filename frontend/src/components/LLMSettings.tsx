@@ -42,6 +42,14 @@ export default function LLMSettings() {
   const [issues, setIssues] = useState<llm.LlmConfigIssue[]>([])
   const [recovered, setRecovered] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  // Gate 1: backend report classification + in-memory recovery token (never persisted)
+  const [reportStatus, setReportStatus] = useState<llm.ConfigLoadStatus | null>(null)
+  const [reportReason, setReportReason] = useState<llm.ConfigDegradedReason | null>(null)
+  const [activePath, setActivePath] = useState('')
+  const [migratedFrom, setMigratedFrom] = useState<number | null>(null)
+  const [recoverToken, setRecoverToken] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [cloudStatus, setCloudStatus] = useState<Record<string,string>>({})
   const [keyring, setKeyring] = useState<Record<string, boolean | undefined>>({})
   const [localTest, setLocalTest] = useState('—')
@@ -64,10 +72,17 @@ export default function LLMSettings() {
   const load = async () => {
     setLoadFailed(false)
     setStatus('загрузка...')
+    setSaveError('')
+    setRecoverToken(null)
+    setConfirming(false)
     try {
       const res = await llm.llmGetConfigSafe()
       setIssues(res.issues)
       setRecovered(res.recovered)
+      setReportStatus(res.reportStatus ?? null)
+      setReportReason(res.reportReason ?? null)
+      setActivePath(res.activePath ?? '')
+      setMigratedFrom(res.migratedFrom ?? null)
       if (!res.config) {
         setCfg(null)
         setLoadFailed(true)
@@ -107,8 +122,21 @@ export default function LLMSettings() {
   const changeMode = (m: SettingsMode) => { setMode(m); saveMode(m) }
 
   const dirty = cfg ? isDirty(savedSnapshot, cfg) : false
+  const degraded = reportStatus === 'degraded'
+  const saveBlocked = degraded && !recoverToken
   const save = async () => {
     if(!cfg || saving) return
+    setSaveError('')
+    if (degraded) {
+      // Gate 1: no silent destructive write. Token comes only from
+      // explicit recovery start; without it the backend rejects too.
+      if (!recoverToken) {
+        setSaveError('Сохранение заблокировано: конфигурация повреждена. Нажмите «Начать восстановление».')
+        return
+      }
+      setConfirming(true)
+      return
+    }
     setSaving(true)
     try {
       await llm.llmSaveConfig(cfg)
@@ -117,6 +145,31 @@ export default function LLMSettings() {
     } catch { setStatus('не удалось сохранить: повторите попытку') }
     finally { setSaving(false) }
   }
+  const startRecovery = async () => {
+    setSaveError('')
+    try {
+      const r = await llm.llmStartConfigRecovery()
+      setRecoverToken(r.token)
+      setConfirming(true)
+    } catch {
+      setSaveError('Не удалось начать восстановление: повторите попытку.')
+    }
+  }
+  const doConfirmedSave = async () => {
+    if (!cfg || !recoverToken || saving) return
+    setSaving(true)
+    try {
+      await llm.llmSaveConfigConfirmed(cfg, recoverToken)
+      setRecoverToken(null)
+      setConfirming(false)
+      await load()
+      flash('восстановлено и сохранено ✓')
+    } catch {
+      setSaveError('Подтверждённая запись не удалась: оригинал не тронут. Перезагрузите и повторите.')
+    }
+    finally { setSaving(false) }
+  }
+  const cancelConfirm = () => { setConfirming(false); setRecoverToken(null) }
   const cancelEdit = async () => { await load() }
 
   const scan = async () => {
@@ -225,7 +278,7 @@ export default function LLMSettings() {
         </div>
       </div>
 
-      {recovered && issues.length > 0 && (
+      {recovered && issues.length > 0 && !degraded && (
         <div role="alert" style={{margin:'8px 10px 0', padding:'8px 10px', background:'rgba(255,180,80,.08)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>
           <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
             <span><b>Часть конфигурации пропущена</b> <span style={{color:'var(--muted)'}}>({issues.length}) — рабочие настройки доступны.</span></span>
@@ -239,6 +292,67 @@ export default function LLMSettings() {
               {issues.map((it, i) => <div key={i}>• {it.message}</div>)}
             </div>
           )}
+        </div>
+      )}
+
+      {reportStatus === 'missing' && (
+        <div role="status" style={{margin:'8px 10px 0', padding:'8px 10px', background:'rgba(120,180,255,.07)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>
+          Первый запуск: файл конфигурации отсутствует и будет создан при сохранении. Текущие настройки — безопасные значения по умолчанию.
+        </div>
+      )}
+
+      {reportStatus === 'migrated' && (
+        <div role="status" style={{margin:'8px 10px 0', padding:'8px 10px', background:'rgba(120,180,255,.07)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>
+          Конфигурация обновлена со схемы v{migratedFrom ?? 1} (в памяти, оригинал не тронут). При сохранении будет создан бэкап <code>llm.json.bak-v{migratedFrom ?? 1}-&lt;UTC&gt;</code>.
+        </div>
+      )}
+
+      {degraded && (
+        <div role="alert" style={{margin:'8px 10px 0', padding:'10px 12px', background:'rgba(255,80,80,.08)', border:'1px solid rgba(255,80,80,.4)', borderRadius:8, fontSize:12}}>
+          <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            <span><b>Конфигурация повреждена: {REASON_RU[reportReason ?? 'corrupt']}</b></span>
+            <span style={{marginLeft:'auto', display:'flex', gap:6}}>
+              <button onClick={()=>setShowIssueDetails(v=>!v)} aria-expanded={showIssueDetails} style={{padding:'4px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:6, fontSize:12}}>Подробнее</button>
+              {!recoverToken
+                ? <button onClick={startRecovery} style={{padding:'4px 10px', background:'var(--accent)', border:0, borderRadius:6, fontSize:12, fontWeight:700}}>Начать восстановление</button>
+                : <button onClick={()=>setConfirming(true)} style={{padding:'4px 10px', background:'var(--accent)', border:0, borderRadius:6, fontSize:12, fontWeight:700}}>Продолжить восстановление</button>}
+              <button onClick={load} style={{padding:'4px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12}}>↻ Перезагрузить</button>
+            </span>
+          </div>
+          <div style={{marginTop:4, color:'var(--muted)'}}>Сохранение заблокировано до явного подтверждения. Оригинал не тронут. {activePath ? <>Активный путь: <code>{activePath}</code></> : null}</div>
+          {showIssueDetails && (
+            <div style={{marginTop:6, display:'flex', flexDirection:'column', gap:2}}>
+              {issues.length === 0 && <div>• Детали недоступны без изменения оригинала.</div>}
+              {issues.map((it, i) => <div key={i}>• {it.message}</div>)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {saveError && (
+        <div role="alert" style={{margin:'8px 10px 0', padding:'8px 10px', background:'rgba(255,80,80,.08)', border:'1px solid rgba(255,80,80,.4)', borderRadius:8, fontSize:12}}>
+          {saveError}
+        </div>
+      )}
+
+      {confirming && (
+        <div role="alertdialog" aria-modal="true" aria-label="Подтверждение восстановления" style={{position:'fixed', inset:0, background:'rgba(0,0,0,.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}}>
+          <div style={{maxWidth:520, width:'90%', background:'var(--panel)', border:'1px solid rgba(255,80,80,.5)', borderRadius:12, padding:16, display:'flex', flexDirection:'column', gap:10}}>
+            <div style={{fontWeight:700, fontSize:14}}>Подтвердить destructive-перезапись?</div>
+            <div style={{fontSize:12, color:'var(--fg)'}}>
+              Оригинал будет сначала скопирован в <code>llm.json.corrupt-&lt;UTC&gt;</code> рядом с конфигом, затем создан обычный бэкап, и только потом выполнена запись.
+              Если копирование не удастся — запись будет отклонена, оригинал останется нетронутым.
+            </div>
+            {issues.length > 0 && (
+              <div style={{fontSize:12, maxHeight:140, overflow:'auto', display:'flex', flexDirection:'column', gap:2}}>
+                {issues.map((it, i) => <div key={i}>• {it.message}</div>)}
+              </div>
+            )}
+            <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
+              <button onClick={cancelConfirm} disabled={saving} style={{padding:'6px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>Отмена</button>
+              <button onClick={doConfirmedSave} disabled={saving} style={{padding:'6px 12px', background:'rgba(255,80,80,.85)', color:'#fff', border:0, borderRadius:8, fontWeight:700, fontSize:12}}>{saving ? 'Запись…' : 'Я понимаю, перезаписать'}</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -482,14 +596,14 @@ export default function LLMSettings() {
           <span style={{fontSize:12, color:'var(--accent-warn)'}}>● Есть несохранённые изменения</span>
           <span style={{marginLeft:'auto', display:'flex', gap:8}}>
             <button onClick={cancelEdit} disabled={saving} style={{padding:'6px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12, opacity: saving?0.5:1}}>Отмена</button>
-            <button onClick={save} disabled={saving} style={{padding:'6px 12px', background:'var(--accent)', border:0, borderRadius:8, fontWeight:700, fontSize:12, opacity: saving?0.5:1}}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+            <button onClick={save} disabled={saving || saveBlocked} title={saveBlocked ? 'Сохранение заблокировано: начните восстановление' : undefined} style={{padding:'6px 12px', background:'var(--accent)', border:0, borderRadius:8, fontWeight:700, fontSize:12, opacity: (saving || saveBlocked)?0.5:1}}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
           </span>
         </div>
       )}
       {!dirty && (
         <div style={{display:'flex', gap:8, alignItems:'center', padding:'6px 12px', borderTop:'1px solid var(--border)'}}>
           <span style={{fontSize:11, color:'var(--muted)'}}>{status}</span>
-          <span style={{marginLeft:'auto'}}><button onClick={save} style={{padding:'4px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11}}>Сохранить</button></span>
+          <span style={{marginLeft:'auto'}}><button onClick={save} disabled={saveBlocked} title={saveBlocked ? 'Сохранение заблокировано: начните восстановление' : undefined} style={{padding:'4px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, opacity: saveBlocked?0.5:1}}>Сохранить</button></span>
         </div>
       )}
     </div>
@@ -498,6 +612,16 @@ export default function LLMSettings() {
   function redactedView() {
     return redactedDiagnostics(cfg as llm.LlmConfig)
   }
+}
+
+const REASON_RU: Record<string, string> = {
+  corrupt: 'файл повреждён',
+  unreadable: 'файл недоступен для чтения',
+  migration_failed: 'миграция не удалась',
+  unsupported_version: 'неподдерживаемая версия схемы',
+  vault_missing: 'каталог из FRAGILE_VAULT отсутствует',
+  keyring_failed: 'сбой переноса секрета в хранилище',
+  invalid_entry: 'часть записей некорректна',
 }
 
 function apiUrlPlaceholder(kind: string): string {

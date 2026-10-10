@@ -13,10 +13,10 @@ use enrich::{enrich_notes, llm_chat, llm_status};
 use search::{LexicalSearchBackend, SearchBackend, SearchQuery, SearchQueryMode};
 use llm::{
     llm_chat_universal, llm_delete_pipeline, llm_delete_provider_credential, llm_download_model,
-    llm_get_config, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
+    llm_get_config, llm_get_config_report, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
     llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
-    llm_runtime_stop, llm_save_config, llm_save_pipeline, llm_scan_models, llm_set_active_model,
-    llm_set_provider_credential, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
+    llm_runtime_stop, llm_save_config, llm_save_config_confirmed, llm_save_pipeline, llm_scan_models, llm_set_active_model,
+    llm_set_provider_credential, llm_start_config_recovery, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
 };
 use llm::models::{llm_models_list, llm_models_scan};
 use llm::download::{llm_download_cancel, llm_download_list, llm_download_pause, llm_download_resume, llm_download_start, llm_download_status};
@@ -317,7 +317,10 @@ fn main() {
             tasks_update_status,
             tasks_archive,
             llm_get_config,
+            llm_get_config_report,
+            llm_start_config_recovery,
             llm_save_config,
+            llm_save_config_confirmed,
             llm_scan_models,
             llm_set_active_model,
             llm_download_model,

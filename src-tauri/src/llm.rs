@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
@@ -321,29 +322,235 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 }
 
 pub fn load_config_for_test() -> LlmConfig { load_config_inner() }
-pub(crate) fn load_config_inner() -> LlmConfig {
-    let p = config_path();
-    if !p.exists() { return LlmConfig::default(); }
-    let txt = match fs::read_to_string(&p) { Ok(t)=>t, Err(_)=> return LlmConfig::default() };
-    let val: serde_json::Value = match serde_json::from_str(&txt) { Ok(v)=>v, Err(_)=> return LlmConfig::default() };
-    // migrate if needed
-    if val.get("schema_version").and_then(|v| v.as_u64()) != Some(2) {
-        match migrate_to_v2(val.clone()) {
-            Ok(migrated) => {
-                // backup old
-                let bak = p.with_file_name(format!("llm.json.bak-v0.5.5"));
-                let _ = fs::copy(&p, &bak);
-                if let Ok(pretty) = serde_json::to_string_pretty(&migrated) { let _ = atomic_write(&p, &pretty); }
-                if let Ok(cfg) = serde_json::from_value::<LlmConfig>(migrated) { return cfg; }
-                return LlmConfig::default();
-            },
-            Err(_) => return LlmConfig::default(),
-        }
-    }
-    serde_json::from_value::<LlmConfig>(val).unwrap_or_else(|_| LlmConfig::default())
+// Legacy internal entry: best-effort working config. Never writes.
+// Degraded sources yield a safe in-memory subset/default; use
+// load_config_report_inner() when the status matters.
+pub(crate) fn load_config_inner() -> LlmConfig { load_config_report_inner().config }
+
+// ---------- Gate 1: non-destructive config load classification ----------
+// Read path NEVER writes: no quarantine, no backup, no migration persistence.
+// Recovery copies/backups are created only inside the guarded save flow
+// after an explicit recovery-start token.
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigLoadStatus { Missing, Valid, Migrated, Degraded }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigDegradedReason {
+    Corrupt, Unreadable, MigrationFailed, UnsupportedVersion,
+    VaultMissing, KeyringFailed, InvalidEntry,
 }
 
-fn migrate_to_v2(old: serde_json::Value) -> Result<serde_json::Value, String> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigLoadIssue {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigCandidateMeta {
+    pub role: String,
+    pub path: String,
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_secs: Option<i64>,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadReport {
+    pub status: ConfigLoadStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ConfigDegradedReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migrated_from: Option<u32>,
+    pub issues: Vec<ConfigLoadIssue>,
+    pub active_path: String,
+    pub candidates: Vec<ConfigCandidateMeta>,
+    // Always None on the read path (no side effects). Present only in
+    // save outcomes surfaced through dedicated commands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quarantine: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup: Option<String>,
+    pub config: LlmConfig,
+}
+
+fn cfg_issue(code: &str, index: Option<i64>, provider_id: Option<String>, detail: Option<String>) -> ConfigLoadIssue {
+    ConfigLoadIssue { code: code.to_string(), index, provider_id, detail }
+}
+
+// Safe short identifiers only: never raw file contents, never secrets.
+fn safe_short_id(v: Option<&serde_json::Value>) -> Option<String> {
+    let s = v?.as_str()?;
+    if s.is_empty() || s.len() > 128 { return None; }
+    Some(s.to_string())
+}
+fn safe_raw_kind(v: Option<&serde_json::Value>) -> Option<String> {
+    let s = v?.as_str()?;
+    if s.is_empty() || s.len() > 64 { return None; }
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | ' ')) { return None; }
+    Some(s.to_string())
+}
+fn is_known_provider_kind(kind: &str) -> bool {
+    matches!(kind.trim(), "local_llama_cpp" | "ollama" | "open_ai" | "gemini"
+        | "claude" | "custom_open_ai" | "deep_seek" | "open_router")
+}
+
+fn candidate_meta(role: &str, path: &Path, active: &Path) -> ConfigCandidateMeta {
+    let md = fs::symlink_metadata(path).ok();
+    ConfigCandidateMeta {
+        role: role.to_string(),
+        path: path.to_string_lossy().to_string(),
+        exists: md.is_some(),
+        size: md.as_ref().map(|m| m.len()),
+        modified_secs: md.as_ref().and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64),
+        active: path == active,
+    }
+}
+fn config_candidates(active: &Path) -> Vec<ConfigCandidateMeta> {
+    let vault = vault_root().join(".fragile").join("llm.json");
+    let global = dirs_next().join(".config").join("Fragile-Notes").join("llm.json");
+    vec![candidate_meta("vault", &vault, active), candidate_meta("global", &global, active)]
+}
+
+trait KeyStore { fn set(&self, provider_id: &str, secret: &str) -> Result<(), String>; }
+struct RealKeyStore;
+impl KeyStore for RealKeyStore {
+    fn set(&self, pid: &str, secret: &str) -> Result<(), String> { set_keyring(pid, secret) }
+}
+
+fn report_with(status: ConfigLoadStatus, reason: Option<ConfigDegradedReason>,
+    migrated_from: Option<u32>, issues: Vec<ConfigLoadIssue>,
+    active: &Path, candidates: Vec<ConfigCandidateMeta>, config: LlmConfig) -> LoadReport {
+    LoadReport { status, reason, migrated_from, issues,
+        active_path: active.to_string_lossy().to_string(),
+        candidates, quarantine: None, backup: None, config }
+}
+
+// Partial provider recovery: valid entries survive, bad ones become safe
+// issues. Only for documents whose root/top-level schema is intact.
+fn parse_v2_partial(obj: serde_json::Value, active: &Path, candidates: Vec<ConfigCandidateMeta>) -> LoadReport {
+    let arr = obj.get("providers").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut providers: Vec<Provider> = Vec::new();
+    let mut issues: Vec<ConfigLoadIssue> = Vec::new();
+    for (i, p) in arr.iter().enumerate() {
+        match serde_json::from_value::<Provider>(p.clone()) {
+            Ok(pr) => providers.push(pr),
+            Err(_) => {
+                let o = p.as_object();
+                let id = o.and_then(|m| safe_short_id(m.get("id")));
+                let raw = o.and_then(|m| m.get("kind"));
+                let known = raw.and_then(|k| k.as_str()).map(is_known_provider_kind).unwrap_or(false);
+                issues.push(cfg_issue(
+                    if known { "invalid_provider" } else { "unknown_kind" },
+                    Some(i as i64), id, safe_raw_kind(raw)));
+            }
+        }
+    }
+    let mut rest = obj;
+    rest["providers"] = serde_json::to_value(&providers).unwrap_or(serde_json::Value::Null);
+    rest["schema_version"] = serde_json::json!(2);
+    match serde_json::from_value::<LlmConfig>(rest) {
+        Ok(cfg) => {
+            if issues.is_empty() {
+                report_with(ConfigLoadStatus::Valid, None, None, vec![], active, candidates, cfg)
+            } else {
+                report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::InvalidEntry),
+                    None, issues, active, candidates, cfg)
+            }
+        }
+        Err(_) => {
+            issues.push(cfg_issue("invalid_root", None, None, None));
+            report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::Corrupt),
+                None, issues, active, candidates, LlmConfig::default())
+        }
+    }
+}
+
+pub(crate) fn load_config_report_inner() -> LoadReport {
+    let active = config_path();
+    let candidates = config_candidates(&active);
+    // 1. FRAGILE_VAULT points nowhere: location itself is dubious, never default silently.
+    if let Ok(custom) = std::env::var("FRAGILE_VAULT") {
+        if !PathBuf::from(&custom).exists() {
+            return report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::VaultMissing),
+                None, vec![cfg_issue("vault_missing", None, None, None)],
+                &active, candidates, LlmConfig::default());
+        }
+    }
+    // 2. Missing first-run config: safe in-memory default, save allowed.
+    if !active.exists() {
+        return report_with(ConfigLoadStatus::Missing, None, None, vec![], &active, candidates, LlmConfig::default());
+    }
+    // 3. Unreadable.
+    let txt = match fs::read_to_string(&active) {
+        Ok(t) => t,
+        Err(_) => return report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::Unreadable),
+            None, vec![cfg_issue("unreadable", None, None, None)],
+            &active, candidates, LlmConfig::default()),
+    };
+    // 4. Broken JSON / non-object root.
+    let val: serde_json::Value = match serde_json::from_str(&txt) {
+        Ok(v) => v,
+        Err(_) => return report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::Corrupt),
+            None, vec![cfg_issue("invalid_root", None, None, None)],
+            &active, candidates, LlmConfig::default()),
+    };
+    let obj = match val.as_object() {
+        Some(_) => val.clone(),
+        None => return report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::Corrupt),
+            None, vec![cfg_issue("invalid_root", None, None, None)],
+            &active, candidates, LlmConfig::default()),
+    };
+    // 5. Version dispatch. No writes on any branch.
+    let v = obj.get("schema_version").and_then(|x| x.as_u64());
+    let legacy = obj.get("version").and_then(|x| x.as_u64());
+    if v == Some(2) || (v.is_none() && legacy.is_none()) {
+        // v2, or version-less but otherwise shaped document (tolerated as v2).
+        if obj.get("providers").and_then(|x| x.as_array()).is_none() {
+            return report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::Corrupt),
+                None, vec![cfg_issue("invalid_root", None, None, None)],
+                &active, candidates, LlmConfig::default());
+        }
+        parse_v2_partial(obj, &active, candidates)
+    } else if v == Some(1) || legacy == Some(1) {
+        // v1: migrate in memory only. Persistence happens via the normal
+        // guarded save path (which creates the versioned backup).
+        match migrate_to_v2(obj, &RealKeyStore) {
+            Ok(migrated) => match serde_json::from_value::<LlmConfig>(migrated) {
+                Ok(cfg) => report_with(ConfigLoadStatus::Migrated, None, Some(1), vec![], &active, candidates, cfg),
+                Err(_) => report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::MigrationFailed),
+                    None, vec![cfg_issue("migration_failed", None, None, None)],
+                    &active, candidates, LlmConfig::default()),
+            },
+            Err(e) => {
+                let reason = if e.starts_with("keyring:") { ConfigDegradedReason::KeyringFailed } else { ConfigDegradedReason::MigrationFailed };
+                let code = if reason == ConfigDegradedReason::KeyringFailed { "keyring_failed" } else { "migration_failed" };
+                report_with(ConfigLoadStatus::Degraded, Some(reason),
+                    None, vec![cfg_issue(code, None, None, None)],
+                    &active, candidates, LlmConfig::default())
+            }
+        }
+    } else {
+        report_with(ConfigLoadStatus::Degraded, Some(ConfigDegradedReason::UnsupportedVersion),
+            None, vec![cfg_issue("unsupported_version", None, None, None)],
+            &active, candidates, LlmConfig::default())
+    }
+}
+
+fn migrate_to_v2(old: serde_json::Value, ks: &dyn KeyStore) -> Result<serde_json::Value, String> {
     // old schema v1 has version, providers with api_key, local, pipelines old shape
     let mut new_cfg = LlmConfig::default();
     new_cfg.schema_version = 2;
@@ -376,8 +583,8 @@ fn migrate_to_v2(old: serde_json::Value) -> Result<serde_json::Value, String> {
                 };
                 // if decoded looks like key (contains sk- etc) use decoded, else use raw
                 let secret = if decoded.len() >=10 { decoded } else { api_key_b64.to_string() };
-                // try keyring, if fails keep error but don't store plain
-                let _ = set_keyring(&id, &secret);
+                // keyring unavailable -> abort migration, no dangling secret_ref
+                ks.set(&id, &secret).map_err(|e| format!("keyring: {}", e))?;
                 auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: Some(secret_ref_for(&id)), account_id: None });
             } else if pv.get("auth").is_some() {
                 // already new
@@ -440,6 +647,158 @@ fn guess_task(name: &str) -> String {
     "general".to_string()
 }
 fn save_config_inner(cfg: &LlmConfig) -> Result<(), String> {
+    // Every write path passes the guard: degraded sources are rejected
+    // without a recovery token, healthy ones get backup + atomic write.
+    save_config_guarded(cfg, None).map(|_| ())
+}
+
+// ---------- Gate 1: recovery copies, backups, confirmation tokens ----------
+
+#[derive(Debug, Clone, PartialEq)]
+struct FileFingerprint { size: u64, mtime_secs: i64 }
+
+fn fingerprint_of(p: &Path) -> Option<FileFingerprint> {
+    let md = fs::symlink_metadata(p).ok()?;
+    let mtime_secs = md.modified().ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)?;
+    Some(FileFingerprint { size: md.len(), mtime_secs })
+}
+
+fn utc_stamp() -> String { chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string() }
+
+// Collision-safe sibling name: never overwrite an existing file.
+// First collision appends -1, then -2, etc.
+fn unique_sibling(live: &Path, first_name: &str) -> PathBuf {
+    let parent = live.parent().unwrap_or(Path::new("."));
+    let mut cand = parent.join(first_name);
+    let mut n = 0;
+    while cand.exists() {
+        n += 1;
+        cand = parent.join(format!("{}-{}", first_name, n));
+    }
+    cand
+}
+
+fn write_create_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut f = OpenOptions::new().write(true).create_new(true)
+        .open(path).map_err(|e| e.to_string())?;
+    f.write_all(bytes).map_err(|e| e.to_string())?;
+    let _ = f.sync_all();
+    if let Some(parent) = path.parent() {
+        if let Ok(d) = fs::File::open(parent) { let _ = d.sync_all(); }
+    }
+    Ok(())
+}
+
+// Pre-save backup, created BEFORE replacing the live config.
+// Ordinary: llm.json.bak-<UTC>. Migration: llm.json.bak-v<from>-<UTC>.
+fn create_pre_save_backup(live: &Path, migration_from: Option<u32>) -> Result<PathBuf, String> {
+    let name = match migration_from {
+        Some(f) => format!("llm.json.bak-v{}-{}", f, utc_stamp()),
+        None => format!("llm.json.bak-{}", utc_stamp()),
+    };
+    let dest = unique_sibling(live, &name);
+    let bytes = fs::read(live).map_err(|e| e.to_string())?;
+    write_create_new(&dest, &bytes)?;
+    Ok(dest)
+}
+
+// Rotation keeps the newest N ordinary backups. Never touches migration
+// backups (bak-v*) or corrupt quarantine files. Non-fatal by contract:
+// callers surface failures as warnings, never fail the save for them.
+fn rotate_ordinary_backups(dir: Option<&Path>, keep: usize) -> Result<Vec<String>, String> {
+    let dir = dir.unwrap_or(Path::new("."));
+    let rd = fs::read_dir(dir).map_err(|e| e.to_string())?;
+    let mut names: Vec<String> = Vec::new();
+    for e in rd {
+        let e = e.map_err(|e| e.to_string())?;
+        let n = e.file_name().to_string_lossy().to_string();
+        if let Some(rest) = n.strip_prefix("llm.json.bak-") {
+            if rest.starts_with(|c: char| c.is_ascii_digit()) { names.push(n); }
+        }
+    }
+    names.sort();
+    names.reverse(); // newest first: UTC stamps sort lexicographically
+    let mut removed = Vec::new();
+    for n in names.into_iter().skip(keep) {
+        match fs::remove_file(dir.join(&n)) {
+            Ok(_) => removed.push(n),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(removed)
+}
+
+struct TokenRecord {
+    path: PathBuf,
+    fp: Option<FileFingerprint>,
+    expires_at: std::time::Instant,
+}
+static RECOVERY_TOKENS: Lazy<Mutex<HashMap<String, TokenRecord>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+const RECOVERY_TOKEN_TTL_SECS: u64 = 600;
+
+fn new_token_string() -> String {
+    (0..4).map(|_| format!("{:016x}", rand::random::<u64>())).collect()
+}
+
+fn issue_recovery_token(path: &Path, fp: Option<FileFingerprint>) -> String {
+    // Policy note (intentional, not a leak): the read/report path is
+    // non-mutating and never purges this store. Tokens live in RAM until
+    // TTL expiry, single-use consumption, a newer issue for the same path,
+    // or successful save. The frontend drops its in-memory copy on Reload,
+    // so Reload needs no backend purge and performs no filesystem writes.
+    let mut map = RECOVERY_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    // Single active token per path: purge expired and previous ones.
+    map.retain(|_, r| r.expires_at > now && r.path != *path);
+    let t = new_token_string();
+    map.insert(t.clone(), TokenRecord {
+        path: path.to_path_buf(), fp,
+        expires_at: now + std::time::Duration::from_secs(RECOVERY_TOKEN_TTL_SECS),
+    });
+    t
+}
+
+fn validate_and_consume_recovery_token(tok: &str, path: &Path, fp: Option<FileFingerprint>) -> Result<(), String> {
+    let mut map = RECOVERY_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+    let rec = map.remove(tok).ok_or_else(|| "InvalidConfirmToken: unknown, expired or already used token".to_string())?;
+    if rec.expires_at <= std::time::Instant::now() {
+        return Err("InvalidConfirmToken: token expired, restart recovery".to_string());
+    }
+    if rec.path != *path {
+        return Err("InvalidConfirmToken: config path changed, restart recovery".to_string());
+    }
+    if rec.fp != fp {
+        return Err("InvalidConfirmToken: source changed since recovery start, restart recovery".to_string());
+    }
+    Ok(())
+}
+
+fn invalidate_recovery_tokens(path: &Path) {
+    let mut map = RECOVERY_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, r| r.path != *path);
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveOutcome {
+    pub saved_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_copy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup: Option<String>,
+    pub rotated_out: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation_warning: Option<String>,
+}
+
+fn scrub_for_save(cfg: &LlmConfig) -> LlmConfig {
     let mut to_save = cfg.clone();
     to_save.schema_version = 2;
     // ensure no plain secrets in file — auth only has secret_ref
@@ -452,11 +811,92 @@ fn save_config_inner(cfg: &LlmConfig) -> Result<(), String> {
         }
         // never store api_key plain —Providers now have no api_key field, so nothing to scrub
     }
-    let p = config_path();
-    ensure_parent(&p)?;
+    to_save
+}
+
+fn restore_masked_secrets(cfg: &mut LlmConfig) {
+    // never accept plain secret in config_json — frontend should use llm_set_provider_credential
+    for pr in &mut cfg.providers {
+        if let Some(auth) = &pr.auth {
+            if auth.method == AuthMethod::ApiKey && auth.secret_ref.as_deref() == Some("masked:••••••••") {
+                // keep existing keyring, don't overwrite
+                let existing = load_config_inner().providers.into_iter().find(|p| p.id==pr.id).and_then(|p| p.auth).and_then(|a| a.secret_ref);
+                pr.auth.as_mut().unwrap().secret_ref = existing;
+            }
+        }
+    }
+}
+
+fn mask_config(cfg: LlmConfig) -> LlmConfig {
+    let mut masked = cfg;
+    for pr in &mut masked.providers {
+        if let Some(auth) = &mut pr.auth {
+            if auth.method == AuthMethod::ApiKey {
+                let has = has_keyring(&pr.id);
+                auth.secret_ref = Some(if has { "masked:••••••••".to_string() } else { String::new() });
+            }
+        }
+    }
+    masked
+}
+
+// The single write funnel. Ordering:
+// 1. classify (read-only) -> 2. degraded requires valid one-time token ->
+// 3. recovery copy of the original (degraded only) -> 4. pre-save backup
+// (live exists) -> 5. atomic write -> 6. rotation (non-fatal) ->
+// 7. invalidate all tokens for the path.
+// Any failure before step 5 leaves the original intact.
+fn save_config_guarded(cfg: &LlmConfig, token: Option<&str>) -> Result<SaveOutcome, String> {
+    save_config_guarded_with(cfg, token, create_pre_save_backup)
+}
+
+// Backup step is injectable so the BackupFailed path is testable
+// deterministically (no permission tricks, root-independent).
+fn save_config_guarded_with(
+    cfg: &LlmConfig,
+    token: Option<&str>,
+    pre_save_backup: fn(&Path, Option<u32>) -> Result<PathBuf, String>,
+) -> Result<SaveOutcome, String> {
+    let live = config_path();
+    let rep = load_config_report_inner();
+    let degraded = rep.status == ConfigLoadStatus::Degraded;
+    if degraded {
+        let t = token.filter(|s| !s.is_empty()).ok_or_else(||
+            "DegradedSaveBlocked: config is degraded, start explicit recovery first".to_string())?;
+        validate_and_consume_recovery_token(t, &live, fingerprint_of(&live))?;
+    }
+    let to_save = scrub_for_save(cfg);
     let txt = serde_json::to_string_pretty(&to_save).map_err(|e| e.to_string())?;
-    atomic_write(&p, &txt)?;
-    Ok(())
+    let mut outcome = SaveOutcome {
+        saved_path: live.to_string_lossy().to_string(),
+        recovery_copy: None, backup: None,
+        rotated_out: Vec::new(), rotation_warning: None,
+    };
+    if degraded {
+        // Recovery copy immediately before the confirmed overwrite.
+        // Failure denies the overwrite; the original stays intact.
+        let bytes = fs::read(&live)
+            .map_err(|e| format!("RecoveryCopyFailed: cannot re-read original: {}", e))?;
+        let dest = unique_sibling(&live, &format!("llm.json.corrupt-{}", utc_stamp()));
+        write_create_new(&dest, &bytes)
+            .map_err(|e| format!("RecoveryCopyFailed: {}", e))?;
+        outcome.recovery_copy = Some(dest.to_string_lossy().to_string());
+    }
+    if live.exists() {
+        let mig_from = if rep.status == ConfigLoadStatus::Migrated { rep.migrated_from } else { None };
+        let bak = pre_save_backup(&live, mig_from)
+            .map_err(|e| format!("BackupFailed: {}", e))?;
+        outcome.backup = Some(bak.to_string_lossy().to_string());
+    } else {
+        ensure_parent(&live)?;
+    }
+    atomic_write(&live, &txt).map_err(|e| format!("save failed: {}", e))?;
+    match rotate_ordinary_backups(live.parent(), 5) {
+        Ok(removed) => outcome.rotated_out = removed,
+        Err(e) => outcome.rotation_warning = Some(e),
+    }
+    invalidate_recovery_tokens(&live);
+    Ok(outcome)
 }
 
 // ---------- privacy guard ----------
@@ -472,37 +912,50 @@ fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind) -
 #[tauri::command]
 pub fn llm_get_config() -> Result<String, String> {
     let cfg = load_config_inner();
-    // mask secrets for frontend
-    let mut masked = cfg.clone();
-    for pr in &mut masked.providers {
-        if let Some(auth) = &mut pr.auth {
-            if auth.method == AuthMethod::ApiKey {
-                let has = has_keyring(&pr.id);
-                auth.secret_ref = Some(if has { "masked:••••••••".to_string() } else { "".to_string() });
-                // frontend gets hasSecret via separate command, but we keep masked
-            }
-        }
-    }
     // frontend expects legacy shape? Provide both: providers with endpoint, models, etc.
     // also include legacy local for compat
+    serde_json::to_string(&mask_config(cfg)).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn llm_get_config_report() -> Result<String, String> {
+    let rep = load_config_report_inner();
+    let masked = LoadReport { config: mask_config(rep.config), ..rep };
     serde_json::to_string(&masked).map_err(|e| e.to_string())
+}
+// Explicit recovery start: issues the one-time confirmation token for a
+// degraded config. Memory-only, short-lived, bound to active path +
+// source fingerprint. Never logged, never stored.
+#[tauri::command]
+pub fn llm_start_config_recovery() -> Result<String, String> {
+    let rep = load_config_report_inner();
+    if rep.status != ConfigLoadStatus::Degraded {
+        return Err("no_recovery_needed: config is not degraded".to_string());
+    }
+    let path = config_path();
+    let token = issue_recovery_token(&path, fingerprint_of(&path));
+    let out = serde_json::json!({
+        "token": token,
+        "active_path": path.to_string_lossy(),
+        "reason": rep.reason,
+        "issues": rep.issues,
+    });
+    serde_json::to_string(&out).map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub fn llm_save_config(config_json: String) -> Result<String, String> {
     let mut cfg: LlmConfig = serde_json::from_str(&config_json).map_err(|e| format!("parse config: {}", e))?;
     cfg.schema_version = 2;
-    // never accept plain secret in config_json — frontend should use llm_set_provider_credential
-    for pr in &mut cfg.providers {
-        if let Some(auth) = &pr.auth {
-            if auth.method == AuthMethod::ApiKey && auth.secret_ref.is_some() && auth.secret_ref.as_deref() == Some("masked:••••••••") {
-                // keep existing keyring, don't overwrite
-                let existing = load_config_inner().providers.into_iter().find(|p| p.id==pr.id).and_then(|p| p.auth).and_then(|a| a.secret_ref);
-                pr.auth.as_mut().unwrap().secret_ref = existing;
-            }
-        }
-    }
+    restore_masked_secrets(&mut cfg);
     save_config_inner(&cfg)?;
     Ok("saved".to_string())
+}
+#[tauri::command]
+pub fn llm_save_config_confirmed(config_json: String, confirm_token: String) -> Result<String, String> {
+    let mut cfg: LlmConfig = serde_json::from_str(&config_json).map_err(|e| format!("CorruptInput: {}", e))?;
+    cfg.schema_version = 2;
+    restore_masked_secrets(&mut cfg);
+    let outcome = save_config_guarded(&cfg, Some(&confirm_token))?;
+    serde_json::to_string(&outcome).map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub fn llm_has_provider_credential(provider_id: String) -> Result<String, String> {
@@ -1036,6 +1489,55 @@ mod tests {
     }
     fn rand_string(n: usize) -> String { (0..n).map(|_| (b'a' + (rand::random::<u8>() % 26)) as char).collect() }
 
+    // Isolated env: temp HOME + FRAGILE_VAULT, restored on drop. No real
+    // user data, no network, no system keyring dependency.
+    static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    struct IsolatedEnv {
+        _g: std::sync::MutexGuard<'static, ()>,
+        tmp: PathBuf,
+        old_home: Option<std::ffi::OsString>,
+        old_vault: Option<std::ffi::OsString>,
+    }
+    impl IsolatedEnv {
+        fn lock(name: &str) -> Self {
+            let g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+            let tmp = std::env::temp_dir().join(format!("fragile-gate1-{}-{}-{}", std::process::id(), name, rand_string(6)));
+            let vault = tmp.join("vault");
+            fs::create_dir_all(vault.join(".fragile")).unwrap();
+            let old_home = std::env::var_os("HOME");
+            let old_vault = std::env::var_os("FRAGILE_VAULT");
+            std::env::set_var("HOME", &tmp);
+            std::env::set_var("FRAGILE_VAULT", &vault);
+            Self { _g: g, tmp, old_home, old_vault }
+        }
+        fn cfg_path(&self) -> PathBuf {
+            PathBuf::from(std::env::var_os("FRAGILE_VAULT").unwrap()).join(".fragile").join("llm.json")
+        }
+        fn dir(&self) -> PathBuf {
+            PathBuf::from(std::env::var_os("FRAGILE_VAULT").unwrap()).join(".fragile")
+        }
+    }
+    impl Drop for IsolatedEnv {
+        fn drop(&mut self) {
+            match &self.old_home { Some(v) => std::env::set_var("HOME", v), None => std::env::remove_var("HOME") }
+            match &self.old_vault { Some(v) => std::env::set_var("FRAGILE_VAULT", v), None => std::env::remove_var("FRAGILE_VAULT") }
+            let _ = fs::remove_dir_all(&self.tmp);
+        }
+    }
+    struct MemKeyStore;
+    impl KeyStore for MemKeyStore {
+        fn set(&self, _pid: &str, _secret: &str) -> Result<(), String> { Ok(()) }
+    }
+    struct FailKeyStore;
+    impl KeyStore for FailKeyStore {
+        fn set(&self, _pid: &str, _secret: &str) -> Result<(), String> { Err("keyring unavailable".to_string()) }
+    }
+    fn write_valid_config(path: &Path) {
+        let cfg = LlmConfig::default();
+        let txt = serde_json::to_string_pretty(&cfg).unwrap();
+        fs::write(path, txt).unwrap();
+    }
+
     #[test]
     fn test_migration_v1_to_v2() {
         let old = serde_json::json!({
@@ -1047,15 +1549,13 @@ mod tests {
             "pipelines": [],
             "active_pipeline":"enrich"
         });
-        let migrated = migrate_to_v2(old).expect("migrate");
+        let migrated = migrate_to_v2(old, &MemKeyStore).expect("migrate");
         assert_eq!(migrated.get("schema_version").and_then(|v| v.as_u64()), Some(2));
         let prov = migrated.get("providers").and_then(|v| v.as_array()).unwrap();
         let openai = prov.iter().find(|p| p.get("id").and_then(|v| v.as_str())==Some("openai")).unwrap();
         // old api_key should be gone, replaced by auth.secret_ref
         assert!(openai.get("api_key").is_none(), "api_key should be removed after migration");
         assert!(openai.get("auth").is_some());
-        // cleanup keyring entry created during migration
-        let _ = delete_keyring("openai");
     }
 
     #[test]
@@ -1218,6 +1718,330 @@ mod tests {
                 _ => assert_eq!(gen.max_tokens, d.max_tokens, "case {k}={v}"),
             }
         }
+    }
+
+    // ---------- Gate 1: non-destructive recovery tests ----------
+    fn dir_files(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir).map(|rd| rd.filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn gate1_missing_first_run() {
+        let env = IsolatedEnv::lock("missing");
+        let p = env.cfg_path();
+        assert!(!p.exists());
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Missing);
+        assert!(rep.reason.is_none());
+        assert!(!p.exists(), "read path must not create files");
+        // first save is allowed and creates parent dirs
+        let out = save_config_guarded(&LlmConfig::default(), None).expect("first save");
+        assert!(p.exists());
+        assert!(out.backup.is_none(), "no backup when nothing existed");
+    }
+
+    #[test]
+    fn gate1_corrupt_no_write() {
+        let env = IsolatedEnv::lock("corrupt");
+        let p = env.cfg_path();
+        fs::write(&p, b"{not json{{").unwrap();
+        let before = dir_files(&env.dir());
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Degraded);
+        assert_eq!(rep.reason, Some(ConfigDegradedReason::Corrupt));
+        assert_eq!(fs::read(&p).unwrap(), b"{not json{{", "original intact");
+        assert_eq!(dir_files(&env.dir()), before, "read path creates no quarantine/backup");
+        // degraded save denied without token
+        let err = save_config_guarded(&LlmConfig::default(), None).unwrap_err();
+        assert!(err.starts_with("DegradedSaveBlocked"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), b"{not json{{");
+    }
+
+    #[test]
+    fn gate1_unreadable() {
+        let env = IsolatedEnv::lock("unreadable");
+        let p = env.cfg_path();
+        // a directory at the config path fails read_to_string deterministically
+        fs::create_dir_all(&p).unwrap();
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Degraded);
+        assert_eq!(rep.reason, Some(ConfigDegradedReason::Unreadable));
+        fs::remove_dir(&p).unwrap();
+    }
+
+    #[test]
+    fn gate1_stale_tmp_ignored() {
+        let env = IsolatedEnv::lock("staletmp");
+        let p = env.cfg_path();
+        write_valid_config(&p);
+        let tmp = p.with_extension("tmp");
+        fs::write(&tmp, b"garbage").unwrap();
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Valid);
+        assert_eq!(fs::read(&tmp).unwrap(), b"garbage", "stale tmp untouched");
+    }
+
+    #[test]
+    fn gate1_v1_migrates_without_write() {
+        let env = IsolatedEnv::lock("v1nowrite");
+        let p = env.cfg_path();
+        let v1 = serde_json::json!({
+            "version": 1,
+            "providers": [{"id":"openai","name":"OpenAI","kind":"open_ai","enabled":true,"api_url":"https://api.openai.com/v1","model":"gpt-4o"}],
+            "local": {"binary_path":"llama-server","models_dir":"/tmp/Models","active_model":"","n_ctx":8192,"n_threads":0,"n_gpu_layers":0,"temp":0.7,"top_p":0.9,"top_k":40,"repeat_penalty":1.1,"port":8010,"auto_start":false,"use_mmap":true,"extra_args":""},
+            "pipelines": [], "active_pipeline":"enrich"
+        });
+        let raw = serde_json::to_string_pretty(&v1).unwrap();
+        fs::write(&p, &raw).unwrap();
+        // Note: load uses RealKeyStore; this fixture has no api_key so no keyring touch.
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Migrated);
+        assert_eq!(rep.migrated_from, Some(1));
+        assert_eq!(fs::read_to_string(&p).unwrap(), raw, "read path must not persist migration");
+        assert!(dir_files(&env.dir()).iter().all(|n| !n.contains(".bak")), "no backup on read");
+    }
+
+    #[test]
+    fn gate1_keyring_failure_aborts_migration() {
+        let old = serde_json::json!({
+            "version": 1,
+            "providers": [{"id":"openai","name":"OpenAI","kind":"open_ai","enabled":true,"api_key":"c2stZmFrZS1rZXktMTIzNA==","api_url":"https://api.openai.com/v1","model":"gpt-4o"}],
+            "pipelines": [], "active_pipeline":"enrich"
+        });
+        let err = migrate_to_v2(old, &FailKeyStore).unwrap_err();
+        assert!(err.starts_with("keyring:"), "got: {}", err);
+    }
+
+    #[test]
+    fn gate1_future_schema() {
+        let env = IsolatedEnv::lock("future");
+        let p = env.cfg_path();
+        let raw = r#"{"schema_version":99,"providers":[]}"#;
+        fs::write(&p, raw).unwrap();
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Degraded);
+        assert_eq!(rep.reason, Some(ConfigDegradedReason::UnsupportedVersion));
+        assert_eq!(fs::read_to_string(&p).unwrap(), raw, "untouched");
+    }
+
+    #[test]
+    fn gate1_partial_providers() {
+        let env = IsolatedEnv::lock("partial");
+        let p = env.cfg_path();
+        let cfg = LlmConfig::default();
+        let good: Vec<serde_json::Value> = cfg.providers.iter().take(2)
+            .map(|pr| serde_json::to_value(pr).unwrap()).collect();
+        let raw_cfg = serde_json::json!({
+            "schema_version": 2,
+            "providers": [
+                good[0].clone(),
+                {"id":"weird","name":"Weird","kind":"quantum_ai","enabled":false,"endpoint":"","default_model":""},
+                {"id":123,"kind":"open_ai"},
+                good[1].clone(),
+            ],
+            "models": [], "runtime_profiles": [], "task_profiles": cfg.task_profiles.clone(),
+            "pipelines": cfg.pipelines.clone(), "active_pipeline": cfg.active_pipeline.clone(),
+            "local": cfg.local.clone(),
+        });
+        let raw = serde_json::to_string_pretty(&raw_cfg).unwrap();
+        fs::write(&p, &raw).unwrap();
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Degraded);
+        assert_eq!(rep.reason, Some(ConfigDegradedReason::InvalidEntry));
+        assert_eq!(rep.issues.len(), 2);
+        assert_eq!(rep.config.providers.len(), 2, "valid subset preserved");
+        assert_eq!(fs::read_to_string(&p).unwrap(), raw, "original never modified during load");
+        assert!(rep.issues.iter().any(|i| i.code == "unknown_kind"));
+        assert!(rep.issues.iter().any(|i| i.code == "invalid_provider"));
+    }
+
+    #[test]
+    fn gate1_recovery_token_flow() {
+        let env = IsolatedEnv::lock("tokenflow");
+        let p = env.cfg_path();
+        let corrupt: &[u8] = b"[[broken";
+        fs::write(&p, corrupt).unwrap();
+        // recovery start is read-only: no files created or changed
+        let before = dir_files(&env.dir());
+        let started = llm_start_config_recovery().expect("recovery start");
+        assert_eq!(dir_files(&env.dir()), before, "recovery start must not write");
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "source untouched by recovery start");
+        let v: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let token = v.get("token").and_then(|t| t.as_str()).unwrap().to_string();
+        assert!(token.len() >= 32);
+        // wrong token rejected, source preserved
+        let err = save_config_guarded(&LlmConfig::default(), Some("deadbeef")).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), corrupt);
+        // valid token: recovery copy + backup + write, single-use
+        let out = save_config_guarded(&LlmConfig::default(), Some(&token)).expect("confirmed save");
+        let rc_path = out.recovery_copy.clone().expect("recovery copy");
+        assert!(out.backup.is_some());
+        assert_eq!(fs::read(&rc_path).unwrap(), corrupt, "recovery copy byte-identical to corrupt source");
+        let names = dir_files(&env.dir());
+        assert!(names.iter().any(|n| n.starts_with("llm.json.corrupt-")), "recovery copy present: {:?}", names);
+        assert!(names.iter().any(|n| n.starts_with("llm.json.bak-")), "backup present: {:?}", names);
+        // live config is now the valid new content
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Valid);
+        // single-use: re-corrupt inside the fixture, old token must not authorize again
+        fs::write(&p, corrupt).unwrap();
+        let err2 = save_config_guarded(&LlmConfig::default(), Some(&token)).unwrap_err();
+        assert!(err2.starts_with("InvalidConfirmToken"), "got: {}", err2);
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "rejected attempt preserves corrupt source");
+    }
+
+    #[test]
+    fn gate1_no_recovery_when_healthy() {
+        let env = IsolatedEnv::lock("healthy");
+        write_valid_config(&env.cfg_path());
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Valid);
+        assert!(llm_start_config_recovery().is_err());
+        // healthy save creates ordinary backup
+        let out = save_config_guarded(&LlmConfig::default(), None).expect("save");
+        assert!(out.backup.is_some());
+        assert!(out.recovery_copy.is_none());
+    }
+
+    #[test]
+    fn gate1_backup_failure_blocks_overwrite() {
+        let env = IsolatedEnv::lock("bakfail");
+        let p = env.cfg_path();
+        write_valid_config(&p);
+        let original = fs::read(&p).unwrap();
+        let before = dir_files(&env.dir());
+        let err = save_config_guarded_with(
+            &LlmConfig::default(),
+            None,
+            |_, _| Err("injected backup failure".to_string()),
+        ).unwrap_err();
+        assert!(err.starts_with("BackupFailed"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), original, "original live bytes unchanged");
+        assert_eq!(dir_files(&env.dir()), before, "no partial new config, no recovery copy on healthy path");
+    }
+
+    #[test]
+    fn gate1_migrated_save_creates_versioned_backup() {
+        let env = IsolatedEnv::lock("migbak");
+        let p = env.cfg_path();
+        let v1 = serde_json::json!({
+            "version": 1,
+            "providers": [{"id":"openai","name":"OpenAI","kind":"open_ai","enabled":true,"api_url":"https://api.openai.com/v1","model":"gpt-4o"}],
+            "local": {"binary_path":"llama-server","models_dir":"/tmp/Models","active_model":"","n_ctx":8192,"n_threads":0,"n_gpu_layers":0,"temp":0.7,"top_p":0.9,"top_k":40,"repeat_penalty":1.1,"port":8010,"auto_start":false,"use_mmap":true,"extra_args":""},
+            "pipelines": [], "active_pipeline":"enrich"
+        });
+        let raw = serde_json::to_string_pretty(&v1).unwrap();
+        fs::write(&p, &raw).unwrap();
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Migrated);
+        let out = save_config_guarded(&rep.config, None).expect("migrated save");
+        assert!(out.recovery_copy.is_none(), "healthy-path save needs no recovery copy");
+        let names = dir_files(&env.dir());
+        let mig: Vec<_> = names.iter().filter(|n| n.starts_with("llm.json.bak-v1-")).collect();
+        assert_eq!(mig.len(), 1, "one versioned migration backup: {:?}", names);
+        assert_eq!(fs::read_to_string(env.dir().join(mig[0])).unwrap(), raw, "migration backup holds source v1 bytes");
+        // rotation must not delete the migration backup
+        let dir = env.dir();
+        for i in 0..6 {
+            fs::write(dir.join(format!("llm.json.bak-202601{:02}T000000Z", i)), b"old").unwrap();
+        }
+        save_config_guarded(&LlmConfig::default(), None).expect("second save");
+        let names2 = dir_files(&dir);
+        assert!(names2.iter().any(|n| n.starts_with("llm.json.bak-v1-")), "migration backup survives rotation: {:?}", names2);
+        let ordinary = names2.iter().filter(|n| {
+            n.strip_prefix("llm.json.bak-").map(|r| r.starts_with(|c: char| c.is_ascii_digit())).unwrap_or(false)
+        }).count();
+        assert_eq!(ordinary, 5, "ordinary cap still N=5: {:?}", names2);
+    }
+
+    #[test]
+    fn gate1_reload_does_not_invalidate_token() {
+        // Policy (intentional): the read/report path is non-mutating and
+        // never purges the RAM token store; the frontend drops its own
+        // in-memory copy on Reload. Reloads must neither consume the
+        // token nor require a backend purge.
+        let env = IsolatedEnv::lock("reloadtok");
+        let p = env.cfg_path();
+        fs::write(&p, b"{oops").unwrap();
+        let started = llm_start_config_recovery().expect("start");
+        let v: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let token = v.get("token").and_then(|t| t.as_str()).unwrap().to_string();
+        assert_eq!(load_config_report_inner().status, ConfigLoadStatus::Degraded);
+        assert_eq!(load_config_report_inner().reason, Some(ConfigDegradedReason::Corrupt));
+        let out = save_config_guarded(&LlmConfig::default(), Some(&token)).expect("save after reloads");
+        assert!(out.recovery_copy.is_some());
+    }
+
+    #[test]
+    fn gate1_rotation_keeps_five() {
+        let env = IsolatedEnv::lock("rotation");
+        let p = env.cfg_path();
+        write_valid_config(&p);
+        let dir = env.dir();
+        for i in 0..7 {
+            fs::write(dir.join(format!("llm.json.bak-202601{:02}T000000Z", i)), b"old").unwrap();
+        }
+        fs::write(dir.join("llm.json.bak-v1-20260101T000000Z"), b"mig").unwrap();
+        fs::write(dir.join("llm.json.corrupt-20260101T000000Z"), b"q").unwrap();
+        save_config_guarded(&LlmConfig::default(), None).expect("save");
+        let names = dir_files(&dir);
+        let ordinary: Vec<_> = names.iter().filter(|n| {
+            n.strip_prefix("llm.json.bak-").map(|r| r.starts_with(|c: char| c.is_ascii_digit())).unwrap_or(false)
+        }).collect();
+        assert_eq!(ordinary.len(), 5, "ordinary backups capped at 5: {:?}", names);
+        assert!(names.iter().any(|n| n == "llm.json.bak-v1-20260101T000000Z"), "migration backup kept");
+        assert!(names.iter().any(|n| n == "llm.json.corrupt-20260101T000000Z"), "quarantine kept");
+    }
+
+    #[test]
+    fn gate1_quarantine_collision() {
+        let env = IsolatedEnv::lock("collision");
+        let p = env.cfg_path();
+        let first = unique_sibling(&p, "llm.json.corrupt-20261010T080000Z");
+        assert_eq!(first.file_name().unwrap().to_string_lossy(), "llm.json.corrupt-20261010T080000Z");
+        write_create_new(&first, b"a").unwrap();
+        let second = unique_sibling(&p, "llm.json.corrupt-20261010T080000Z");
+        assert_eq!(second.file_name().unwrap().to_string_lossy(), "llm.json.corrupt-20261010T080000Z-1");
+        write_create_new(&second, b"b").unwrap();
+        assert_eq!(fs::read(&first).unwrap(), b"a", "existing quarantine never overwritten");
+    }
+
+    #[test]
+    fn gate1_no_secrets_in_report() {
+        let env = IsolatedEnv::lock("nosecrets");
+        let p = env.cfg_path();
+        let mut cfg = LlmConfig::default();
+        if let Some(pr) = cfg.providers.iter_mut().find(|x| x.id == "openai") {
+            pr.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/openai".to_string()), account_id: None });
+        }
+        fs::write(&p, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let rep = load_config_report_inner();
+        let masked = mask_config(rep.config);
+        let json = serde_json::to_string(&masked).unwrap();
+        assert!(!json.contains("keychain://"), "secret_ref must be masked");
+        // every api-key provider carries only the masked placeholder or empty
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        for pr in v.get("providers").and_then(|x| x.as_array()).cloned().unwrap_or_default() {
+            if pr.get("auth").and_then(|a| a.get("method")).and_then(|m| m.as_str()) == Some("api_key") {
+                let r = pr.get("auth").and_then(|a| a.get("secret_ref")).and_then(|s| s.as_str()).unwrap_or("");
+                assert!(r == "masked:••••••••" || r.is_empty(), "unmasked secret_ref: {:?}", r);
+            }
+        }
+        let dbg = format!("{:?}", rep.issues);
+        assert!(!dbg.contains("keychain://"));
+    }
+
+    #[test]
+    fn gate1_vault_missing() {
+        let _env = IsolatedEnv::lock("vaultmiss");
+        let missing = std::env::temp_dir().join(format!("fragile-gate1-nothing-{}-{}", std::process::id(), rand_string(6)));
+        std::env::set_var("FRAGILE_VAULT", &missing);
+        let rep = load_config_report_inner();
+        assert_eq!(rep.status, ConfigLoadStatus::Degraded);
+        assert_eq!(rep.reason, Some(ConfigDegradedReason::VaultMissing));
     }
 }
 

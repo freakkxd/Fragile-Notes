@@ -167,11 +167,55 @@ export interface LlmConfigIssue {
   repairable: boolean
 }
 
+// Gate 1: typed backend load report. Token is NEVER part of the report:
+// it is issued only by llmStartConfigRecovery and lives in component
+// state (memory only, never localStorage).
+export type ConfigLoadStatus = 'missing' | 'valid' | 'migrated' | 'degraded'
+export type ConfigDegradedReason =
+  | 'corrupt' | 'unreadable' | 'migration_failed' | 'unsupported_version'
+  | 'vault_missing' | 'keyring_failed' | 'invalid_entry'
+export interface ConfigReportIssue {
+  code: string
+  index?: number | null
+  provider_id?: string | null
+  detail?: string | null
+}
+export interface ConfigReportCandidate {
+  role: string
+  path: string
+  exists: boolean
+  size?: number | null
+  modified_secs?: number | null
+  active: boolean
+}
+export interface ConfigReport {
+  status: ConfigLoadStatus
+  reason?: ConfigDegradedReason | null
+  migrated_from?: number | null
+  issues: ConfigReportIssue[]
+  active_path: string
+  candidates: ConfigReportCandidate[]
+  quarantine?: string | null
+  backup?: string | null
+  config: unknown
+}
+export interface RecoveryStart {
+  token: string
+  active_path: string
+  reason: ConfigDegradedReason | null
+  issues: ConfigReportIssue[]
+}
+
 export interface LlmConfigLoadResult {
   /** working config, or null when nothing usable could be built */
   config: LlmConfig | null
   issues: LlmConfigIssue[]
   recovered: boolean
+  /** backend report classification; absent only on legacy fallback */
+  reportStatus?: ConfigLoadStatus
+  reportReason?: ConfigDegradedReason | null
+  activePath?: string
+  migratedFrom?: number | null
 }
 
 function safeId(v: unknown): string | null {
@@ -273,7 +317,31 @@ export function parseConfigSafe(raw: unknown): LlmConfigLoadResult {
   return { config: parsed.data, issues, recovered: issues.length > 0 }
 }
 
-/** Load config through the tolerant path. Never throws a raw Zod error. */
+const BACKEND_ISSUE_MESSAGE: Record<string, string> = {
+  unknown_kind: 'Неподдерживаемый тип провайдера.',
+  invalid_provider: 'Некорректная запись провайдера.',
+  invalid_root: 'Конфигурация повреждена и не может быть прочитана.',
+  unreadable: 'Конфигурация недоступна для чтения.',
+  vault_missing: 'Каталог из FRAGILE_VAULT отсутствует.',
+  unsupported_version: 'Неподдерживаемая версия схемы конфигурации.',
+  migration_failed: 'Миграция конфигурации не удалась.',
+  keyring_failed: 'Не удалось перенести секрет в системное хранилище.',
+}
+
+function mapReportIssue(it: ConfigReportIssue): LlmConfigIssue {
+  const code: LlmConfigIssueCode =
+    it.code === 'unknown_kind' ? 'unknown_kind'
+    : it.code === 'invalid_provider' ? 'invalid_provider'
+    : 'invalid_root'
+  const idx = typeof it.index === 'number' ? it.index : -1
+  const providerId = typeof it.provider_id === 'string' ? it.provider_id : null
+  const rawKind = typeof it.detail === 'string' ? it.detail : null
+  const base = BACKEND_ISSUE_MESSAGE[it.code] ?? BACKEND_ISSUE_MESSAGE['invalid_root']
+  const message = idx >= 0 ? `Провайдер #${idx + 1} пропущен: ${base}` : base
+  return { index: idx, providerId, code, message, rawKind, repairable: code !== 'invalid_root' }
+}
+
+/** Load config through the report path. Never throws a raw Zod error. */
 export async function llmGetConfigSafe(): Promise<LlmConfigLoadResult> {
   const inv = getInvoke()
   if (!inv) {
@@ -286,6 +354,25 @@ export async function llmGetConfigSafe(): Promise<LlmConfigLoadResult> {
       }],
       recovered: false,
     }
+  }
+  // Prefer the typed Gate 1 report; fall back to legacy raw config.
+  try {
+    const rep = JSON.parse(await inv('llm_get_config_report') as string) as ConfigReport
+    const base = parseConfigSafe(rep.config)
+    const reportIssues = (rep.issues ?? []).map(mapReportIssue)
+    const issues = [...reportIssues, ...base.issues.filter(b => b.code === 'invalid_root')]
+    const degraded = rep.status === 'degraded'
+    return {
+      config: base.config,
+      issues,
+      recovered: degraded || base.recovered,
+      reportStatus: rep.status,
+      reportReason: rep.reason ?? null,
+      activePath: rep.active_path,
+      migratedFrom: rep.migrated_from ?? null,
+    }
+  } catch {
+    // legacy backend: raw config without report
   }
   let raw: unknown
   try {
@@ -302,6 +389,14 @@ export async function llmGetConfigSafe(): Promise<LlmConfigLoadResult> {
     }
   }
   return parseConfigSafe(raw)
+}
+
+/** Explicit recovery start: backend issues a one-time in-memory token. */
+export async function llmStartConfigRecovery(): Promise<RecoveryStart> {
+  const inv = getInvoke()
+  if (!inv) throw new Error('no tauri')
+  const raw = await inv('llm_start_config_recovery') as string
+  return JSON.parse(raw) as RecoveryStart
 }
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>, schema?: z.ZodSchema<T>): Promise<T> {
@@ -322,6 +417,14 @@ export async function llmSaveConfig(cfg: LlmConfig): Promise<void> {
   const inv = getInvoke()
   if (!inv) throw new Error('no tauri')
   await inv('llm_save_config', { configJson: JSON.stringify(cfg) })
+}
+/** Confirmed overwrite of a degraded config. Token comes only from
+ * llmStartConfigRecovery and is never persisted. */
+export async function llmSaveConfigConfirmed(cfg: LlmConfig, confirmToken: string): Promise<unknown> {
+  const inv = getInvoke()
+  if (!inv) throw new Error('no tauri')
+  const raw = await inv('llm_save_config_confirmed', { configJson: JSON.stringify(cfg), confirmToken })
+  try { return JSON.parse(raw as string) } catch { return raw }
 }
 export async function llmScanModels(modelsDir?: string): Promise<ModelInfo[]> {
   const inv = getInvoke()
