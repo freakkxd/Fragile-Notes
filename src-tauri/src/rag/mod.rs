@@ -282,6 +282,7 @@ pub async fn rag_answer(
                     let role = match m.role {
                         crate::rag::answer::ChatRole::System => "system",
                         crate::rag::answer::ChatRole::User => "user",
+                        crate::rag::answer::ChatRole::Assistant => "assistant",
                     };
                     serde_json::json!({"role": role, "content": m.content})
                 })

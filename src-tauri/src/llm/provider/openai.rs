@@ -873,6 +873,7 @@ impl<'a> crate::rag::answer::ChatGateway for AdapterChatBridge<'a> {
                 role: match m.role {
                     RagRole::System => ChatRole::System,
                     RagRole::User => ChatRole::User,
+                    RagRole::Assistant => ChatRole::Assistant,
                 },
                 content: m.content,
             })

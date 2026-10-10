@@ -9,7 +9,7 @@ use super::openai::{
     join_api_path, map_http_status_for, map_reqwest_err_for, race_with, truncate_capped,
     ChatMessage, ChatRequest, ChatResponse, ChatRole, ChatUsage, HealthReport, ProviderAdapter,
     SecretStore,
-};use super::types::{AuthReference, ProviderConnection, ProviderError, ProviderModel};
+};use super::types::{AuthReference, ModelCatalog, ProviderConnection, ProviderError, ProviderModel};
 use crate::llm::embeddings::provider::redact_secrets;
 use crate::llm::task::policy::ProviderScope;
 use crate::llm::{Capability, CapabilitySource, ProviderKind};
@@ -159,6 +159,45 @@ impl ClaudeNativeAdapter {
             return Err(ProviderError::UnsupportedCapability("Chat".to_string()));
         }
         Ok(())
+    }
+
+    /// Model catalog with an explicit completeness flag. Callers that
+    /// persist or display the catalog must check `complete` first.
+    pub async fn list_models_catalog(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<ModelCatalog, ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(ProviderError::Cancelled);
+        }
+        let base = self.base_url()?;
+        let key = self.resolve_key(&cancel)?;
+        race_with(
+            self.http.clone(),
+            self.timeout,
+            cancel.clone(),
+            |client| async move {
+                let url = join_api_path(&base, "/v1/models")?;
+                let resp = client
+                    .get(&url)
+                    .header("x-api-key", key)
+                    .header("anthropic-version", ANTHROPIC_VERSION)
+                    .send()
+                    .await
+                    .map_err(map_reqwest_err_for)?;
+                if cancel.is_cancelled() {
+                    return Err(ProviderError::Cancelled);
+                }
+                let status = resp.status().as_u16();
+                if !resp.status().is_success() {
+                    let b = resp.text().await.unwrap_or_default();
+                    return Err(map_http_status_for(status, &b));
+                }
+                let bytes = resp.bytes().await.map_err(map_reqwest_err_for)?;
+                parse_models_json(&self.connection.id, &truncate_capped(&bytes)?)
+            },
+        )
+        .await
     }
 }
 
@@ -317,12 +356,18 @@ pub fn has_structured_output(item: &serde_json::Value) -> bool {
 fn parse_models_json(
     connection_id: &str,
     bytes: &[u8],
-) -> Result<Vec<ProviderModel>, ProviderError> {
+) -> Result<ModelCatalog, ProviderError> {
     let json: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|e| ProviderError::MalformedResponse(redact_claude(&e.to_string())))?;
     let data = json.get("data").and_then(|v| v.as_array()).ok_or_else(|| {
         ProviderError::MalformedResponse("missing data array".to_string())
     })?;
+    // Explicit truncation: has_more:true means entries were NOT fetched.
+    // Missing field keeps old behavior (complete) for shape compatibility.
+    let complete = !json
+        .get("has_more")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let mut out = Vec::with_capacity(data.len());
     for item in data {
         let remote = item
@@ -355,7 +400,7 @@ fn parse_models_json(
             source: ModelSource::Manual,
         });
     }
-    Ok(out)
+    Ok(ModelCatalog { models: out, complete })
 }
 
 #[async_trait]
@@ -409,37 +454,14 @@ impl super::openai::ProviderAdapter for ClaudeNativeAdapter {
         &self,
         cancel: CancellationToken,
     ) -> Result<Vec<ProviderModel>, ProviderError> {
-        if cancel.is_cancelled() {
-            return Err(ProviderError::Cancelled);
+        let catalog = self.list_models_catalog(cancel).await?;
+        if !catalog.complete {
+            // A partial catalog must never be presented as complete.
+            return Err(ProviderError::InvalidResponse(
+                "truncated model catalog (has_more)".to_string(),
+            ));
         }
-        let base = self.base_url()?;
-        let key = self.resolve_key(&cancel)?;
-        race_with(
-            self.http.clone(),
-            self.timeout,
-            cancel.clone(),
-            |client| async move {
-                let url = join_api_path(&base, "/v1/models")?;
-                let resp = client
-                    .get(&url)
-                    .header("x-api-key", key)
-                    .header("anthropic-version", ANTHROPIC_VERSION)
-                    .send()
-                    .await
-                    .map_err(map_reqwest_err_for)?;
-                if cancel.is_cancelled() {
-                    return Err(ProviderError::Cancelled);
-                }
-                let status = resp.status().as_u16();
-                if !resp.status().is_success() {
-                    let b = resp.text().await.unwrap_or_default();
-                    return Err(map_http_status_for(status, &b));
-                }
-                let bytes = resp.bytes().await.map_err(map_reqwest_err_for)?;
-                parse_models_json(&self.connection.id, &truncate_capped(&bytes)?)
-            },
-        )
-        .await
+        Ok(catalog.models)
     }
 
     async fn chat(
@@ -520,6 +542,7 @@ impl<'a> crate::rag::answer::ChatGateway for ClaudeChatBridge<'a> {
                 role: match m.role {
                     RagRole::System => ChatRole::System,
                     RagRole::User => ChatRole::User,
+                    RagRole::Assistant => ChatRole::Assistant,
                 },
                 content: m.content,
             })
@@ -1006,6 +1029,51 @@ mod tests {
         assert_eq!(
             a.list_models(CancellationToken::new()).await.unwrap_err().code(),
             "malformed_response"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_preserves_assistant_role() {
+        use crate::rag::answer::{ChatDispatch, ChatGateway, ChatMessage as RagMessage, ChatRole as RagRole};
+        let m = spawn_wire(200, chat_ok(), 0).await;
+        let a = adapter_for(m.port, Duration::from_secs(5));
+        let bridge = ClaudeChatBridge { adapter: &a, model: model() };
+        let dispatch = ChatDispatch {
+            provider_id: "claude".to_string(),
+            model_id: "claude:claude-sonnet-4-5".to_string(),
+            task_profile_id: "task-chat".to_string(),
+            messages: vec![
+                RagMessage { role: RagRole::User, content: "hi".to_string() },
+                RagMessage { role: RagRole::Assistant, content: "hello".to_string() },
+                RagMessage { role: RagRole::User, content: "again".to_string() },
+            ],
+            temperature: None,
+            max_tokens: Some(64),
+        };
+        let text = bridge.chat(dispatch, CancellationToken::new()).await.unwrap();
+        assert_eq!(text, "hello");
+        let raw = m.captured.lock().unwrap().join("\n");
+        let body = raw.split("\r\n\r\n").nth(1).expect("request body");
+        let v: serde_json::Value = serde_json::from_str(body).unwrap();
+        let roles: Vec<&str> = v["messages"].as_array().unwrap().iter()
+            .map(|x| x["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "user"], "assistant must not become user");
+    }
+
+    #[tokio::test]
+    async fn claude_catalog_truncated_on_has_more() {
+        use super::super::openai::ProviderAdapter;
+        let body = r#"{"data":[{"id":"claude-sonnet-4-5","display_name":"Sonnet","type":"model"}],"has_more":true,"first_id":"a","last_id":"b"}"#.to_string();
+        let m = spawn_wire(200, body, 0).await;
+        let a = adapter_for(m.port, Duration::from_secs(5));
+        // Structured form carries the explicit completeness flag.
+        let catalog = a.list_models_catalog(CancellationToken::new()).await.unwrap();
+        assert_eq!(catalog.models.len(), 1);
+        assert!(!catalog.complete, "has_more:true must not read as complete");
+        // The Vec-returning contract refuses to present it as complete.
+        assert_eq!(
+            a.list_models(CancellationToken::new()).await.unwrap_err().code(),
+            "invalid_response"
         );
     }
 

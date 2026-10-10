@@ -33,10 +33,13 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Chat message roles allowed in RAG prompts. No tool roles exist here.
+/// Assistant exists so multi-turn history survives bridges that support it
+/// (Claude Messages API); producers that only emit System/User are unaffected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatRole {
     System,
     User,
+    Assistant,
 }
 
 /// A single assembled chat message (content already built, no raw context).

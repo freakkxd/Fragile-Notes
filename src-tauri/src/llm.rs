@@ -19,6 +19,9 @@ pub mod provider;
 #[cfg(test)]
 mod e2e_manual;
 
+// Native adapter contract for the Claude dispatch path.
+use crate::llm::provider::ProviderAdapter;
+
 // ---------- helpers ----------
 pub(crate) fn config_path() -> PathBuf {
     let vault = vault_root().join(".fragile").join("llm.json");
@@ -1166,6 +1169,118 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
     Ok(txt)
 }
 
+// ---------- Claude dispatch foundation (non-breaking) ----------
+// Internal dispatch through the native provider adapters. Only Claude is
+// wired: any other kind returns an explicit error pointing at the legacy
+// gateway. The contract matches gateway_chat exactly (Result<String, String>
+// carrying assistant TEXT, never raw provider JSON), so existing callers
+// keep working. Legacy gateway.rs branches stay untouched.
+pub async fn gateway_chat_via_registry(
+    req: ChatRequest,
+    cancel: tokio_util::sync::CancellationToken,
+    secrets: std::sync::Arc<dyn provider::SecretStore>,
+    timeout: Duration,
+) -> Result<String, String> {
+    let cfg = load_config_inner();
+    // privacy guard + profile generation (same policy as gateway_chat)
+    let mut gen = ChatGeneration::default();
+    if let Some(tpid) = &req.task_profile_id {
+        if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
+            let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
+            check_privacy(&tp.privacy, &prov.kind)?;
+            if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
+            gen = resolve_chat_generation(&tp.generation);
+        }
+    }
+    let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).cloned().ok_or("provider not found")?;
+    if prov.kind != ProviderKind::Claude {
+        return Err(format!("dispatch unsupported for {:?}: use gateway_chat", prov.kind));
+    }
+    if !prov.enabled {
+        return Err(format!("provider {} is disabled", prov.id));
+    }
+    // Model identity: internal id + provider ownership enforced here;
+    // only remote_id ever goes upstream (enforced again by the adapter).
+    // A catalog hit resolves an internal id to its remote_id.
+    let mut remote = if !req.model_ref.is_empty() { req.model_ref.clone() } else { prov.default_model.clone() };
+    if remote.trim().is_empty() {
+        return Err("dispatch: no model selected (model_ref and provider default_model are empty)".to_string());
+    }
+    let mut capabilities = vec![Capability::Chat];
+    if let Some(known) = cfg.models.iter().find(|m| m.id==req.model_ref || (!m.remote_id.is_empty() && m.remote_id==remote)) {
+        if known.provider_id != prov.id {
+            return Err(format!("model {} belongs to {}, not {}", known.id, known.provider_id, prov.id));
+        }
+        if !known.capabilities.is_empty() && !known.capabilities.contains(&Capability::Chat) {
+            return Err("UnsupportedCapability: model missing Chat".to_string());
+        }
+        if !known.capabilities.is_empty() {
+            capabilities = known.capabilities.clone();
+        }
+        if !known.remote_id.is_empty() {
+            remote = known.remote_id.clone();
+        }
+    }
+    let model = provider::ProviderModel {
+        id: format!("{}:{}", prov.id, remote),
+        provider_id: prov.id.clone(),
+        remote_id: remote.clone(),
+        display_name: remote.clone(),
+        capabilities,
+        capability_source: None,
+        context_length: None,
+        dimensions: None,
+        pricing: None,
+        source: crate::llm::models::types::ModelSource::Manual,
+    };
+    let auth = match &prov.auth {
+        Some(a) if a.method == AuthMethod::ApiKey => match &a.secret_ref {
+            Some(r) => Some(provider::AuthReference::new(r.clone()).map_err(|e| format!("dispatch: {}", e))?),
+            None => None,
+        },
+        _ => None,
+    };
+    let connection = provider::ProviderConnection {
+        id: prov.id.clone(),
+        kind: ProviderKind::Claude,
+        name: prov.name.clone(),
+        enabled: true,
+        scope: crate::llm::task::policy::ProviderScope::Cloud,
+        endpoint: if prov.endpoint.is_empty() { None } else { Some(prov.endpoint.clone()) },
+        auth,
+    };
+    let adapter = provider::ClaudeNativeAdapter::new(connection, secrets, timeout)
+        .map_err(|e| dispatch_err(&e))?;
+    // Legacy role strings -> adapter roles. Assistant is preserved
+    // (parity with multi-turn history); unknown roles become user.
+    let messages = req.messages.iter().map(|m| {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+        let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let role = match role {
+            "system" => provider::ChatRole::System,
+            "assistant" => provider::ChatRole::Assistant,
+            _ => provider::ChatRole::User,
+        };
+        provider::ChatMessage { role, content }
+    }).collect::<Vec<_>>();
+    let preq = provider::ChatRequest {
+        messages,
+        temperature: Some(gen.temperature),
+        top_p: None, // parity with the legacy Claude branch (no top_p on the wire)
+        // Profile value with gateway default 2048 fallback — never the
+        // adapter-local DEFAULT_MAX_TOKENS=1024 in this path.
+        max_tokens: Some(gen.max_tokens),
+        response_format: None,
+    };
+    let resp = adapter.chat(&model, preq, cancel).await.map_err(|e| dispatch_err(&e))?;
+    Ok(resp.content)
+}
+
+fn dispatch_err(e: &provider::ProviderError) -> String {
+    let capped: String = e.safe_message().chars().take(600).collect();
+    format!("LLM {}: {}", e.code(), capped)
+}
+
 #[tauri::command]
 pub async fn llm_chat_universal(provider_id: String, model: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
     // wrap with privacy via default task
@@ -2042,6 +2157,315 @@ mod tests {
         let rep = load_config_report_inner();
         assert_eq!(rep.status, ConfigLoadStatus::Degraded);
         assert_eq!(rep.reason, Some(ConfigDegradedReason::VaultMissing));
+    }
+
+    // ---------- Claude dispatch foundation tests ----------
+    struct MapSecrets;
+    impl provider::SecretStore for MapSecrets {
+        fn get(&self, r: &str) -> Result<String, provider::ProviderError> {
+            assert_eq!(r, "keychain://fragile-notes/cld");
+            Ok("sk-ant-test-key".to_string())
+        }
+    }
+    struct NoSecrets;
+    impl provider::SecretStore for NoSecrets {
+        fn get(&self, _: &str) -> Result<String, provider::ProviderError> {
+            Err(provider::ProviderError::CredentialsMissing("no credential for test".to_string()))
+        }
+    }
+
+    struct Wire { port: u16, captured: Arc<std::sync::Mutex<Vec<String>>> }
+
+    async fn spawn_dispatch_wire(status: u16, body: String, delay_ms: u64) -> Wire {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let c2 = captured.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let c3 = c2.clone();
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut acc = Vec::new();
+                    let mut buf = vec![0u8; 65536];
+                    loop {
+                        let n = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+                            .await.unwrap().unwrap();
+                        if n == 0 { break; }
+                        acc.extend_from_slice(&buf[..n]);
+                        if acc.windows(4).any(|w| w == b"\r\n\r\n") { break; }
+                    }
+                    let head = String::from_utf8_lossy(&acc).to_string();
+                    let len = head.lines().find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        if k.trim().eq_ignore_ascii_case("content-length") { v.trim().parse::<usize>().ok() } else { None }
+                    }).unwrap_or(0);
+                    let hend = acc.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4).unwrap_or(acc.len());
+                    let mut full = acc.clone();
+                    while full.len() < hend + len {
+                        let n = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+                            .await.unwrap().unwrap();
+                        if n == 0 { break; }
+                        full.extend_from_slice(&buf[..n]);
+                    }
+                    c3.lock().unwrap().push(String::from_utf8_lossy(&full).to_string());
+                    if delay_ms > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    }
+                    let resp = format!("HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status, body.len(), body);
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        Wire { port, captured }
+    }
+
+    fn claude_ok_body(text: &str) -> String {
+        format!(r#"{{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{{"type":"text","text":"{}"}}],"stop_reason":"end_turn","usage":{{"input_tokens":1,"output_tokens":1}}}}"#, text)
+    }
+
+    fn write_claude_config(path: &Path, port: u16, default_model: &str) {
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = default_model.to_string();
+        }
+        fs::write(path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+    }
+
+    fn claude_legacy_msgs() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"role": "system", "content": "sys"}),
+            serde_json::json!({"role": "user", "content": "hi"}),
+            serde_json::json!({"role": "assistant", "content": "hello"}),
+        ]
+    }
+
+    fn dispatch_req(model_ref: &str, task: Option<&str>) -> ChatRequest {
+        ChatRequest {
+            provider_id: "claude".to_string(),
+            model_ref: model_ref.to_string(),
+            messages: claude_legacy_msgs(),
+            task_profile_id: task.map(|s| s.to_string()),
+        }
+    }
+
+    fn dispatch_cancel() -> tokio_util::sync::CancellationToken {
+        tokio_util::sync::CancellationToken::new()
+    }
+
+    fn wire_body(wire: &Wire) -> serde_json::Value {
+        // Last captured request (tests may issue several).
+        let lock = wire.captured.lock().unwrap();
+        let raw = lock.last().cloned().expect("request captured");
+        let body = raw.split("\r\n\r\n").nth(1).expect("request body captured");
+        serde_json::from_str(body).unwrap()
+    }
+
+    fn wire_f32(v: &serde_json::Value, expected: f64) {
+        let a = v.as_f64().expect("number");
+        assert!((a - expected).abs() < 1e-6, "{} != {}", a, expected);
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_wire_headers_and_body() {
+        let env = IsolatedEnv::lock("dispwire");
+        let w = spawn_dispatch_wire(200, claude_ok_body("hello"), 0).await;
+        write_claude_config(&env.cfg_path(), w.port, "claude-sonnet-4-5");
+        let out = gateway_chat_via_registry(dispatch_req("", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "hello");
+        let raw = w.captured.lock().unwrap().join("\n");
+        assert!(raw.contains("POST /v1/messages"), "messages endpoint");
+        assert!(raw.contains("x-api-key: sk-ant-test-key"), "header auth");
+        assert!(raw.contains("anthropic-version: 2023-06-01"), "version header");
+        let body = wire_body(&w);
+        assert_eq!(body["model"], "claude-sonnet-4-5", "remote id upstream");
+        assert_eq!(body["system"], "sys");
+        assert_eq!(body["max_tokens"], 2048, "gateway default, not adapter 1024");
+        wire_f32(&body["temperature"], 0.7);
+        assert!(body.get("top_p").is_none(), "parity: no top_p on Claude wire");
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_returns_text_not_raw_chat_response() {
+        let env = IsolatedEnv::lock("disptext");
+        let w = spawn_dispatch_wire(200, claude_ok_body("hello world"), 0).await;
+        write_claude_config(&env.cfg_path(), w.port, "claude-sonnet-4-5");
+        let out = gateway_chat_via_registry(dispatch_req("", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "hello world");
+        assert!(!out.contains("msg_1"), "no raw envelope leak");
+        assert!(!out.contains("stop_reason"), "no raw envelope leak");
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_parity_with_legacy_fixture() {
+        let env = IsolatedEnv::lock("dispparity");
+        let w = spawn_dispatch_wire(200, claude_ok_body("ok"), 0).await;
+        let endpoint = format!("http://127.0.0.1:{}", w.port);
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = endpoint.clone();
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = "claude-3-5-sonnet-latest".to_string();
+        }
+        let mut generation = HashMap::new();
+        generation.insert("temperature".to_string(), "0.2".to_string());
+        generation.insert("max_tokens".to_string(), "512".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-parity".to_string(), name: "Parity".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        // Legacy frozen mapping for the same input.
+        let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
+        let legacy = gateway::build_chat_http_request(&ProviderKind::Claude, &endpoint,
+            "claude-3-5-sonnet-latest", 8010, "", &claude_legacy_msgs(), &gen, "sk-ant-test-key");
+        let out = gateway_chat_via_registry(dispatch_req("", Some("tp-parity")), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "ok");
+        let body = wire_body(&w);
+        assert_eq!(body["model"], legacy.body["model"]);
+        assert_eq!(body["system"], legacy.body["system"]);
+        assert_eq!(body["messages"], legacy.body["messages"]);
+        assert_eq!(body["max_tokens"], legacy.body["max_tokens"]);
+        assert_eq!(body["temperature"], legacy.body["temperature"]);
+        assert!(body.get("top_p").is_none() && legacy.body.get("top_p").is_none());
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_privacy_deny() {
+        let env = IsolatedEnv::lock("dispdeny");
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = "http://127.0.0.1:1".to_string();
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+        }
+        let mut generation = HashMap::new();
+        generation.insert("temperature".to_string(), "0.2".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-local".to_string(), name: "Local".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: Some(Privacy::LocalOnly),
+            cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let err = gateway_chat_via_registry(dispatch_req("", Some("tp-local")), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap_err();
+        assert!(err.starts_with("PrivacyPolicyViolation"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_cancel_and_timeout() {
+        let env = IsolatedEnv::lock("dispcancel");
+        let w = spawn_dispatch_wire(200, claude_ok_body("late"), 2000).await;
+        write_claude_config(&env.cfg_path(), w.port, "claude-sonnet-4-5");
+        // Pre-cancelled token short-circuits before network I/O.
+        let cancel = dispatch_cancel();
+        cancel.cancel();
+        let err = gateway_chat_via_registry(dispatch_req("", None), cancel,
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap_err();
+        assert!(err.starts_with("LLM cancelled"), "got: {}", err);
+        // Slow server + short timeout surfaces a timeout, never a hang.
+        let err2 = gateway_chat_via_registry(dispatch_req("", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_millis(200)).await.unwrap_err();
+        assert!(err2.starts_with("LLM timeout"), "got: {}", err2);
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_missing_credential_no_network() {
+        let env = IsolatedEnv::lock("dispnocred");
+        // Closed port: any network attempt would surface transport/timeout,
+        // so a credentials error proves resolution precedes I/O.
+        write_claude_config(&env.cfg_path(), 1, "claude-sonnet-4-5");
+        let err = gateway_chat_via_registry(dispatch_req("", None), dispatch_cancel(),
+            Arc::new(NoSecrets), Duration::from_secs(5)).await.unwrap_err();
+        assert!(err.contains("credential"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn claude_registry_identity_never_sends_internal_id() {
+        let env = IsolatedEnv::lock("dispidentity");
+        let w = spawn_dispatch_wire(200, claude_ok_body("hi"), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = String::new();
+        }
+        cfg.models.push(Model { id: "claude:claude-sonnet-4-5".to_string(), provider_id: "claude".to_string(),
+            name: "Sonnet".to_string(), path: String::new(), remote_id: "claude-sonnet-4-5".to_string(),
+            capabilities: vec![Capability::Chat], capability_source: None, metadata: Default::default() });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let out = gateway_chat_via_registry(dispatch_req("claude:claude-sonnet-4-5", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "hi");
+        let raw = w.captured.lock().unwrap().join("\n");
+        assert!(!raw.contains("claude:"), "internal id must never go upstream");
+        let body = wire_body(&w);
+        assert_eq!(body["model"], "claude-sonnet-4-5", "remote id only");
+        // Unknown internal-style ref is rejected before any network I/O.
+        let err = gateway_chat_via_registry(dispatch_req("evil:model", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap_err();
+        assert!(err.starts_with("LLM invalid_config"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_profile_max_tokens_used() {
+        let env = IsolatedEnv::lock("dispmaxtok");
+        let w = spawn_dispatch_wire(200, claude_ok_body("t"), 0).await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+            p.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
+            p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        let mut generation = HashMap::new();
+        generation.insert("max_tokens".to_string(), "512".to_string());
+        cfg.task_profiles.push(TaskProfile { id: "tp-tok".to_string(), name: "Tok".to_string(),
+            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None, generation });
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        gateway_chat_via_registry(dispatch_req("", Some("tp-tok")), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(wire_body(&w)["max_tokens"], 512, "profile value wins");
+        gateway_chat_via_registry(dispatch_req("", None), dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        let fallback = wire_body(&w)["max_tokens"].as_u64().unwrap();
+        assert_eq!(fallback, 2048, "gateway default fallback, never adapter 1024 (got {})", fallback);
+    }
+
+    #[tokio::test]
+    async fn claude_dispatch_assistant_role_preserved() {
+        let env = IsolatedEnv::lock("dispassist");
+        let w = spawn_dispatch_wire(200, claude_ok_body("ack"), 0).await;
+        write_claude_config(&env.cfg_path(), w.port, "claude-sonnet-4-5");
+        let req = ChatRequest {
+            provider_id: "claude".to_string(),
+            model_ref: String::new(),
+            messages: vec![
+                serde_json::json!({"role": "user", "content": "q1"}),
+                serde_json::json!({"role": "assistant", "content": "a1"}),
+                serde_json::json!({"role": "user", "content": "q2"}),
+            ],
+            task_profile_id: None,
+        };
+        let out = gateway_chat_via_registry(req, dispatch_cancel(),
+            Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out, "ack");
+        let body = wire_body(&w);
+        let roles: Vec<&str> = body["messages"].as_array().unwrap().iter()
+            .map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "user"], "assistant must not become user");
+        assert_eq!(body["messages"][1]["content"], "a1", "assistant content intact");
     }
 }
 

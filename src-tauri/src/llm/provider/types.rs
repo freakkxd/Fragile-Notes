@@ -186,6 +186,18 @@ impl PricingInfo {
     }
 }
 
+/// A model catalog page with an explicit completeness flag.
+///
+/// `complete=false` means the provider reported more entries
+/// (`has_more:true` or equivalent) that were NOT fetched: the listed models
+/// must never be saved, displayed, or treated as a complete catalog.
+/// Real pagination is out of scope; truncation must stay explicit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCatalog {
+    pub models: Vec<ProviderModel>,
+    pub complete: bool,
+}
+
 /// A model in the provider catalog.
 ///
 /// Three identities stay separate: application `id`, owning `provider_id`,

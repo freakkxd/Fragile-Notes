@@ -10,8 +10,8 @@ pub mod claude;
 pub mod types;
 
 pub use types::{
-    AuthReference, PricingInfo, ProviderConnection, ProviderError, ProviderModel, ProviderRegistry,
-    default_endpoint,
+    AuthReference, ModelCatalog, PricingInfo, ProviderConnection, ProviderError, ProviderModel,
+    ProviderRegistry, default_endpoint,
 };
 pub use openai::{
     AdapterChatBridge, AdapterEmbedBridge, ChatMessage, ChatRequest, ChatResponse, ChatRole,
