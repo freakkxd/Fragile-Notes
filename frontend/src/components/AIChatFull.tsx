@@ -50,6 +50,12 @@ export function chatPrivacyBlocked(provider: llm.Provider | null, privacy: strin
   return ''
 }
 
+/** Local registry records eligible for chat: Present state of this provider.
+ *  The select value is always RegistryModel.id — never a filesystem path. */
+export function presentLocalModels(registry: llm.RegistryModel[], providerId: string): llm.RegistryModel[] {
+  return registry.filter((r) => r.state === 'Present' && r.provider_id === providerId)
+}
+
 /** Local legacy providers return raw JSON; cloud returns normalized text. */
 export function extractChatText(raw: unknown): string {
   let txt = String(raw)
@@ -67,6 +73,7 @@ export default function AIChatFull() {
   const [privacy, setPrivacy] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [blocked, setBlocked] = useState('')
+  const [registry, setRegistry] = useState<llm.RegistryModel[]>([])
   const stale = useRef(false)
 
   useEffect(() => {
@@ -83,14 +90,33 @@ export default function AIChatFull() {
       const chat = res.config.task_profiles.find((t) => t.id === 'task-chat')
       setPrivacy(chat?.privacy ?? undefined)
     }).catch(() => {})
+    llm.llmModelsList().then((list) => { if (live) setRegistry(list) }).catch(() => {})
     return () => { live = false }
   }, [])
 
   const selected = providers.find((p) => p.id === providerId) ?? null
+  const isLocal = !!selected && isLocalKind(selected.kind)
+  const eligible = selected && isLocal ? presentLocalModels(registry, selected.id) : []
+
+  // Prefer the first verified registry record once it arrives.
+  useEffect(() => {
+    if (!selected || !isLocalKind(selected.kind)) return
+    const list = presentLocalModels(registry, selected.id)
+    if (list.length > 0 && !list.some((r) => r.id === model)) {
+      setModel(list[0].id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registry, providerId])
 
   const onProvider = (id: string) => {
     setProviderId(id)
-    setModel(defaultModelForProvider(providers.find((x) => x.id === id) ?? null))
+    const p = providers.find((x) => x.id === id) ?? null
+    if (p && isLocalKind(p.kind)) {
+      const list = presentLocalModels(registry, p.id)
+      setModel(list.length > 0 ? list[0].id : '')
+    } else {
+      setModel(defaultModelForProvider(p))
+    }
     setBlocked('')
   }
 
@@ -117,6 +143,16 @@ export default function AIChatFull() {
     if (blockReason) {
       setBlocked(blockReason)
       return
+    }
+    if (isLocal) {
+      if (eligible.length === 0) {
+        setBlocked('Нет установленных моделей: откройте настройки → Модели и нажмите «Сканировать реестр».')
+        return
+      }
+      if (!eligible.some((r) => r.id === model)) {
+        setBlocked('Выбранная модель отсутствует в реестре. Выберите доступную модель или пересканируйте реестр.')
+        return
+      }
     }
     const u: Msg = { role: 'user', content: input }
     const history = [...msgs, u]
@@ -147,8 +183,19 @@ export default function AIChatFull() {
           {providers.length === 0 && <option value="">Нет включённых провайдеров</option>}
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name} ({isLocalKind(p.kind) ? 'local' : 'cloud'})</option>)}
         </select>
-        <input value={model} onChange={(e)=>setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель"
-          style={{ padding:'4px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, width:200 }} />
+        {isLocal ? (
+          eligible.length > 0 ? (
+            <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
+              style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>
+              {eligible.map((r) => <option key={r.id} value={r.id}>{r.filename}</option>)}
+            </select>
+          ) : (
+            <span style={{ fontSize:11, color:'var(--muted)' }}>Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».</span>
+          )
+        ) : (
+          <input value={model} onChange={(e)=>setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель"
+            style={{ padding:'4px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, width:200 }} />
+        )}
         <button onClick={check} style={{ marginLeft:'auto', padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>Статус</button>
         <span style={{ fontSize:11, color:'var(--muted)' }}>{status}</span>
       </div>

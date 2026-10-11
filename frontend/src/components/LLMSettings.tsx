@@ -38,6 +38,8 @@ export default function LLMSettings() {
   const [cfg, setCfg] = useState<llm.LlmConfig | null>(null)
   const [savedSnapshot, setSavedSnapshot] = useState('')
   const [models, setModels] = useState<llm.ModelInfo[]>([])
+  const [registry, setRegistry] = useState<llm.RegistryModel[]>([])
+  const [registryStatus, setRegistryStatus] = useState('')
   const [status, setStatus] = useState('загрузка...')
   const [issues, setIssues] = useState<llm.LlmConfigIssue[]>([])
   const [recovered, setRecovered] = useState(false)
@@ -180,6 +182,21 @@ export default function LLMSettings() {
       flash(`найдено ${m.length} моделей`)
     } catch { setStatus('не удалось сканировать модели') }
   }
+
+  // Registry-backed scan/list (GGUF-verified states). Backend defaults only.
+  const loadRegistry = async () => {
+    setRegistryStatus('сканирование реестра…')
+    try {
+      await llm.llmModelsScan()
+      const list = await llm.llmModelsList()
+      setRegistry(list)
+      const present = list.filter((r) => r.state === 'Present').length
+      setRegistryStatus(`реестр: ${present} Present из ${list.length}`)
+    } catch {
+      setRegistryStatus('реестр недоступен')
+    }
+  }
+  useEffect(()=>{ if(section==='models') loadRegistry() },[section])
 
   const setActive = async (path: string) => {
     try {
@@ -485,7 +502,31 @@ export default function LLMSettings() {
           )}
 
           {section==='models' && (
-            <SectionCard title={`Модели (.gguf) — ${models.length} шт.`}>
+            <SectionCard title={`Модели — реестр (${registry.length})`}>
+              <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                <button onClick={loadRegistry} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>🔍 Сканировать реестр</button>
+                <span style={{fontSize:12, color:'var(--muted)'}}>{registryStatus}</span>
+              </div>
+              {registry.length===0 && <div style={{fontSize:12, color:'var(--muted)'}}>Нет записей — положите .gguf в папку моделей и нажмите «Сканировать реестр».</div>}
+              <div style={{display:'flex', flexDirection:'column', gap:6, maxHeight:360, overflow:'auto'}}>
+                {registry.map(r=>(
+                  <div key={r.id} style={{display:'flex', gap:8, alignItems:'center', padding:'8px 10px', background:'rgba(255,255,255,.02)', border:`1px solid ${r.state==='Present'?'var(--accent)':'var(--border)'}`, borderRadius:10}}>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div style={{fontWeight:700, fontSize:13, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.filename}</div>
+                      <div style={{fontSize:11, color:'var(--muted)', display:'flex', gap:8, flexWrap:'wrap'}}>
+                        <span>{(r.size_bytes/1024/1024).toFixed(0)}МБ</span>
+                        <StateBadge state={r.state} />
+                        {r.diagnostics.length > 0 && <span>{JSON.stringify(r.diagnostics[0]).slice(0,200)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+          )}
+
+          {section==='models' && (
+            <SectionCard title={`Модели (.gguf) — ${models.length} шт. — legacy, без проверки`}>
               {models.length===0 && <div style={{fontSize:12, color:'var(--muted)'}}>Пусто — положи .gguf в {cfg.local.models_dir}</div>}
               <div style={{display:'flex', flexDirection:'column', gap:6, maxHeight:360, overflow:'auto'}}>
                 {models.map(m=>(
@@ -525,7 +566,7 @@ export default function LLMSettings() {
                   <LabeledSlider label={`repeat ${cfg.local.repeat_penalty.toFixed(2)}`} min={1} max={2} step={0.05} value={cfg.local.repeat_penalty} onChange={v=>setCfg({...cfg, local:{...cfg.local, repeat:v}})} />
                 </div>
               )}
-              <InstallModel onInstalled={scan} modelsDir={cfg.local.models_dir} />
+              <InstallModel modelsDir={cfg.local.models_dir} />
             </SectionCard>
           )}
 
@@ -637,32 +678,21 @@ function apiUrlPlaceholder(kind: string): string {
   }
 }
 
+function StateBadge({state}:{state: llm.RegistryModelState}) {
+  const ok = state === 'Present'
+  return <span title={ok ? 'Проверена, доступна для чата' : 'Недоступна для чата: требуется сканирование/проверка'} style={{padding:'2px 8px', borderRadius:20, fontSize:11, fontWeight:700, background: ok?'var(--accent)':'transparent', color: ok?'#0b0b0b':'var(--muted)', border:'1px solid var(--border)'}}>{state}</span>
+}
+
 function LabeledSlider({label, min,max,step,value,onChange}:{label:string,min:number,max:number,step:number,value:number,onChange:(v:number)=>void}) {
   return <label style={{fontSize:12}}>{label}<input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))} style={{width:'100%'}} /></label>
 }
 
-function InstallModel({onInstalled, modelsDir}:{onInstalled:()=>void, modelsDir:string}) {
-  const [url,setUrl]=useState('')
-  const [task,setTask]=useState('general')
-  const [log,setLog]=useState('—')
-  const dl=async()=>{
-    if(!url.trim()) return
-    setLog('установка...')
-    try {
-      const p=await llm.llmDownloadModel(url, task)
-      setLog(`готово: ${p}`)
-      onInstalled()
-    } catch(e){ setLog('ошибка установки') }
-  }
+function InstallModel({modelsDir}:{modelsDir:string}) {
   return <div style={{display:'flex', flexDirection:'column', gap:6}}>
-    <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
-      <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://huggingface.co/.../model.gguf" style={{flex:1, minWidth:260, padding:'6px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8, color:'var(--fg)', fontSize:12}} />
-      <select value={task} onChange={e=>setTask(e.target.value)} style={{padding:'6px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8}}>
-        <option value="general">general</option><option value="chat">chat</option><option value="coder">coder</option><option value="embedding">embedding</option><option value="enrich">enrich</option>
-      </select>
-      <button onClick={dl} style={{padding:'6px 12px', background:'var(--accent)', border:0, borderRadius:8, fontWeight:700}}>Установить</button>
+    <div style={{display:'flex', gap:6, flexWrap:'wrap', alignItems:'center'}}>
+      <button disabled title="Загрузка через менеджер — скоро: дождитесь подключения download manager, частичная установка отключена" style={{padding:'6px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontWeight:700, opacity:.5, cursor:'not-allowed'}}>Загрузка через менеджер — скоро</button>
     </div>
-    <div style={{fontSize:11, color:'var(--muted)'}}>Цель: <code>{modelsDir}/{task}/</code> — {log}</div>
+    <div style={{fontSize:11, color:'var(--muted)'}}>Папка моделей: <code>{modelsDir}</code> — положите .gguf вручную и нажмите «Сканировать реестр» выше.</div>
   </div>
 }
 

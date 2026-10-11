@@ -59,6 +59,9 @@ function reportCfg(taskPrivacy?: string) {
 function mockConfig(taskPrivacy?: string, chatImpl?: (cmd: string, args?: Record<string, unknown>) => unknown) {
   const fixtures: Record<string, unknown> = {
     llm_get_config_report: JSON.stringify(reportCfg(taskPrivacy)),
+    llm_models_list: JSON.stringify([
+      { id: 'model-abc', provider_id: 'local', filename: 'qwen.gguf', state: 'Present', size_bytes: 1000 },
+    ]),
   }
   if (chatImpl) fixtures['llm_chat_universal'] = chatImpl
   installTauriMock(fixtures)
@@ -75,13 +78,14 @@ describe('ai_chat_renders_enabled_providers', () => {
 })
 
 describe('ai_chat_default_local_selection', () => {
-  it('selects local provider and its configured model by default', async () => {
+  it('selects local provider and first Present registry model by default', async () => {
     mockConfig()
     render(<AIChatFull />)
     const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
     expect(combo.value).toBe('local')
-    const model = screen.getByLabelText('Модель') as HTMLInputElement
-    expect(model.value).toBe('qwen.gguf')
+    const model = screen.getByLabelText('Модель') as HTMLSelectElement
+    expect(model.value).toBe('model-abc')
+    expect(screen.getByRole('option', { name: 'qwen.gguf' })).toBeTruthy()
   })
 })
 

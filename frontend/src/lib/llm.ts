@@ -432,6 +432,43 @@ export async function llmScanModels(modelsDir?: string): Promise<ModelInfo[]> {
   const raw = await inv('llm_scan_models', { modelsDir: modelsDir ?? null }) as string
   return z.array(ModelInfoSchema).parse(JSON.parse(raw))
 }
+// Registry-backed scan/list (GGUF-verified, Present/Missing/Invalid states).
+// Legacy llmScanModels/ModelInfo above are preserved as fallback.
+export const RegistryModelStateSchema = z.enum(['Present', 'Missing', 'Changed', 'Invalid', 'Unverified'])
+export type RegistryModelState = z.infer<typeof RegistryModelStateSchema>
+export const RegistryModelSchema = z.object({
+  id: z.string(),
+  provider_id: z.string().optional().default(''),
+  path: z.string().optional().default(''),
+  canonical_path: z.string().optional().default(''),
+  filename: z.string(),
+  size_bytes: z.number().optional().default(0),
+  sha256: z.string().nullable().optional(),
+  state: RegistryModelStateSchema,
+  diagnostics: z.array(z.unknown()).optional().default([]),
+}).passthrough()
+export type RegistryModel = z.infer<typeof RegistryModelSchema>
+export const ScanResultSchema = z.object({
+  discovered: z.array(RegistryModelSchema),
+  added: z.array(z.string()),
+  updated: z.array(z.string()),
+  missing: z.array(z.string()),
+  invalid: z.array(z.unknown()).optional().default([]),
+}).passthrough()
+export type ScanResult = z.infer<typeof ScanResultSchema>
+/** Registry scan using backend defaults; never pass arbitrary paths. */
+export async function llmModelsScan(): Promise<ScanResult> {
+  const inv = getInvoke()
+  if (!inv) return { discovered: [], added: [], updated: [], missing: [], invalid: [] }
+  const raw = await inv('llm_models_scan', { modelsDir: null }) as string
+  return ScanResultSchema.parse(JSON.parse(raw))
+}
+export async function llmModelsList(): Promise<RegistryModel[]> {
+  const inv = getInvoke()
+  if (!inv) return []
+  const raw = await inv('llm_models_list') as string
+  return z.array(RegistryModelSchema).parse(JSON.parse(raw))
+}
 export async function llmSetActiveModel(path: string): Promise<void> {
   const inv = getInvoke()
   if (!inv) return
