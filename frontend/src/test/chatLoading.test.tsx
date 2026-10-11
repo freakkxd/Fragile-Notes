@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import AIChatFull from '../components/AIChatFull'
@@ -55,6 +55,15 @@ function deferred(): { promise: Promise<string>; resolve: (v: string) => void; r
   let reject!: (e: unknown) => void
   const promise = new Promise<string>((res, rej) => { resolve = res; reject = rej })
   return { promise, resolve, reject }
+}
+
+// Deterministic flush: one macrotask runs after every previously queued
+// microtask and React scheduler message, draining the whole stale chain
+// (resolve -> continuations -> state updates -> re-render). This is not an
+// arbitrary sleep: FIFO ordering guarantees the chain settled, however long
+// it is; a fixed sleep could only hope.
+function flushAsync(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe('chat_loading_no_premature_cloud_input', () => {
@@ -119,8 +128,7 @@ describe('chat_loading_cloud_input', () => {
   })
 })
 
-describe('chat_loading_error_visible_with_retry', () => {
-  it('shows error and recovers via retry, never a fake cloud control', async () => {
+describe('chat_loading_error_visible_with_retry', () => {  it('shows error and recovers via retry, never a fake cloud control', async () => {
     const user = userEvent.setup()
     installTauriMock({
       llm_get_config_report: () => Promise.reject(new Error('backend down')),
@@ -140,5 +148,92 @@ describe('chat_loading_error_visible_with_retry', () => {
     await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
     expect(await screen.findByRole('combobox', { name: 'Модель' })).toBeTruthy()
     expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
+
+// Latest-request-wins: each load()/retry is a generation; only the latest
+// may publish state. Overlap is reachable on the registry leg (config fails
+// fast -> error banner -> retry starts a new attempt while the old registry
+// promise is still pending). All flows below use public UX only.
+function deferredQueue() {
+  const pending: Array<{ resolve: (v: string) => void; reject: (e: unknown) => void }> = []
+  const impl = () =>
+    new Promise<string>((resolve, reject) => {
+      pending.push({ resolve, reject })
+    })
+  return { impl, pending }
+}
+
+function geminiRecord() {
+  return { id: 'mB', provider_id: 'local', filename: 'b.gguf', state: 'Present', size_bytes: 1 }
+}
+
+describe('chat_retry_stale_registry_ignored', () => {
+  it('late first-attempt registry never overwrites retry state', async () => {
+    const user = userEvent.setup()
+    const cfgQ = deferredQueue()
+    const regQ = deferredQueue()
+    installTauriMock({
+      llm_get_config_report: () => cfgQ.impl(),
+      llm_models_list: () => regQ.impl(),
+    })
+    render(<AIChatFull />)
+    // Attempt A: config rejects fast -> error banner; its registry stays pending.
+    cfgQ.pending[0].reject(new Error('boom-first'))
+    expect(await screen.findByText(/Не удалось загрузить конфигурацию/)).toBeTruthy()
+    // Retry starts attempt B through public UX.
+    await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+    // B resolves fully: local select with mB.
+    cfgQ.pending[1].resolve(reportFor([localProvider()]))
+    // The registry request for B is issued by B's continuation: wait for it.
+    await waitFor(() => expect(regQ.pending.length).toBe(2))
+    regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
+    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
+    expect(combo.value).toBe('mB')
+    // Stale A registry resolves late with a different record: must be ignored.
+    regQ.pending[0].resolve(
+      JSON.stringify([{ id: 'mA', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 }]),
+    )
+    // Flush: one macrotask drains the whole stale chain, then assert the
+    // stale update never landed.
+    await flushAsync()
+    expect((screen.getByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value).toBe('mB')
+    expect(screen.queryByRole('option', { name: 'a.gguf' })).toBeNull()
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
+
+describe('chat_retry_stale_registry_mirror_order', () => {
+  // Ordering contract (informational, not guard-discriminating): with no
+  // providers loaded yet, even an unguarded stale registry could not render
+  // a select — this pins that no intermediate select appears before the
+  // retry completes, guarding future refactors of the render conditions.
+  it('early stale registry never surfaces before retry completes', async () => {
+    const user = userEvent.setup()
+    const cfgQ = deferredQueue()
+    const regQ = deferredQueue()
+    installTauriMock({
+      llm_get_config_report: () => cfgQ.impl(),
+      llm_models_list: () => regQ.impl(),
+    })
+    render(<AIChatFull />)
+    cfgQ.pending[0].reject(new Error('boom-first'))
+    expect(await screen.findByText(/Не удалось загрузить конфигурацию/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
+    // Stale A registry resolves while B is still pending: no select yet.
+    regQ.pending[0].resolve(
+      JSON.stringify([{ id: 'mA', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 }]),
+    )
+    // Flush first (deterministic, see helper), then assert absence.
+    await flushAsync()
+    expect(screen.queryByRole('combobox', { name: 'Модель' })).toBeNull()
+    // B completes: only B records are selectable.
+    cfgQ.pending[1].resolve(reportFor([localProvider()]))
+    await waitFor(() => expect(regQ.pending.length).toBe(2))
+    regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
+    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
+    expect(combo.value).toBe('mB')
+    expect(screen.queryByRole('option', { name: 'a.gguf' })).toBeNull()
   })
 })

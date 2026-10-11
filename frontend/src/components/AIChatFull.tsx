@@ -86,14 +86,20 @@ export default function AIChatFull() {
   const [registryLoaded, setRegistryLoaded] = useState(false)
   const stale = useRef(false)
   const mounted = useRef(true)
+  // Monotonic generation: every load()/retry is a new generation; only the
+  // latest one may publish state. mounted guards unmount, generation guards
+  // staleness between overlapping attempts on a live component.
+  const loadGen = useRef(0)
 
   const load = async () => {
+    const gen = (loadGen.current += 1)
+    const isCurrent = () => mounted.current && loadGen.current === gen
     setConfigState('loading')
     setConfigError('')
     setBlocked('')
     try {
       const res = await llm.llmGetConfigSafe()
-      if (!mounted.current) return
+      if (!isCurrent()) return
       if (!res.config) throw new Error('empty config')
       const enabled = res.config.providers.filter((p) => p.enabled)
       setProviders(enabled)
@@ -106,19 +112,19 @@ export default function AIChatFull() {
       setPrivacy(chat?.privacy ?? undefined)
       setConfigState('ready')
     } catch (e) {
-      if (!mounted.current) return
+      if (!isCurrent()) return
       setConfigState('error')
       setConfigError(e instanceof Error ? e.message : String(e))
     }
     try {
       const list = await llm.llmModelsList()
-      if (!mounted.current) return
+      if (!isCurrent()) return
       setRegistry(list)
     } catch {
-      if (!mounted.current) return
+      if (!isCurrent()) return
       setRegistry([])
     } finally {
-      if (mounted.current) setRegistryLoaded(true)
+      if (isCurrent()) setRegistryLoaded(true)
     }
   }
 
