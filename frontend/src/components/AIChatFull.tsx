@@ -4,7 +4,9 @@ import { isLocalKind } from './settings/types'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
-function classifyError(e: unknown): string {
+/** Pure helpers below are exported for unit tests; component behavior is unchanged. */
+
+export function classifyError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
   const low = raw.toLowerCase()
   if (low.includes('no api_key in keyring') || low.includes('missing credential') || low.includes('credentials_missing')) {
@@ -25,6 +27,36 @@ function classifyError(e: unknown): string {
   return raw.slice(0, 500)
 }
 
+/** First enabled local provider, else first enabled provider, else null. */
+export function defaultProviderForChat(providers: llm.Provider[]): llm.Provider | null {
+  const enabled = providers.filter((p) => p.enabled)
+  return enabled.find((p) => isLocalKind(p.kind)) ?? enabled[0] ?? null
+}
+
+/** Configured model default for a provider; user may override afterwards. */
+export function defaultModelForProvider(p: llm.Provider | null): string {
+  if (!p) return ''
+  return p.default_model || p.model || ''
+}
+
+/** Non-empty explanation when send must be blocked; '' means allowed. */
+export function chatPrivacyBlocked(provider: llm.Provider | null, privacy: string | undefined): string {
+  if (provider && privacy === 'local_only' && !isLocalKind(provider.kind)) {
+    return `Отправка заблокирована: профиль task-chat — local_only, а провайдер «${provider.name}» облачный. Выберите локальный провайдер или смените политику в настройках.`
+  }
+  if (!provider) {
+    return 'Нет включённого провайдера. Включите провайдера в настройках нейросетей.'
+  }
+  return ''
+}
+
+/** Local legacy providers return raw JSON; cloud returns normalized text. */
+export function extractChatText(raw: unknown): string {
+  let txt = String(raw)
+  try { const j = JSON.parse(txt); txt = j.choices?.[0]?.message?.content || txt } catch {}
+  return txt
+}
+
 export default function AIChatFull() {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [input, setInput] = useState('')
@@ -43,10 +75,10 @@ export default function AIChatFull() {
       if (!live || !res.config) return
       const enabled = res.config.providers.filter((p) => p.enabled)
       setProviders(enabled)
-      const first = enabled.find((p) => isLocalKind(p.kind)) ?? enabled[0]
+      const first = defaultProviderForChat(enabled)
       if (first) {
         setProviderId(first.id)
-        setModel(first.default_model || first.model || '')
+        setModel(defaultModelForProvider(first))
       }
       const chat = res.config.task_profiles.find((t) => t.id === 'task-chat')
       setPrivacy(chat?.privacy ?? undefined)
@@ -58,8 +90,7 @@ export default function AIChatFull() {
 
   const onProvider = (id: string) => {
     setProviderId(id)
-    const p = providers.find((x) => x.id === id)
-    if (p) setModel(p.default_model || p.model || '')
+    setModel(defaultModelForProvider(providers.find((x) => x.id === id) ?? null))
     setBlocked('')
   }
 
@@ -82,12 +113,9 @@ export default function AIChatFull() {
     if (!input.trim() || busy) return
     setBlocked('')
     // UI privacy pre-check (backend guard remains authoritative).
-    if (selected && privacy === 'local_only' && !isLocalKind(selected.kind)) {
-      setBlocked(`Отправка заблокирована: профиль task-chat — local_only, а провайдер «${selected.name}» облачный. Выберите локальный провайдер или смените политику в настройках.`)
-      return
-    }
-    if (!selected) {
-      setBlocked('Нет включённого провайдера. Включите провайдера в настройках нейросетей.')
+    const blockReason = chatPrivacyBlocked(selected, privacy)
+    if (blockReason) {
+      setBlocked(blockReason)
       return
     }
     const u: Msg = { role: 'user', content: input }
@@ -100,9 +128,7 @@ export default function AIChatFull() {
       const res = await llm.llmChatUniversal(providerId, model, history.map(m=>({role:m.role, content:m.content})))
       if (stale.current) return
       // Local legacy providers return raw JSON; cloud returns normalized text.
-      let txt = String(res)
-      try { const j = JSON.parse(txt); txt = j.choices?.[0]?.message?.content || txt } catch {}
-      setMsgs((m) => [...m, { role: 'assistant', content: txt }])
+      setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res) }])
     } catch (e) {
       if (stale.current) return
       setMsgs((m)=>[...m, {role:'assistant', content: classifyError(e)}])
