@@ -11,20 +11,24 @@ const invoke = (cmd: string, args?: unknown) => {
 
 function useTasks(filter: string) {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [error, setError] = useState('')
   const load = async () => {
     try {
       const raw = await invoke('tasks_list', { filter })
       setTasks(JSON.parse(String(raw)) as Task[])
-    } catch { setTasks([]) }
+      setError('')
+    } catch { setTasks([]); setError('Не удалось загрузить задачи. Проверьте backend и нажмите «Обновить».') }
   }
   useEffect(() => { load() }, [filter])
-  return { tasks, reload: load }
+  return { tasks, reload: load, error, setError }
 }
 
-function TaskRow({ t, onDone }: { t: Task; onDone: () => void }) {
+function TaskRow({ t, onDone, onError }: { t: Task; onDone: () => void; onError: (m: string) => void }) {
   const done = async () => {
-    await invoke('tasks_update_status', { id: t.id, status: 'done' }).catch(()=>{})
-    onDone()
+    try {
+      await invoke('tasks_update_status', { id: t.id, status: 'done' })
+      onDone()
+    } catch { onError('Не удалось отметить задачу выполненной.') }
   }
   return (
     <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8 }}>
@@ -41,14 +45,25 @@ export default function TaskManager() {
   const [newTitle, setNewTitle] = useState('')
   const [project, setProject] = useState('')
   const filter = surface==='today'?'today': surface==='board'?'board': surface==='completed'?'completed': 'workspace'
-  const { tasks, reload } = useTasks(filter)
+  const { tasks, reload, error, setError } = useTasks(filter)
   const todayCount = tasks.filter(t=> t.status!=='done').length
 
   const create = async () => {
     if (!newTitle.trim()) return
-    await invoke('tasks_create', { title: newTitle, project, due: '' }).catch(()=>{})
-    setNewTitle('')
-    reload()
+    try {
+      await invoke('tasks_create', { title: newTitle, project, due: '' })
+      setNewTitle('')
+      setError('')
+      reload()
+    } catch { setError('Не удалось создать задачу.') }
+  }
+
+  const archive = async () => {
+    try {
+      await invoke('tasks_archive',{})
+      setError('')
+      reload()
+    } catch { setError('Не удалось архивировать задачи.') }
   }
 
   return (
@@ -61,6 +76,7 @@ export default function TaskManager() {
         ))}
         <span style={{ marginLeft:'auto', fontSize:11, color:'var(--muted)' }}>{todayCount} активных</span>
       </div>
+      {error && <div role="alert" style={{ margin:'8px 12px 0', padding:'8px 10px', background:'rgba(255,80,80,.08)', border:'1px solid rgba(255,80,80,.4)', borderRadius:8, fontSize:12 }}>{error}</div>}
 
       {surface==='start' && (
         <div style={{ padding:16, display:'flex', flexDirection:'column', gap:12 }}>
@@ -85,7 +101,7 @@ export default function TaskManager() {
         <div style={{ padding:12, display:'flex', flexDirection:'column', gap:8, overflow:'auto' }}>
           <div style={{ fontSize:11, letterSpacing:'.06em', color:'var(--muted)', fontWeight:700 }}>TODAY — {new Date().toISOString().slice(0,10)}</div>
           {tasks.length===0 && <div style={{ padding:20, textAlign:'center', color:'var(--muted)', border:'1px dashed var(--border)', borderRadius:12 }}>Нет задач на сегодня — создай в Start</div>}
-          {tasks.map(t=> <TaskRow key={t.id} t={t} onDone={reload} />)}
+          {tasks.map(t=> <TaskRow key={t.id} t={t} onDone={reload} onError={setError} />)}
         </div>
       )}
 
@@ -96,7 +112,7 @@ export default function TaskManager() {
             <div style={{ fontSize:12, color:'var(--muted)', marginTop:4 }}>Контекст `02 Daily/{new Date().toISOString().slice(0,10)}.md` + задачи. Утром: Daily note → Today, вечером: Completed.</div>
           </div>
           <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8 }}>
-            {tasks.slice(0,6).map(t=> <TaskRow key={t.id} t={t} onDone={reload} />)}
+            {tasks.slice(0,6).map(t=> <TaskRow key={t.id} t={t} onDone={reload} onError={setError} />)}
           </div>
         </div>
       )}
@@ -107,7 +123,7 @@ export default function TaskManager() {
             <input placeholder="Фильтр по проекту" onChange={(e)=> setProject(e.target.value)} value={project} style={{ flex:1, padding:'8px 10px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8 }} />
             <button onClick={reload} style={{ padding:'8px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8 }}>Обновить</button>
           </div>
-          {tasks.filter(t=> !project || t.project.includes(project)).map(t=> <div key={t.id} style={{ marginBottom:6 }}><TaskRow t={t} onDone={reload} /></div>)}
+          {tasks.filter(t=> !project || t.project.includes(project)).map(t=> <div key={t.id} style={{ marginBottom:6 }}><TaskRow t={t} onDone={reload} onError={setError} /></div>)}
         </div>
       )}
 
@@ -117,7 +133,7 @@ export default function TaskManager() {
             <div key={col} style={{ flex:1, minWidth:220, background:'rgba(255,255,255,.02)', border:'1px solid var(--border)', borderRadius:12, padding:10 }}>
               <div style={{ fontWeight:700, fontSize:11, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--muted)', borderBottom:'1px solid var(--border)', paddingBottom:6, marginBottom:8 }}>{col} — {tasks.filter(t=> t.status===col).length}</div>
               <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                {tasks.filter(t=> t.status===col).map(t=> <TaskRow key={t.id} t={t} onDone={reload} />)}
+                {tasks.filter(t=> t.status===col).map(t=> <TaskRow key={t.id} t={t} onDone={reload} onError={setError} />)}
               </div>
             </div>
           ))}
@@ -128,7 +144,7 @@ export default function TaskManager() {
         <div style={{ padding:12, overflow:'auto' }}>
           <div style={{ display:'flex', gap:8, marginBottom:10 }}>
             <span style={{ fontSize:12, color:'var(--muted)' }}>Ретро — terminal `done/cancelled`</span>
-            <button onClick={async()=> { await invoke('tasks_archive',{}).catch(()=>{}); reload() }} style={{ marginLeft:'auto', padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}>Архивировать</button>
+            <button onClick={archive} style={{ marginLeft:'auto', padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}>Архивировать</button>
           </div>
           {tasks.map(t=> (
             <div key={t.id} style={{ padding:'8px 10px', background:'rgba(120,210,150,.08)', border:'1px solid rgba(120,210,150,.22)', borderRadius:8, marginBottom:6, fontSize:13 }}>

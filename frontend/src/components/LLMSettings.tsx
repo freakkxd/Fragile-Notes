@@ -267,7 +267,7 @@ export default function LLMSettings() {
       {/* header: search placeholder + mode switch */}
       <div style={{display:'flex', gap:8, padding:'8px 10px', borderBottom:'1px solid var(--border)', alignItems:'center', flexWrap:'wrap'}}>
         <strong style={{fontSize:13}}>Настройки</strong>
-        <span style={{fontSize:11, color:'var(--muted)'}}>⌘K — скоро</span>
+        <span style={{fontSize:11, color:'var(--muted)'}}>Палитра: Ctrl+P</span>
         <div role="group" aria-label="Режим настроек" style={{marginLeft:'auto', display:'flex', gap:4}}>
           {(['simple','default','expert'] as SettingsMode[]).map(m => (
             <button key={m} onClick={()=>changeMode(m)} aria-pressed={mode===m}
