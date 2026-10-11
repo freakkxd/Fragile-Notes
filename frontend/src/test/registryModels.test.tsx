@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
-import AIChatFull from '../components/AIChatFull'
+import AIChatFull, { presentLocalModels } from '../components/AIChatFull'
 import LLMSettings from '../components/LLMSettings'
+import type { RegistryModel } from '../lib/llm'
 import { installTauriMock, tauriMockCalls } from './tauriMock'
 
 // Vitest runs without globals: unmount after each test explicitly.
@@ -71,6 +72,34 @@ describe('registry_present_onlySelectable', () => {
     render(<AIChatFull />)
     expect(await screen.findByRole('option', { name: 'qwen.gguf' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'second.gguf' })).toBeTruthy()
+  })
+})
+
+describe('registry_order_deterministic', () => {
+  const shuffled = [
+    rec('model-def', 'local', 'second.gguf', 'Present'),
+    rec('model-abc', 'local', 'qwen.gguf', 'Present'),
+    rec('model-aaa', 'local', 'aaa.gguf', 'Present'),
+  ] as unknown as RegistryModel[]
+
+  it('sorts eligible models by filename, then id, regardless of backend order', () => {
+    const ids = presentLocalModels(shuffled, 'local').map((r) => r.id)
+    expect(ids).toEqual(['model-aaa', 'model-abc', 'model-def'])
+    // Reversed input yields the same order.
+    const ids2 = presentLocalModels([...shuffled].reverse(), 'local').map((r) => r.id)
+    expect(ids2).toEqual(ids)
+  })
+
+  it('selects the first sorted record by default in chat', async () => {
+    mockChat(shuffled)
+    render(<AIChatFull />)
+    // NOTE: findByLabelText would match the initial cloud-branch input
+    // (rendered before config loads); combobox matches <select> only.
+    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
+    // Registry arrives async; the correction effect applies the default after.
+    await waitFor(() => expect(combo.value).toBe('model-aaa'))
+    const options = Array.from(combo.querySelectorAll('option')).map((o) => o.value)
+    expect(options).toEqual(['model-aaa', 'model-abc', 'model-def'])
   })
 })
 

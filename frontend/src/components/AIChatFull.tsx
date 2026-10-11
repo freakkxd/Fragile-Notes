@@ -51,9 +51,14 @@ export function chatPrivacyBlocked(provider: llm.Provider | null, privacy: strin
 }
 
 /** Local registry records eligible for chat: Present state of this provider.
- *  The select value is always RegistryModel.id — never a filesystem path. */
+ *  The select value is always RegistryModel.id — never a filesystem path.
+ *  Deterministic order (filename, then id): backend registry order is
+ *  unspecified, so the UI must not depend on list position. */
 export function presentLocalModels(registry: llm.RegistryModel[], providerId: string): llm.RegistryModel[] {
-  return registry.filter((r) => r.state === 'Present' && r.provider_id === providerId)
+  return registry
+    .filter((r) => r.state === 'Present' && r.provider_id === providerId)
+    .sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)
+      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
 /** Local legacy providers return raw JSON; cloud returns normalized text. */

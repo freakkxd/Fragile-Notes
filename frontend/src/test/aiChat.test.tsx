@@ -83,7 +83,7 @@ describe('ai_chat_default_local_selection', () => {
     render(<AIChatFull />)
     const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
     expect(combo.value).toBe('local')
-    const model = screen.getByLabelText('Модель') as HTMLSelectElement
+    const model = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
     expect(model.value).toBe('model-abc')
     expect(screen.getByRole('option', { name: 'qwen.gguf' })).toBeTruthy()
   })
