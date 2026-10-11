@@ -237,3 +237,39 @@ describe('chat_retry_stale_registry_mirror_order', () => {
     expect(screen.queryByRole('option', { name: 'a.gguf' })).toBeNull()
   })
 })
+
+describe('chat_retry_stale_registry_error_ignored', () => {
+  // A stale registry REJECTION must not wipe the retry result either: the
+  // catch branch clears the list, so without the generation guard the
+  // healthy select would vanish. Same public-UX interleaving as above,
+  // but the stale leg rejects instead of resolving.
+  it('late first-attempt registry error never clears retry state', async () => {
+    const user = userEvent.setup()
+    const cfgQ = deferredQueue()
+    const regQ = deferredQueue()
+    installTauriMock({
+      llm_get_config_report: () => cfgQ.impl(),
+      llm_models_list: () => regQ.impl(),
+    })
+    render(<AIChatFull />)
+    // Attempt A: config rejects fast -> error banner; its registry stays pending.
+    cfgQ.pending[0].reject(new Error('boom-first'))
+    expect(await screen.findByText(/Не удалось загрузить конфигурацию/)).toBeTruthy()
+    // Retry starts attempt B through public UX.
+    await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+    // B resolves fully: local select with mB.
+    cfgQ.pending[1].resolve(reportFor([localProvider()]))
+    await waitFor(() => expect(regQ.pending.length).toBe(2))
+    regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
+    expect(
+      (await screen.findByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value,
+    ).toBe('mB')
+    // Stale A registry rejects late: must be ignored, select stays intact.
+    regQ.pending[0].reject(new Error('boom-stale-registry'))
+    await flushAsync()
+    expect((screen.getByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value).toBe('mB')
+    expect(screen.queryByRole('option', { name: 'b.gguf' })).toBeTruthy()
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
