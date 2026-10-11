@@ -79,12 +79,22 @@ export default function AIChatFull() {
   const [busy, setBusy] = useState(false)
   const [blocked, setBlocked] = useState('')
   const [registry, setRegistry] = useState<llm.RegistryModel[]>([])
+  // Config lifecycle: never render a provider-shaped model control before
+  // the config is resolved (initial null must not look like cloud).
+  const [configState, setConfigState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [configError, setConfigError] = useState('')
+  const [registryLoaded, setRegistryLoaded] = useState(false)
   const stale = useRef(false)
+  const mounted = useRef(true)
 
-  useEffect(() => {
-    let live = true
-    llm.llmGetConfigSafe().then((res) => {
-      if (!live || !res.config) return
+  const load = async () => {
+    setConfigState('loading')
+    setConfigError('')
+    setBlocked('')
+    try {
+      const res = await llm.llmGetConfigSafe()
+      if (!mounted.current) return
+      if (!res.config) throw new Error('empty config')
       const enabled = res.config.providers.filter((p) => p.enabled)
       setProviders(enabled)
       const first = defaultProviderForChat(enabled)
@@ -94,9 +104,29 @@ export default function AIChatFull() {
       }
       const chat = res.config.task_profiles.find((t) => t.id === 'task-chat')
       setPrivacy(chat?.privacy ?? undefined)
-    }).catch(() => {})
-    llm.llmModelsList().then((list) => { if (live) setRegistry(list) }).catch(() => {})
-    return () => { live = false }
+      setConfigState('ready')
+    } catch (e) {
+      if (!mounted.current) return
+      setConfigState('error')
+      setConfigError(e instanceof Error ? e.message : String(e))
+    }
+    try {
+      const list = await llm.llmModelsList()
+      if (!mounted.current) return
+      setRegistry(list)
+    } catch {
+      if (!mounted.current) return
+      setRegistry([])
+    } finally {
+      if (mounted.current) setRegistryLoaded(true)
+    }
+  }
+
+  useEffect(() => {
+    mounted.current = true
+    load()
+    return () => { mounted.current = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const selected = providers.find((p) => p.id === providerId) ?? null
@@ -143,6 +173,10 @@ export default function AIChatFull() {
   const send = async () => {
     if (!input.trim() || busy) return
     setBlocked('')
+    if (configState !== 'ready') {
+      setBlocked(configState === 'loading' ? 'Дождитесь загрузки конфигурации.' : 'Конфигурация недоступна. Нажмите «Повторить» выше.')
+      return
+    }
     // UI privacy pre-check (backend guard remains authoritative).
     const blockReason = chatPrivacyBlocked(selected, privacy)
     if (blockReason) {
@@ -150,6 +184,10 @@ export default function AIChatFull() {
       return
     }
     if (isLocal) {
+      if (!registryLoaded) {
+        setBlocked('Дождитесь загрузки моделей.')
+        return
+      }
       if (eligible.length === 0) {
         setBlocked('Нет установленных моделей: откройте настройки → Модели и нажмите «Сканировать реестр».')
         return
@@ -183,19 +221,21 @@ export default function AIChatFull() {
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
         <span style={{ fontWeight:700 }}>AI Чат{selected ? ` — ${selected.name}` : ''}</span>
-        <select value={providerId} onChange={(e)=>onProvider(e.target.value)} aria-label="Провайдер"
+        <select value={providerId} onChange={(e)=>onProvider(e.target.value)} aria-label="Провайдер" disabled={configState !== 'ready'}
           style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:220 }}>
-          {providers.length === 0 && <option value="">Нет включённых провайдеров</option>}
+          {configState === 'loading' && <option value="">Загрузка…</option>}
+          {configState !== 'loading' && providers.length === 0 && <option value="">Нет включённых провайдеров</option>}
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name} ({isLocalKind(p.kind) ? 'local' : 'cloud'})</option>)}
         </select>
-        {isLocal ? (
-          eligible.length > 0 ? (
-            <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
+        {configState !== 'ready' ? (
+          <span style={{ fontSize:11, color:'var(--muted)' }}>{configState === 'loading' ? 'Загрузка…' : '—'}</span>
+        ) : isLocal ? (
+          eligible.length > 0 ? (            <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
               style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>
               {eligible.map((r) => <option key={r.id} value={r.id}>{r.filename}</option>)}
             </select>
           ) : (
-            <span style={{ fontSize:11, color:'var(--muted)' }}>Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».</span>
+            <span style={{ fontSize:11, color:'var(--muted)' }}>{registryLoaded ? 'Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».' : 'Загрузка моделей…'}</span>
           )
         ) : (
           <input value={model} onChange={(e)=>setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель"
@@ -205,6 +245,12 @@ export default function AIChatFull() {
         <span style={{ fontSize:11, color:'var(--muted)' }}>{status}</span>
       </div>
       {blocked && <div role="alert" style={{ margin:'8px 12px 0', padding:'8px 10px', background:'rgba(255,180,80,.08)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}>{blocked}</div>}
+      {configState === 'error' && (
+        <div role="alert" style={{ margin:'8px 12px 0', padding:'8px 10px', background:'rgba(255,80,80,.08)', border:'1px solid rgba(255,80,80,.4)', borderRadius:8, fontSize:12 }}>
+          Не удалось загрузить конфигурацию{configError ? `: ${configError.slice(0, 200)}` : '. Проверьте backend.'}{' '}
+          <button onClick={load} style={{ padding:'4px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>↻ Повторить</button>
+        </div>
+      )}
       <div style={{ flex:1, overflow:'auto', padding:12, display:'flex', flexDirection:'column', gap:8 }}>
         {msgs.map((m,i)=> (
           <div key={i} style={{ alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'80%', padding:'8px 12px', borderRadius:12, background: m.role==='user'?'rgba(130,168,255,.14)':'var(--panel-2)', border:'1px solid var(--border)', fontSize:13 }}>{m.content}</div>
