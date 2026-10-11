@@ -2379,6 +2379,93 @@ mod tests {
         assert_eq!(rep.reason, Some(ConfigDegradedReason::VaultMissing));
     }
 
+    fn gate1_issue_token_for_corrupt() -> (IsolatedEnv, PathBuf, String, Vec<u8>) {
+        let env = IsolatedEnv::lock("tokhard");
+        let p = env.cfg_path();
+        let corrupt = b"[[broken-token-fixture".to_vec();
+        fs::write(&p, &corrupt).unwrap();
+        let started = llm_start_config_recovery().expect("recovery start");
+        let v: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let token = v.get("token").and_then(|t| t.as_str()).unwrap().to_string();
+        (env, p, token, corrupt)
+    }
+
+    fn gate1_expire_token(token: &str) {
+        let mut map = RECOVERY_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+        let rec = map.get_mut(token).expect("token must exist");
+        rec.expires_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    }
+
+    #[test]
+    fn gate1_token_expiry_rejected() {
+        let (_env, p, token, corrupt) = gate1_issue_token_for_corrupt();
+        gate1_expire_token(&token);
+        let err = save_config_guarded(&LlmConfig::default(), Some(&token)).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken: token expired"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "original unchanged");
+    }
+
+    #[test]
+    fn gate1_token_path_mismatch_rejected() {
+        let (_env, p, token, corrupt) = gate1_issue_token_for_corrupt();
+        let fp = fingerprint_of(&p);
+        let other = p.with_file_name("other-llm.json");
+        let err = validate_and_consume_recovery_token(&token, &other, fp).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken: config path changed"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "original unchanged");
+    }
+
+    #[test]
+    fn gate1_token_fingerprint_mismatch_rejected() {
+        let (_env, p, token, _corrupt) = gate1_issue_token_for_corrupt();
+        let real = fingerprint_of(&p).expect("fingerprint");
+        // Different size defeats mtime-granularity concerns by construction.
+        let stale = FileFingerprint { size: real.size + 1000, mtime_secs: real.mtime_secs };
+        let err = validate_and_consume_recovery_token(&token, &p, Some(stale)).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken: source changed"), "got: {}", err);
+    }
+
+    #[test]
+    fn gate1_second_issue_supersedes_first() {
+        let env = IsolatedEnv::lock("toksuper");
+        let p = env.cfg_path();
+        fs::write(&p, b"[[broken-supersede").unwrap();
+        let fp = || fingerprint_of(&p);
+        let token_a = issue_recovery_token(&p, fp());
+        let token_b = issue_recovery_token(&p, fp());
+        // The second issue for the same path purges the first.
+        let err = validate_and_consume_recovery_token(&token_a, &p, fp()).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken"), "got: {}", err);
+        validate_and_consume_recovery_token(&token_b, &p, fp())
+            .expect("latest token stays valid");
+    }
+
+    #[test]
+    fn gate1_save_invalidates_token_end_to_end() {
+        // Single-use is end-to-end: after a successful confirmed save the
+        // same token cannot authorize another degraded overwrite. (A save on
+        // a now-healthy config needs no token at all — that path is covered
+        // by gate1_no_recovery_when_healthy.)
+        let (_env, p, token, corrupt) = gate1_issue_token_for_corrupt();
+        save_config_guarded(&LlmConfig::default(), Some(&token)).expect("confirmed save");
+        fs::write(&p, &corrupt).unwrap();
+        let err = save_config_guarded(&LlmConfig::default(), Some(&token)).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "rejected attempt preserves source");
+    }
+
+    #[test]
+    fn gate1_expired_token_end_to_end() {
+        let (env, p, token, corrupt) = gate1_issue_token_for_corrupt();
+        gate1_expire_token(&token);
+        let before = dir_files(&env.dir());
+        let cfg_json = serde_json::to_string(&LlmConfig::default()).unwrap();
+        let err = llm_save_config_confirmed(cfg_json, token).unwrap_err();
+        assert!(err.starts_with("InvalidConfirmToken: token expired"), "got: {}", err);
+        assert_eq!(fs::read(&p).unwrap(), corrupt, "original unchanged");
+        assert_eq!(dir_files(&env.dir()), before, "no recovery copy or backup on rejection");
+    }
+
     // ---------- Claude dispatch foundation tests ----------
     struct MapSecrets;
     impl provider::SecretStore for MapSecrets {
