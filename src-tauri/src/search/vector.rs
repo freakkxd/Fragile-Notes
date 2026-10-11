@@ -447,4 +447,85 @@ mod tests {
     fn escape_like() {
         assert_eq!(escape_like_literal("a%b_c\\d"), "a\\%b\\_c\\\\d");
     }
+
+    fn dim_test_db(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "fragile-dim-{}-{}-{}",
+            std::process::id(),
+            tag,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("embeddings.db")
+    }
+
+    fn dim_record(dims: usize, n: usize) -> crate::llm::embeddings::types::EmbeddingRecord {
+        crate::llm::embeddings::types::EmbeddingRecord {
+            chunk_id: "c1".to_string(),
+            model_id: "m".to_string(),
+            model_fingerprint: "F".to_string(),
+            content_hash: "h".to_string(),
+            dimensions: dims,
+            vector: vec![1.0; n],
+        }
+    }
+
+    fn dim_chunk_row(db: &PathBuf) {
+        let conn = rusqlite::Connection::open(db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS embedding_chunks (
+                chunk_id text primary key, note_id text not null, content text not null,
+                content_hash text not null, heading_path_json text not null,
+                start_offset integer not null, end_offset integer not null,
+                created_at text not null, updated_at text not null);
+             CREATE TABLE IF NOT EXISTS embedding_vectors (
+                chunk_id text not null, model_id text not null, model_fingerprint text not null,
+                dimensions integer not null, vector_blob blob not null, content_hash text not null,
+                created_at text not null, updated_at text not null,
+                primary key (chunk_id, model_id, model_fingerprint));",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO embedding_chunks
+             (chunk_id, note_id, content, content_hash, heading_path_json, start_offset, end_offset, created_at, updated_at)
+             VALUES ('c1','n1','text','h','[]',0,4,'t','t')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_dimensions_mismatch_is_explicit_error() {
+        use crate::search::types::{VectorModelFilter, VectorQuery};
+        let db = dim_test_db("mismatch");
+        let store = SqliteVectorStore::new(db.clone(), crate::search::types::VectorSearchLimits::default());
+        dim_chunk_row(&db);
+        store.upsert(&[dim_record(3, 3)]).await.unwrap();
+        // Same (model, fingerprint), different dims: explicit error, never
+        // silent empty results or a panic in similarity math.
+        let q = VectorQuery {
+            vector: vec![1.0; 4],
+            model: VectorModelFilter { model_id: "m".to_string(), model_fingerprint: "F".to_string() },
+            limit: 10,
+            note_filter: None,
+            min_score: None,
+        };
+        let err = store.search(q).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains('3') && msg.contains('4'), "expected/actual dims in: {}", msg);
+        // Matching dims succeed: the error above is the discriminator.
+        let q2 = VectorQuery {
+            vector: vec![1.0; 3],
+            model: VectorModelFilter { model_id: "m".to_string(), model_fingerprint: "F".to_string() },
+            limit: 10,
+            note_filter: None,
+            min_score: None,
+        };
+        let hits = store.search(q2).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
 }

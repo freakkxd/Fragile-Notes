@@ -354,3 +354,119 @@ fn scope_resolved_without_credentials() {
     let cfg2 = config_with(p2, m2);
     assert_eq!(resolve_scope_for_model(&cfg2, "e2"), None);
 }
+
+fn gemini_provider() -> Provider {
+    Provider {
+        id: "gemini".to_string(),
+        name: "gemini".to_string(),
+        kind: ProviderKind::Gemini,
+        enabled: true,
+        endpoint: "https://generativelanguage.googleapis.com".to_string(),
+        auth: Some(AuthRef {
+            method: AuthMethod::ApiKey,
+            secret_ref: Some("keychain://fragile-notes/gem".to_string()),
+            account_id: None,
+        }),
+        default_model: String::new(),
+        extra: HashMap::new(),
+    }
+}
+
+fn gemini_loader(id: &str) -> Result<String, String> {
+    assert_eq!(id, "gemini"); // keyed by provider id only, like production
+    Ok("sk-gem-test-key".to_string())
+}
+
+#[test]
+fn gemini_wiring_selects_bridge_for_gemini_kind() {
+    let p = gemini_provider();
+    let m = model(
+        "emb-gem",
+        "gemini",
+        "text-embedding-004",
+        vec![Capability::Embeddings],
+    );
+    let cfg = config_with(p, m);
+    let out = resolve_embedding_provider(&cfg, "emb-gem", None, &None, &gemini_loader)
+        .expect("gemini must resolve");
+    assert_eq!(out.model_ref.model_id, "emb-gem");
+    assert_eq!(out.model_ref.model_fingerprint, "remote:text-embedding-004");
+    assert_eq!(out.scope, ProviderScope::Cloud);
+    assert_eq!(out.endpoint, "https://generativelanguage.googleapis.com");
+    assert_eq!(out.remote_model, "text-embedding-004");
+    // No secret material in diagnostics ...
+    let dbg = format!("{:?}", out);
+    assert!(!dbg.contains("sk-gem-test-key"), "key in Debug: {}", dbg);
+    assert!(!dbg.contains("keychain://"), "ref in Debug");
+}
+
+#[test]
+fn gemini_wiring_keeps_bearer_for_others() {
+    // Non-Gemini kinds keep the Bearer path with identical resolution.
+    let p = provider(
+        "openai",
+        ProviderKind::OpenAI,
+        "https://api.openai.com",
+        Some(AuthMethod::ApiKey),
+    );
+    let m = model(
+        "e1",
+        "openai",
+        "text-embedding-3-small",
+        vec![Capability::Embeddings],
+    );
+    let cfg = config_with(p, m);
+    let loader = |_: &str| Ok("sk-test-secret-value".to_string());
+    let out = resolve_embedding_provider(&cfg, "e1", None, &None, &loader).expect("must resolve");
+    assert_eq!(out.remote_model, "text-embedding-3-small");
+    assert_eq!(out.scope, ProviderScope::Cloud);
+    let dbg = format!("{:?}", out);
+    assert!(!dbg.contains("sk-test-secret-value"));
+}
+
+/// Manual cloud E2E (ignored by default). Secret ONLY from
+/// GEMINI_API_KEY_TEST via the injected loader — never keyring, never repo,
+/// never logs. No config files, no vault, no keyring writes.
+#[tokio::test]
+#[ignore]
+async fn gemini_embed_cloud_e2e_manual() {
+    use super::provider::EmbeddingProvider;
+    use super::types::EmbeddingRequest;
+    let key = match std::env::var("GEMINI_API_KEY_TEST") {
+        Ok(k) if !k.trim().is_empty() => k,
+        _ => {
+            eprintln!("SKIP: GEMINI_API_KEY_TEST absent");
+            return;
+        }
+    };
+    let mut p = gemini_provider();
+    p.auth = Some(AuthRef {
+        method: AuthMethod::ApiKey,
+        secret_ref: Some("keychain://fragile-notes/e2e".to_string()),
+        account_id: None,
+    });
+    let m = model(
+        "emb-cloud",
+        "gemini",
+        "text-embedding-004",
+        vec![Capability::Embeddings],
+    );
+    let cfg = config_with(p, m);
+    let loader = |_: &str| Ok(key.clone());
+    let out = resolve_embedding_provider(&cfg, "emb-cloud", None, &None, &loader)
+        .expect("cloud resolve");
+    let resp = out
+        .provider
+        .embed(
+            EmbeddingRequest::new(
+                "emb-cloud".to_string(),
+                vec!["hello world".to_string(), "second probe".to_string(), "third probe".to_string()],
+            ),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("cloud embed");
+    assert_eq!(resp.vectors.len(), 3, "positional batch");
+    assert!(resp.dimensions > 0, "non-empty dimensions");
+    assert!(resp.vectors.iter().all(|v| v.len() == resp.dimensions && v.iter().all(|x| x.is_finite())));
+}

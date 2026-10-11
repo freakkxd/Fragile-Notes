@@ -19,7 +19,7 @@ pub use openai::{
     ProviderAdapter, ResponseFormat, SecretStore, build_chat_body, detect_layout, join_api_path,
 };
 pub use openai_native::{OpenAiNativeAdapter, build_native_chat_body};
-pub use gemini::{GeminiEmbedBridge, GeminiEmbedParams, GeminiNativeAdapter, GeminiTaskType, build_gemini_body, capabilities_from_methods};
+pub use gemini::{GeminiEmbedBridge, GeminiEmbedParams, GeminiNativeAdapter, GeminiTaskType, OwnedGeminiEmbeddingProvider, build_gemini_body, capabilities_from_methods};
 pub use claude::{ClaudeChatBridge, ClaudeNativeAdapter, ANTHROPIC_VERSION, DEFAULT_MAX_TOKENS, build_claude_body};
 
 #[cfg(test)]

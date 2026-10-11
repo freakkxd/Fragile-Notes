@@ -10,7 +10,8 @@
 //!   -> Provider (enabled, endpoint)
 //!   -> ProviderScope + privacy check (local-only blocks cloud)
 //!   -> credential via keyring ONLY (never config/frontend/logs)
-//!   -> OpenAiCompatibleEmbeddingProvider + EmbeddingModelRef{model_id, fingerprint}
+//!   -> Bearer provider for OpenAI-compatible kinds, native header-auth
+//!      provider for Gemini + EmbeddingModelRef{model_id, fingerprint}
 //! ```
 //!
 //! Security rules:
@@ -22,12 +23,17 @@
 //! - Error messages carry ids/endpoints only — never secret material.
 
 use super::openai_compatible::{OpenAiCompatibleConfig, OpenAiCompatibleEmbeddingProvider};
+use super::provider::EmbeddingProvider;
 use super::types::EmbeddingModelRef;
 use crate::llm::models::identity::verified_id;
 use crate::llm::models::registry::Registry;
 use crate::llm::models::types::ModelRecord;
+use crate::llm::provider::{
+    AuthReference, GeminiEmbedParams, GeminiNativeAdapter, OwnedGeminiEmbeddingProvider,
+    ProviderConnection, ProviderError, ProviderModel, SecretStore,
+};
 use crate::llm::task::policy::{ensure_capability, scope_of, validate_privacy, ProviderScope};
-use crate::llm::{AuthMethod, Capability, LlmConfig, Model, Privacy, ProviderKind};
+use crate::llm::{AuthMethod, Capability, LlmConfig, Model, Privacy, Provider, ProviderKind};
 
 /// Typed wiring failures. Display strings contain ids/endpoints only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,11 +73,13 @@ impl std::error::Error for EmbeddingWiringError {}
 
 /// A resolved, ready-to-use production embedding provider.
 ///
-/// The raw `api_key` lives inside `provider`'s config (needed for the
-/// `Authorization` header) and is intentionally NOT exposed: no getter,
-/// redacted `Debug`.
+/// The concrete provider is boxed behind [`EmbeddingProvider`]: Bearer-based
+/// [`OpenAiCompatibleEmbeddingProvider`] for OpenAI-compatible kinds,
+/// header-auth native providers (Gemini) otherwise. Credentials live inside
+/// the provider and are intentionally NOT exposed: no getter, redacted
+/// `Debug`.
 pub struct ResolvedEmbedding {
-    pub provider: OpenAiCompatibleEmbeddingProvider,
+    pub provider: Box<dyn EmbeddingProvider>,
     pub model_ref: EmbeddingModelRef,
     pub scope: ProviderScope,
     pub endpoint: String,
@@ -85,8 +93,31 @@ impl std::fmt::Debug for ResolvedEmbedding {
             .field("scope", &self.scope)
             .field("endpoint", &self.endpoint)
             .field("remote_model", &self.remote_model)
-            .field("provider", &"OpenAiCompatibleEmbeddingProvider(api_key: ***)")
+            .field("provider", &"embedding provider (api_key: ***)")
             .finish()
+    }
+}
+
+/// Memory-only [`SecretStore`] holding an already-resolved key.
+///
+/// The key itself comes from the injected credential loader (production:
+/// OS keyring). The reference is validated for shape only; the key is
+/// never logged, never cloned beyond the request, never exposed.
+struct KeySecretStore(String);
+
+impl SecretStore for KeySecretStore {
+    fn get(&self, secret_ref: &str) -> Result<String, ProviderError> {
+        if secret_ref.trim().is_empty() {
+            return Err(ProviderError::CredentialsMissing(
+                "empty secret reference".to_string(),
+            ));
+        }
+        if self.0.is_empty() {
+            return Err(ProviderError::CredentialsMissing(
+                "empty credential".to_string(),
+            ));
+        }
+        Ok(self.0.clone())
     }
 }
 
@@ -224,6 +255,21 @@ pub fn resolve_embedding_provider(
         model_fingerprint: fingerprint,
     };
 
+    // Gemini: native header-auth path (never Bearer, never ?key=).
+    // Every other kind keeps the Bearer path below, byte-for-byte.
+    let endpoint = provider.endpoint.clone();
+    if provider.kind == ProviderKind::Gemini {
+        return resolve_gemini_embedding(
+            model,
+            provider,
+            api_key,
+            remote_model,
+            model_ref,
+            scope,
+            endpoint,
+        );
+    }
+
     let cfg = OpenAiCompatibleConfig {
         endpoint: provider.endpoint.clone(),
         api_key,
@@ -238,7 +284,78 @@ pub fn resolve_embedding_provider(
         .map_err(EmbeddingWiringError::InvalidEndpoint)?;
 
     Ok(ResolvedEmbedding {
-        provider,
+        provider: Box::new(provider),
+        model_ref,
+        scope,
+        endpoint,
+        remote_model,
+    })
+}
+
+/// Native Gemini embedding resolution: header-only auth through
+/// [`GeminiNativeAdapter::embed_content`], same [`EmbeddingResponse`]
+/// contract, same fingerprint rules. Task-type separation is out of scope:
+/// [`GeminiEmbedParams::default`] applies to query and index alike.
+#[allow(clippy::too_many_arguments)]
+fn resolve_gemini_embedding(
+    model: &Model,
+    provider: &Provider,
+    api_key: Option<String>,
+    remote_model: String,
+    model_ref: EmbeddingModelRef,
+    scope: ProviderScope,
+    endpoint: String,
+) -> Result<ResolvedEmbedding, EmbeddingWiringError> {
+    use crate::llm::models::types::ModelSource;
+    use std::sync::Arc;
+    let key = api_key
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| EmbeddingWiringError::MissingCredential(provider.id.clone()))?;
+    let secret_ref = provider
+        .auth
+        .as_ref()
+        .and_then(|a| a.secret_ref.clone())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| EmbeddingWiringError::MissingCredential(provider.id.clone()))?;
+    if remote_model.trim().is_empty() {
+        return Err(EmbeddingWiringError::InvalidEndpoint(format!(
+            "gemini embedding model {} has no remote model name",
+            model.id
+        )));
+    }
+    let auth = AuthReference::new(secret_ref)
+        .map_err(|_| EmbeddingWiringError::MissingCredential(provider.id.clone()))?;
+    let connection = ProviderConnection {
+        id: provider.id.clone(),
+        kind: ProviderKind::Gemini,
+        name: provider.name.clone(),
+        enabled: true,
+        scope: ProviderScope::Cloud,
+        endpoint: Some(endpoint.clone()),
+        auth: Some(auth),
+    };
+    let catalog_model = ProviderModel {
+        id: format!("{}:{}", provider.id, remote_model.trim()),
+        provider_id: provider.id.clone(),
+        remote_id: remote_model.trim().to_string(),
+        display_name: model.name.clone(),
+        capabilities: model.capabilities.clone(),
+        capability_source: None,
+        context_length: None,
+        dimensions: None,
+        pricing: None,
+        source: ModelSource::Manual,
+    };
+    let adapter = GeminiNativeAdapter::new(
+        connection,
+        Arc::new(KeySecretStore(key)),
+        std::time::Duration::from_secs(30),
+    )
+    .map_err(|e| EmbeddingWiringError::InvalidEndpoint(e.to_string()))?;
+    let provider =
+        OwnedGeminiEmbeddingProvider::new(adapter, catalog_model, GeminiEmbedParams::default());
+    Ok(ResolvedEmbedding {
+        provider: Box::new(provider),
         model_ref,
         scope,
         endpoint,

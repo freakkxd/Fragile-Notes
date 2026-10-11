@@ -70,7 +70,7 @@ pub(crate) fn production_embedding_provider(
         model_fingerprint: resolved.model_ref.model_fingerprint,
     };
     let provider: std::sync::Arc<dyn crate::llm::embeddings::provider::EmbeddingProvider> =
-        std::sync::Arc::new(resolved.provider);
+        std::sync::Arc::from(resolved.provider);
     Some((provider, filter))
 }
 

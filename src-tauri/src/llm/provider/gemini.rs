@@ -740,8 +740,62 @@ fn parse_embed_content(
     Ok(out)
 }
 
+/// Owned embedding provider for production wiring.
+///
+/// [`GeminiEmbedBridge`] borrows its adapter/model and cannot live inside an
+/// owned resolved handle; this type owns both and delegates to the same
+/// [`GeminiNativeAdapter::embed_content`] path with identical error mapping.
+pub struct OwnedGeminiEmbeddingProvider {
+    adapter: GeminiNativeAdapter,
+    model: ProviderModel,
+    params: GeminiEmbedParams,
+}
+
+/// Manual `Debug`: connection prints presence-only auth, no secrets.
+impl std::fmt::Debug for OwnedGeminiEmbeddingProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedGeminiEmbeddingProvider")
+            .field("connection", &self.adapter.connection())
+            .field("model", &self.model.id)
+            .finish()
+    }
+}
+
+impl OwnedGeminiEmbeddingProvider {
+    pub fn new(
+        adapter: GeminiNativeAdapter,
+        model: ProviderModel,
+        params: GeminiEmbedParams,
+    ) -> Self {
+        Self { adapter, model, params }
+    }
+}
+
+#[async_trait]
+impl crate::llm::embeddings::provider::EmbeddingProvider for OwnedGeminiEmbeddingProvider {
+    async fn embed(
+        &self,
+        request: crate::llm::embeddings::types::EmbeddingRequest,
+        cancel: CancellationToken,
+    ) -> Result<
+        crate::llm::embeddings::types::EmbeddingResponse,
+        crate::llm::embeddings::types::EmbeddingError,
+    > {
+        use crate::llm::embeddings::types::EmbeddingError;
+        self.adapter
+            .embed_content(&self.model, request.inputs.clone(), self.params.clone(), cancel)
+            .await
+            .map_err(|e| match e {
+                ProviderError::Cancelled => EmbeddingError::Cancelled,
+                ProviderError::Timeout(m) => EmbeddingError::Timeout(m),
+                other => EmbeddingError::Provider(format!("{:?}", other)),
+            })
+    }
+}
+
 /// [`crate::llm::embeddings::provider::EmbeddingProvider`] bridge bound to
-/// one catalog model (remote_id known — never guessed).
+/// one catalog model (remote_id known — never guessed; borrowed form, see
+/// [`OwnedGeminiEmbeddingProvider`] for the owned production form).
 pub struct GeminiEmbedBridge<'a> {
     pub adapter: &'a GeminiNativeAdapter,
     pub model: ProviderModel,
@@ -1510,5 +1564,106 @@ mod tests {
         let r = bridge.embed(req, CancellationToken::new()).await.unwrap();
         assert_eq!(r.dimensions, 2);
         assert_eq!(r.model_id, "gemini:models/gemini-embedding-001");
+    }
+
+    fn emb_ok_3() -> String {
+        r#"{"embeddings":[{"embedding":{"values":[0.1,0.2,0.3]}},{"embedding":{"values":[0.4,0.5,0.6]}},{"embedding":{"values":[0.7,0.8,0.9]}}]}"#.to_string()
+    }
+
+    fn owned_for(port: u16) -> OwnedGeminiEmbeddingProvider {
+        OwnedGeminiEmbeddingProvider::new(
+            adapter_for(port, Duration::from_secs(5)),
+            emb_model(),
+            GeminiEmbedParams::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_uses_header_not_bearer_or_query() {
+        use crate::llm::embeddings::provider::EmbeddingProvider;
+        use crate::llm::embeddings::types::EmbeddingRequest;
+        let m = spawn_wire(200, emb_ok_2(), 0).await;
+        let p = owned_for(m.port);
+        let r = p
+            .embed(
+                EmbeddingRequest::new("gemini:models/gemini-embedding-001".to_string(), vec!["a".to_string(), "b".to_string()]),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.vectors.len(), 2);
+        let raw = m.captured.lock().unwrap().join("\n");
+        let target = raw.lines().next().unwrap_or("").to_string();
+        assert!(target.starts_with("POST /v1beta/models/gemini-embedding-001:batchEmbedContent "),
+            "batch path, got: {}", target);
+        assert!(!target.contains('?'), "no query string at all, got: {}", target);
+        let lower = raw.to_lowercase();
+        assert_eq!(lower.matches("x-goog-api-key: aiza-test-key-12345").count(), 1,
+            "exactly one header auth");
+        assert!(!lower.contains("authorization:"), "never Bearer for Gemini");
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_batch_order_preserved() {
+        use crate::llm::embeddings::provider::EmbeddingProvider;
+        use crate::llm::embeddings::types::EmbeddingRequest;
+        let m = spawn_wire(200, emb_ok_3(), 0).await;
+        let p = owned_for(m.port);
+        let r = p
+            .embed(
+                EmbeddingRequest::new("m".to_string(), vec!["a".to_string(), "b".to_string(), "c".to_string()]),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.vectors.len(), 3, "positional 1:1 mapping");
+        assert_eq!(r.vectors[0], vec![0.1, 0.2, 0.3]);
+        assert_eq!(r.vectors[1], vec![0.4, 0.5, 0.6]);
+        assert_eq!(r.vectors[2], vec![0.7, 0.8, 0.9]);
+        assert_eq!(r.dimensions, 3);
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_params_validated() {
+        // Invalid params fail before any network I/O (closed port would
+        // otherwise surface transport errors, not validation ones).
+        let a = adapter_for(9, Duration::from_secs(5));
+        let bad = GeminiEmbedParams { task_type: None, output_dimensionality: Some(0) };
+        assert_eq!(
+            a.embed_content(&emb_model(), vec!["a".to_string()], bad, CancellationToken::new())
+                .await
+                .unwrap_err()
+                .code(),
+            "invalid_request"
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_error_redacted() {
+        use crate::llm::embeddings::provider::EmbeddingProvider;
+        use crate::llm::embeddings::types::EmbeddingRequest;
+        let m = spawn_wire(401, "denied".to_string(), 0).await;
+        let p = owned_for(m.port);
+        let err = p
+            .embed(
+                EmbeddingRequest::new("m".to_string(), vec!["a".to_string()]),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let dbg = format!("{:?}", err);
+        let disp = err.to_string();
+        assert!(!dbg.contains("AIza-test-key-12345"), "key in Debug: {}", dbg);
+        assert!(!disp.contains("AIza-test-key-12345"), "key in Display");
+        assert!(!dbg.contains("keychain://"), "ref in Debug");
+    }
+
+    #[tokio::test]
+    async fn gemini_embed_no_secret_in_debug() {
+        let m = spawn_wire(200, emb_ok_2(), 0).await;
+        let p = owned_for(m.port);
+        let dbg = format!("{:?}", p);
+        assert!(!dbg.contains("AIza-test-key-12345"), "key in Debug: {}", dbg);
+        assert!(!dbg.contains("keychain://"), "ref in Debug");
     }
 }
