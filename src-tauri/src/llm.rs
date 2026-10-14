@@ -1872,6 +1872,15 @@ mod tests {
         let txt = serde_json::to_string_pretty(&cfg).unwrap();
         fs::write(path, txt).unwrap();
     }
+    // Sorted file names in a directory — used to prove the read path creates no
+    // backups/quarantine siblings. Only ever called on the test's own temp dir.
+    fn dir_inventory(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    }
 
     #[test]
     fn test_migration_v1_to_v2() {
@@ -2396,9 +2405,16 @@ mod tests {
         }
     }
 
-    // Wire contract: the exact JSON llm_get_config_report emits — the field
-    // names the frontend reads, the save-only fields omitted on the read path,
-    // and masking of a raw credential marker (synthetic marker only).
+    // Command-level wire contract: this calls the real llm_get_config_report()
+    // command function and serializes its actual return value — it does not
+    // re-create the command's composition. Scope: this is a Rust-level command
+    // test. It does NOT exercise Tauri IPC transport, command registration, or
+    // the JS/frontend boundary.
+    //
+    // Residual keyring note: mask_config() -> has_keyring() performs a read-only
+    // session-keyring existence lookup per api-key provider. HOME redirection
+    // does not isolate that lookup; no secret value is read out, written, or
+    // deleted here, and no real credential reference is used.
     #[test]
     fn gate1_report_command_wire_shape_and_masking() {
         let env = IsolatedEnv::lock("reportwire");
@@ -2410,11 +2426,25 @@ mod tests {
                 secret_ref: Some(marker.to_string()), account_id: None });
         }
         fs::write(&p, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
-        let rep = load_config_report_inner();
-        // Mirror llm_get_config_report's serialization exactly.
-        let masked = LoadReport { config: mask_config(rep.config), ..rep };
-        let json = serde_json::to_string(&masked).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let bytes_before = fs::read(&p).unwrap();
+        let dir_before = dir_inventory(&env.dir());
+
+        // Precondition: the real read path parses and preserves the synthetic
+        // marker in its (still unmasked) config, so its later absence on the
+        // wire is causally attributable to masking rather than to the parser
+        // dropping the provider.
+        let pre = load_config_report_inner();
+        let pre_openai = pre.config.providers.iter().find(|x| x.id == "openai")
+            .expect("openai provider parsed");
+        assert_eq!(
+            pre_openai.auth.as_ref().and_then(|a| a.secret_ref.as_deref()),
+            Some(marker),
+            "synthetic sentinel must be present in the loaded config before masking",
+        );
+
+        // Invoke the actual command function and serialize what it returns.
+        let command_json = llm_get_config_report().expect("llm_get_config_report ok");
+        let v: serde_json::Value = serde_json::from_str(&command_json).unwrap();
         // Field names the frontend ConfigReport reads.
         for k in ["status", "issues", "active_path", "candidates", "config"] {
             assert!(v.get(k).is_some(), "missing report field: {k}");
@@ -2424,12 +2454,15 @@ mod tests {
         assert!(v.get("quarantine").is_none());
         assert!(v.get("backup").is_none());
         // The synthetic credential marker must never reach the wire.
-        assert!(!json.contains("SENTINEL-NOT-A-REAL-KEY"), "raw secret_ref leaked");
-        assert!(!json.contains("keychain://"), "secret_ref scheme leaked");
+        assert!(!command_json.contains("SENTINEL-NOT-A-REAL-KEY"), "raw secret_ref leaked");
+        assert!(!command_json.contains("keychain://"), "secret_ref scheme leaked");
         // Masking must preserve provider identity and auth method.
         let provs = v["config"]["providers"].as_array().expect("providers");
         let openai = provs.iter().find(|p| p["id"].as_str() == Some("openai")).expect("openai provider");
         assert_eq!(openai["auth"]["method"].as_str(), Some("api_key"));
+        // Non-mutating: source bytes unchanged and no backup/quarantine files.
+        assert_eq!(fs::read(&p).unwrap(), bytes_before, "read path must not rewrite config");
+        assert_eq!(dir_inventory(&env.dir()), dir_before, "read path must not create files");
     }
 
     #[test]
