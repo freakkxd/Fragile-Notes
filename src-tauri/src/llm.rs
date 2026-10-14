@@ -74,7 +74,21 @@ pub enum CloudPolicy { Deny, AskOnce, Allow }
 // ---------- provider / model / runtime / task ----------
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderKind { LocalLlamaCpp, Ollama, OpenAI, Gemini, Claude, CustomOpenAI, DeepSeek, OpenRouter }
+pub enum ProviderKind {
+    LocalLlamaCpp,
+    Ollama,
+    // `rename_all = "snake_case"` mis-splits the "AI" acronym ("open_a_i"),
+    // so pin the canonical wire values explicitly. `alias` keeps reading
+    // configs written by the previous (buggy) serializer.
+    #[serde(rename = "open_ai", alias = "open_a_i")]
+    OpenAI,
+    Gemini,
+    Claude,
+    #[serde(rename = "custom_open_ai", alias = "custom_open_a_i")]
+    CustomOpenAI,
+    DeepSeek,
+    OpenRouter,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod { ApiKey, OAuth, None }
@@ -1823,6 +1837,49 @@ pub(crate) mod tests {
         p
     }
     fn rand_string(n: usize) -> String { (0..n).map(|_| (b'a' + (rand::random::<u8>() % 26)) as char).collect() }
+
+    // ProviderKind wire contract: canonical snake_case values (must match the
+    // frontend KNOWN_PROVIDER_KINDS list) while still accepting the legacy
+    // mis-split acronym values written by older builds.
+    #[test]
+    fn provider_kind_serializes_canonical_wire_values() {
+        let s = |k: &ProviderKind| serde_json::to_string(k).unwrap();
+        assert_eq!(s(&ProviderKind::OpenAI), "\"open_ai\"");
+        assert_eq!(s(&ProviderKind::CustomOpenAI), "\"custom_open_ai\"");
+        assert_eq!(s(&ProviderKind::LocalLlamaCpp), "\"local_llama_cpp\"");
+        assert_eq!(s(&ProviderKind::Ollama), "\"ollama\"");
+        assert_eq!(s(&ProviderKind::Gemini), "\"gemini\"");
+        assert_eq!(s(&ProviderKind::Claude), "\"claude\"");
+        assert_eq!(s(&ProviderKind::DeepSeek), "\"deep_seek\"");
+        assert_eq!(s(&ProviderKind::OpenRouter), "\"open_router\"");
+    }
+
+    #[test]
+    fn provider_kind_deserializes_canonical_and_legacy_values() {
+        let de = |v: &str| serde_json::from_str::<ProviderKind>(v);
+        assert_eq!(de("\"open_ai\"").unwrap(), ProviderKind::OpenAI);
+        assert_eq!(de("\"open_a_i\"").unwrap(), ProviderKind::OpenAI);
+        assert_eq!(de("\"custom_open_ai\"").unwrap(), ProviderKind::CustomOpenAI);
+        assert_eq!(de("\"custom_open_a_i\"").unwrap(), ProviderKind::CustomOpenAI);
+        assert!(de("\"not_a_kind\"").is_err());
+    }
+
+    #[test]
+    fn provider_kind_roundtrip_config_with_openai_and_custom() {
+        let cfg = LlmConfig::default();
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("\"kind\":\"open_ai\""), "canonical open_ai missing");
+        assert!(json.contains("\"kind\":\"custom_open_ai\""), "canonical custom_open_ai missing");
+        assert!(!json.contains("open_a_i"), "legacy open_a_i leaked into serialization");
+        assert!(!json.contains("custom_open_a_i"), "legacy custom_open_a_i leaked into serialization");
+        let back: LlmConfig = serde_json::from_str(&json).unwrap();
+        let kind = |id: &str| back.providers.iter().find(|p| p.id == id).unwrap().kind.clone();
+        assert_eq!(kind("local"), ProviderKind::LocalLlamaCpp);
+        assert_eq!(kind("openai"), ProviderKind::OpenAI);
+        assert_eq!(kind("gemini"), ProviderKind::Gemini);
+        assert_eq!(kind("claude"), ProviderKind::Claude);
+        assert_eq!(kind("custom"), ProviderKind::CustomOpenAI);
+    }
 
     // Deterministic in-memory keyring for tests. keyring 2.x exposes a public
     // `set_default_credential_builder` plus an in-memory `mock` store, so every
