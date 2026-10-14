@@ -1824,8 +1824,22 @@ mod tests {
     }
     fn rand_string(n: usize) -> String { (0..n).map(|_| (b'a' + (rand::random::<u8>() % 26)) as char).collect() }
 
-    // Isolated env: temp HOME + FRAGILE_VAULT, restored on drop. No real
-    // user data, no network, no system keyring dependency.
+    // Deterministic in-memory keyring for tests. keyring 2.x exposes a public
+    // `set_default_credential_builder` plus an in-memory `mock` store, so every
+    // Entry::new (has_keyring / set / get / delete) can be routed away from the
+    // real session keyring without touching production code. Installed once per
+    // test process; the mock keeps no cross-entry persistence (a get before a
+    // set is NoEntry), which makes has_keyring() deterministically false.
+    static KEYRING_MOCK: std::sync::Once = std::sync::Once::new();
+    fn install_mock_keyring() {
+        KEYRING_MOCK.call_once(|| {
+            keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        });
+    }
+
+    // Isolated env: temp HOME + FRAGILE_VAULT, restored on drop, plus the
+    // in-memory keyring mock above so mask/save paths never read a real user
+    // credential. No real user data, no network, no real system keyring.
     static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
     struct IsolatedEnv {
         _g: std::sync::MutexGuard<'static, ()>,
@@ -1836,6 +1850,7 @@ mod tests {
     impl IsolatedEnv {
         fn lock(name: &str) -> Self {
             let g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+            install_mock_keyring();
             let tmp = std::env::temp_dir().join(format!("fragile-gate1-{}-{}-{}", std::process::id(), name, rand_string(6)));
             let vault = tmp.join("vault");
             fs::create_dir_all(vault.join(".fragile")).unwrap();
@@ -1904,6 +1919,7 @@ mod tests {
 
     #[test]
     fn test_no_api_key_in_serialized() {
+        install_mock_keyring();
         let mut cfg = LlmConfig::default();
         // simulate setting a secret via keyring, not via plain field
         let _ = set_keyring("test-no-plain", "sk-fake-plain-key-12345");
@@ -2000,8 +2016,9 @@ mod tests {
 
     #[test]
     fn test_keyring_failure() {
-        // when keyring unavailable, the error should contain actionable UI hint
-        // we simulate by trying to get non-existent credential
+        // In-memory keyring mock keeps this off the real session keyring; a
+        // missing entry still yields the actionable "keyring" error hint.
+        install_mock_keyring();
         let res = get_keyring("non-existent-provider-xyz-123");
         assert!(res.is_err());
         let err = res.unwrap_err();
@@ -2411,10 +2428,9 @@ mod tests {
     // test. It does NOT exercise Tauri IPC transport, command registration, or
     // the JS/frontend boundary.
     //
-    // Residual keyring note: mask_config() -> has_keyring() performs a read-only
-    // session-keyring existence lookup per api-key provider. HOME redirection
-    // does not isolate that lookup; no secret value is read out, written, or
-    // deleted here, and no real credential reference is used.
+    // Keyring note: mask_config() -> has_keyring() would normally consult the
+    // real session keyring per api-key provider. IsolatedEnv installs the
+    // in-memory keyring mock, so this test performs no real keyring access.
     #[test]
     fn gate1_report_command_wire_shape_and_masking() {
         let env = IsolatedEnv::lock("reportwire");
