@@ -43,9 +43,9 @@ function cloudProvider() {
   }
 }
 
-function reportFor(providers: unknown[]) {
+function reportFor(providers: unknown[], status = 'valid') {
   return JSON.stringify({
-    status: 'valid', reason: null, issues: [], active_path: '/tmp/llm.json',
+    status, reason: null, issues: [], active_path: '/tmp/llm.json',
     candidates: [], config: cfgWithProviders(providers),
   })
 }
@@ -271,5 +271,52 @@ describe('chat_retry_stale_registry_error_ignored', () => {
     expect((screen.getByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value).toBe('mB')
     expect(screen.queryByRole('option', { name: 'b.gguf' })).toBeTruthy()
     expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
+
+describe('chat_typed_failure_not_a_fake_cloud_control', () => {
+  // Unlike chat_loading_error_visible_with_retry (which mocks a rejected
+  // promise), this drives the real typed path: llmGetConfigSafe never
+  // rejects, it returns config:null with a backend_unavailable issue when
+  // Tauri is absent. The UI must still show the error banner and recover.
+  it('shows error when Tauri IPC is absent, then recovers via retry', async () => {
+    const user = userEvent.setup()
+    // No installTauriMock(): window.__TAURI__ is absent, as in browser preview.
+    render(<AIChatFull />)
+    expect(await screen.findByText(/Не удалось загрузить конфигурацию/)).toBeTruthy()
+    expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Модель' })).toBeNull()
+    // Retry once a backend is available: typed result now carries a config.
+    installTauriMock({
+      llm_get_config_report: reportFor([localProvider()]),
+      llm_models_list: JSON.stringify([
+        { id: 'm1', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 },
+      ]),
+    })
+    await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
+    expect(await screen.findByRole('combobox', { name: 'Модель' })).toBeTruthy()
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
+
+describe('chat_missing_first_run_defaults_to_local', () => {
+  it('selects the local provider on a missing first-run report, never cloud', async () => {
+    // Backend default config: local enabled, cloud providers disabled.
+    installTauriMock({
+      llm_get_config_report: reportFor(
+        [
+          localProvider(),
+          { ...cloudProvider(), enabled: false },
+        ],
+        'missing',
+      ),
+      llm_models_list: JSON.stringify([]),
+    })
+    render(<AIChatFull />)
+    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
+    expect(combo.value).toBe('local')
+    // Missing must not render the cloud model text input.
+    expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
+    expect(screen.queryByRole('option', { name: /OpenAI/ })).toBeNull()
   })
 })

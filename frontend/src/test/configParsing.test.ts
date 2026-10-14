@@ -81,3 +81,70 @@ describe('config_parsing_tolerant_safe', () => {
     expect(res.config).not.toBeNull()
   })
 })
+
+// The report path is typed and only rejects at the IPC edge. These tests pin
+// the real contract of llmGetConfigSafe: legacy fallback, all-fail, malformed
+// embedded config, and absent Tauri. None of them may throw a raw error.
+describe('llm_get_config_safe_typed_contract', () => {
+  it('falls back to the legacy raw config when the report command is unavailable', async () => {
+    const { llmGetConfigSafe } = await import('../lib/llm')
+    // Legacy backend: no llm_get_config_report command, only llm_get_config.
+    installTauriMock({
+      llm_get_config: JSON.stringify(baseCfg({ providers: [provider('local', 'local_llama_cpp')] })),
+    })
+    const res = await llmGetConfigSafe()
+    expect(res.config).not.toBeNull()
+    expect(res.config!.providers.map((p) => p.id)).toEqual(['local'])
+    // Legacy path carries no report classification.
+    expect(res.reportStatus).toBeUndefined()
+    expect(res.recovered).toBe(false)
+    expect(res.issues).toEqual([])
+  })
+
+  it('returns a typed backend_unavailable result when both commands fail', async () => {
+    const { llmGetConfigSafe } = await import('../lib/llm')
+    installTauriMock({
+      llm_get_config_report: () => Promise.reject(new Error('report down')),
+      llm_get_config: () => Promise.reject(new Error('legacy down')),
+    })
+    const res = await llmGetConfigSafe()
+    expect(res.config).toBeNull()
+    expect(res.recovered).toBe(false)
+    expect(res.issues.some((i) => i.code === 'backend_unavailable')).toBe(true)
+    // User-facing message is present and free of raw payload / secrets.
+    for (const i of res.issues) {
+      expect(i.message).not.toMatch(/sk-|AIza|keychain:\/\//)
+    }
+  })
+
+  it('never turns a malformed embedded report config into a false ready', async () => {
+    const { llmGetConfigSafe } = await import('../lib/llm')
+    // Report succeeds, but the embedded config is structurally unusable
+    // (no providers array). This must be null + invalid_root, not ready.
+    installTauriMock({
+      llm_get_config_report: JSON.stringify({
+        status: 'valid',
+        reason: null,
+        issues: [],
+        active_path: '/tmp/llm.json',
+        candidates: [],
+        config: { schema_version: 2 },
+      }),
+    })
+    const res = await llmGetConfigSafe()
+    expect(res.config).toBeNull()
+    expect(res.recovered).toBe(true)
+    expect(res.reportStatus).toBe('valid')
+    expect(res.issues.some((i) => i.code === 'invalid_root')).toBe(true)
+  })
+
+  it('returns a typed backend_unavailable result when Tauri IPC is absent', async () => {
+    const { llmGetConfigSafe } = await import('../lib/llm')
+    // No installTauriMock(): window.__TAURI__ is absent, as in a browser preview.
+    const res = await llmGetConfigSafe()
+    expect(res.config).toBeNull()
+    expect(res.recovered).toBe(false)
+    expect(res.issues).toHaveLength(1)
+    expect(res.issues[0].code).toBe('backend_unavailable')
+  })
+})
