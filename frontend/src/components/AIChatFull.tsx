@@ -100,7 +100,12 @@ export default function AIChatFull() {
     try {
       const res = await llm.llmGetConfigSafe()
       if (!isCurrent()) return
-      if (!res.config) throw new Error('empty config')
+      if (!res.config) {
+        // config:null carries typed, user-facing issues — surface a safe
+        // message, never the internal placeholder or raw payload/paths.
+        const issue = res.issues.find((i) => i.code === 'invalid_root' || i.code === 'backend_unavailable') ?? res.issues[0]
+        throw new Error(issue?.message || 'Конфигурация недоступна. Проверьте backend.')
+      }
       const enabled = res.config.providers.filter((p) => p.enabled)
       setProviders(enabled)
       const first = defaultProviderForChat(enabled)
