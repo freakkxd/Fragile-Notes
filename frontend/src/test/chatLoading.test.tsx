@@ -320,3 +320,46 @@ describe('chat_missing_first_run_defaults_to_local', () => {
     expect(screen.queryByRole('option', { name: /OpenAI/ })).toBeNull()
   })
 })
+
+describe('chat_config_error_uses_typed_safe_message', () => {
+  // Regression: config:null used to surface the internal string 'empty config'.
+  // It must show the typed, user-facing issue message instead.
+  it('shows the typed backend_unavailable message, never the internal placeholder', async () => {
+    // No installTauriMock(): llmGetConfigSafe returns config:null +
+    // backend_unavailable (Tauri IPC absent); it does not reject.
+    render(<AIChatFull />)
+    const banner = await screen.findByText(/Не удалось загрузить конфигурацию/)
+    expect(banner.textContent).toMatch(/Backend недоступен/)
+    expect(banner.textContent).not.toMatch(/empty config/)
+    expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Модель' })).toBeNull()
+  })
+
+  it('shows a safe invalid_root message for a malformed report config, then recovers', async () => {
+    const user = userEvent.setup()
+    installTauriMock({
+      llm_get_config_report: JSON.stringify({
+        status: 'valid', reason: null, issues: [], active_path: '/tmp/llm.json',
+        candidates: [], config: 42,
+      }),
+      llm_models_list: JSON.stringify([]),
+    })
+    render(<AIChatFull />)
+    const banner = await screen.findByText(/Не удалось загрузить конфигурацию/)
+    expect(banner.textContent).toMatch(/Конфигурация повреждена/)
+    expect(banner.textContent).not.toMatch(/empty config/)
+    // No raw JSON / paths / secrets in the user-facing banner.
+    expect(banner.textContent).not.toMatch(/sk-|AIza|keychain:\/\//)
+    expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
+    // Retry with a usable report clears the error and selects local.
+    installTauriMock({
+      llm_get_config_report: reportFor([localProvider()]),
+      llm_models_list: JSON.stringify([
+        { id: 'm1', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 },
+      ]),
+    })
+    await user.click(screen.getByRole('button', { name: '↻ Повторить' }))
+    expect(await screen.findByRole('combobox', { name: 'Модель' })).toBeTruthy()
+    expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
+  })
+})
