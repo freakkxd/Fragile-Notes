@@ -1,3 +1,13 @@
+// Manual, environment-gated E2E tests. They require an externally provisioned
+// GGUF model (not part of the repository) and, for the runtime test, a real
+// llama-server binary. They are `#[ignore]`d so the normal `cargo test` suite is
+// deterministic and green; run them explicitly with:
+//
+//   cargo test --manifest-path src-tauri/Cargo.toml e2e_manual_tests \
+//     -- --ignored --test-threads=1 --nocapture
+//
+// When a fixture is absent they print an explicit SKIP reason and return.
+// See docs/E2E-P1.6-report.md for provisioning.
 #[cfg(test)]
 mod e2e_manual_tests {
     use std::path::PathBuf;
@@ -6,8 +16,66 @@ mod e2e_manual_tests {
     use crate::llm::models::registry::Registry;
     use crate::llm::models::types::ModelState;
 
+    const E2E_VAULT: &str = "/tmp/fragile-e2e-v0_5_7/vault";
+    const E2E_MODEL_FIXTURE: &str =
+        "/tmp/fragile-e2e-v0_5_7/models/qwen2-0_5b-instruct-q4_k_m.gguf";
+    const E2E_LLAMA_SERVER: &str = "/home/fragilich/src/llama.cpp/build/bin/llama-server";
+
+    /// Explicitly skip (with a printed reason) when the external model fixture is
+    /// not provisioned, instead of failing for an environment reason.
+    fn skip_unless_model_fixture() -> bool {
+        if !PathBuf::from(E2E_MODEL_FIXTURE).is_file() {
+            eprintln!(
+                "SKIP: external GGUF fixture absent at {} (not part of the repo; see docs/E2E-P1.6-report.md)",
+                E2E_MODEL_FIXTURE
+            );
+            return true;
+        }
+        false
+    }
+
+    fn skip_unless_runtime_fixture() -> bool {
+        if skip_unless_model_fixture() {
+            return true;
+        }
+        if !PathBuf::from(E2E_LLAMA_SERVER).is_file() {
+            eprintln!("SKIP: llama-server binary absent at {}", E2E_LLAMA_SERVER);
+            return true;
+        }
+        false
+    }
+
+    /// Test-only env guard: serializes process-env mutation with other test
+    /// modules (shared ENV_GUARD) and restores FRAGILE_VAULT on drop, including
+    /// on panic.
+    struct VaultEnvGuard {
+        _g: std::sync::MutexGuard<'static, ()>,
+        prev: Option<std::ffi::OsString>,
+    }
+    impl VaultEnvGuard {
+        fn set(vault: &str) -> Self {
+            let g = crate::llm::tests::env_guard();
+            let prev = std::env::var_os("FRAGILE_VAULT");
+            std::env::set_var("FRAGILE_VAULT", vault);
+            Self { _g: g, prev }
+        }
+    }
+    impl Drop for VaultEnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var("FRAGILE_VAULT", v),
+                None => std::env::remove_var("FRAGILE_VAULT"),
+            }
+        }
+    }
+
     #[tokio::test]
+    #[ignore = "requires an external GGUF fixture provisioned at /tmp/fragile-e2e-v0_5_7 (see docs/E2E-P1.6-report.md)"]
     async fn e2e_scan_and_registry() {
+        if skip_unless_model_fixture() {
+            return;
+        }
+        let _env = VaultEnvGuard::set(E2E_VAULT);
         let models_dir = PathBuf::from("/tmp/fragile-e2e-v0_5_7/models");
         let scanner = Scanner::new(models_dir.clone());
         let scan = scanner.scan(None).expect("scan");
@@ -23,7 +91,6 @@ mod e2e_manual_tests {
         let rec = scan.discovered.iter().find(|r| r.path == gguf).cloned().expect("gguf not found");
         println!("selected model_id={} path={} size={}", rec.id, rec.path.display(), rec.size_bytes);
         // registry
-        std::env::set_var("FRAGILE_VAULT", "/tmp/fragile-e2e-v0_5_7/vault");
         let mut reg = Registry::new(crate::llm::registry_path());
         let _ = reg.load();
         let result = reg.update_with_scan(scan);
@@ -47,8 +114,12 @@ mod e2e_manual_tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires an external GGUF fixture + real llama-server; provision at /tmp/fragile-e2e-v0_5_7 (see docs/E2E-P1.6-report.md)"]
     async fn e2e_runtime_and_gateway() {
-        std::env::set_var("FRAGILE_VAULT", "/tmp/fragile-e2e-v0_5_7/vault");
+        if skip_unless_runtime_fixture() {
+            return;
+        }
+        let _env = VaultEnvGuard::set(E2E_VAULT);
         // Cleanup any leftover runtimes from previous runs (max_active=1)
         {
             crate::llm::clear_startup_for_test("runtime:runtime-e2e-qwen0.5b").await;

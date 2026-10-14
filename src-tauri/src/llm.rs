@@ -1812,7 +1812,7 @@ pub async fn llm_task_status(run_id: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -1841,6 +1841,12 @@ mod tests {
     // in-memory keyring mock above so mask/save paths never read a real user
     // credential. No real user data, no network, no real system keyring.
     static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    /// Test-support (test-only): serialize process-env mutation across test
+    /// modules. The manual E2E module holds this while setting FRAGILE_VAULT so
+    /// it cannot race IsolatedEnv-based tests.
+    pub(crate) fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner())
+    }
     struct IsolatedEnv {
         _g: std::sync::MutexGuard<'static, ()>,
         tmp: PathBuf,
@@ -1849,7 +1855,7 @@ mod tests {
     }
     impl IsolatedEnv {
         fn lock(name: &str) -> Self {
-            let g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+            let g = env_guard();
             install_mock_keyring();
             let tmp = std::env::temp_dir().join(format!("fragile-gate1-{}-{}-{}", std::process::id(), name, rand_string(6)));
             let vault = tmp.join("vault");
