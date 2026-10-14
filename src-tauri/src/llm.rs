@@ -2369,6 +2369,69 @@ mod tests {
         assert!(!dbg.contains("keychain://"));
     }
 
+    // Wire contract: the frontend union types (ConfigLoadStatus /
+    // ConfigDegradedReason) depend on these exact snake_case strings. Nothing
+    // else pins the wire format, so renaming a variant here would silently
+    // break the cross-layer contract while Rust tests keep passing.
+    #[test]
+    fn gate1_report_wire_enum_values() {
+        for (status, wire) in [
+            (ConfigLoadStatus::Missing, "missing"),
+            (ConfigLoadStatus::Valid, "valid"),
+            (ConfigLoadStatus::Migrated, "migrated"),
+            (ConfigLoadStatus::Degraded, "degraded"),
+        ] {
+            assert_eq!(serde_json::to_value(&status).unwrap(), serde_json::json!(wire));
+        }
+        for (reason, wire) in [
+            (ConfigDegradedReason::Corrupt, "corrupt"),
+            (ConfigDegradedReason::Unreadable, "unreadable"),
+            (ConfigDegradedReason::MigrationFailed, "migration_failed"),
+            (ConfigDegradedReason::UnsupportedVersion, "unsupported_version"),
+            (ConfigDegradedReason::VaultMissing, "vault_missing"),
+            (ConfigDegradedReason::KeyringFailed, "keyring_failed"),
+            (ConfigDegradedReason::InvalidEntry, "invalid_entry"),
+        ] {
+            assert_eq!(serde_json::to_value(&reason).unwrap(), serde_json::json!(wire));
+        }
+    }
+
+    // Wire contract: the exact JSON llm_get_config_report emits — the field
+    // names the frontend reads, the save-only fields omitted on the read path,
+    // and masking of a raw credential marker (synthetic marker only).
+    #[test]
+    fn gate1_report_command_wire_shape_and_masking() {
+        let env = IsolatedEnv::lock("reportwire");
+        let p = env.cfg_path();
+        let marker = "keychain://fragile-notes/SENTINEL-NOT-A-REAL-KEY";
+        let mut cfg = LlmConfig::default();
+        if let Some(pr) = cfg.providers.iter_mut().find(|x| x.id == "openai") {
+            pr.auth = Some(AuthRef { method: AuthMethod::ApiKey,
+                secret_ref: Some(marker.to_string()), account_id: None });
+        }
+        fs::write(&p, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let rep = load_config_report_inner();
+        // Mirror llm_get_config_report's serialization exactly.
+        let masked = LoadReport { config: mask_config(rep.config), ..rep };
+        let json = serde_json::to_string(&masked).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Field names the frontend ConfigReport reads.
+        for k in ["status", "issues", "active_path", "candidates", "config"] {
+            assert!(v.get(k).is_some(), "missing report field: {k}");
+        }
+        assert_eq!(v["status"].as_str(), Some("valid"));
+        // Read path only: no side-effect provenance surfaced.
+        assert!(v.get("quarantine").is_none());
+        assert!(v.get("backup").is_none());
+        // The synthetic credential marker must never reach the wire.
+        assert!(!json.contains("SENTINEL-NOT-A-REAL-KEY"), "raw secret_ref leaked");
+        assert!(!json.contains("keychain://"), "secret_ref scheme leaked");
+        // Masking must preserve provider identity and auth method.
+        let provs = v["config"]["providers"].as_array().expect("providers");
+        let openai = provs.iter().find(|p| p["id"].as_str() == Some("openai")).expect("openai provider");
+        assert_eq!(openai["auth"]["method"].as_str(), Some("api_key"));
+    }
+
     #[test]
     fn gate1_vault_missing() {
         let _env = IsolatedEnv::lock("vaultmiss");
