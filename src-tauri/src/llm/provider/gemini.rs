@@ -90,8 +90,11 @@ impl GeminiNativeAdapter {
         }
         let http = reqwest::Client::builder()
             .timeout(timeout + Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| ProviderError::InvalidConfig(e.to_string()))?;
+            .map_err(|_| ProviderError::InvalidConfig(
+                "failed to initialize HTTP client".to_string(),
+            ))?;
         Ok(Self {
             connection,
             secrets,

@@ -106,6 +106,30 @@ impl ProviderConnection {
     }
 }
 
+/// Endpoint-aware scope for the *legacy* chat path, which uses [`crate::llm::Provider`]
+/// (no `scope` field) instead of [`ProviderConnection`]. A local kind is only
+/// local when it has no endpoint (built-in local default) or a loopback
+/// endpoint; a remote endpoint classifies it as `Cloud`, so a `LocalOnly` task
+/// cannot silently reach a remote host merely because `kind` is
+/// `Ollama`/`LocalLlamaCpp`. Non-local kinds keep `scope_of` semantics.
+///
+/// Unlike [`validate_endpoint_for_scope`], this does not reject the
+/// connection outright, so a LAN provider stays usable under `CloudAllowed`.
+/// This is a policy classification, NOT a network sandbox: no DNS resolution
+/// or SSRF protection is provided.
+pub fn endpoint_scope(kind: &ProviderKind, endpoint: &str) -> ProviderScope {
+    match kind {
+        ProviderKind::LocalLlamaCpp | ProviderKind::Ollama => {
+            if endpoint.trim().is_empty() || is_loopback(endpoint) {
+                scope_of(kind, endpoint)
+            } else {
+                ProviderScope::Cloud
+            }
+        }
+        _ => scope_of(kind, endpoint),
+    }
+}
+
 /// Built-in base URLs. `None` = assigned at runtime (local managed server).
 pub fn default_endpoint(kind: &ProviderKind) -> Option<String> {
     match kind {

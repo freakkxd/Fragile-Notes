@@ -105,6 +105,7 @@ pub async fn discover_models(
     let url = tags_url(endpoint);
     let client = reqwest::Client::builder()
         .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| DiscoverError {
             code: "network".to_string(),

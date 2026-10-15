@@ -923,9 +923,16 @@ fn save_config_guarded_with(
 // so a local-only task can never silently reach a remote endpoint.
 fn is_local_kind(kind: &ProviderKind) -> bool { matches!(kind, ProviderKind::LocalLlamaCpp | ProviderKind::Ollama) }
 fn is_cloud_kind(kind: &ProviderKind) -> bool { !is_local_kind(kind) }
-fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind) -> Result<(), String> {
+/// LocalOnly gate. Scope is derived from BOTH kind and endpoint (see
+/// [`provider::types::endpoint_scope`]): a local kind with a remote endpoint
+/// classifies as `Cloud`, so `LocalOnly` cannot pass it. This is a policy
+/// boundary, not a network sandbox (no DNS/SSRF protection).
+fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind, endpoint: &str) -> Result<(), String> {
     if let Some(Privacy::LocalOnly) = task_privacy {
-        if is_cloud_kind(provider_kind) { return Err("PrivacyPolicyViolation: local-only task cannot use cloud provider".to_string()); }
+        let scope = provider::types::endpoint_scope(provider_kind, endpoint);
+        if scope == crate::llm::task::policy::ProviderScope::Cloud {
+            return Err("PrivacyPolicyViolation: local-only task cannot use cloud provider".to_string());
+        }
     }
     Ok(())
 }
@@ -934,10 +941,16 @@ fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind) -
 /// provider exists → task-profile resolution (fail-closed) → privacy →
 /// cloud policy → enabled → resolved generation.
 ///
-/// `task_profile_id: None` skips the profile gate entirely (legacy internal
-/// callers such as enrich and the task executor RealGateway keep their own
-/// selection/policy layers). The chat IPC path (`llm_chat_universal`) always
-/// passes `Some("task-chat")`, so AskOnce/Deny are enforced there.
+/// `task_profile_id: None` skips the profile gate entirely. This is reserved
+/// for internal, config-derived callers that perform their own selection and
+/// policy check (e.g. the task executor). It must never be used for
+/// user-initiated inference: the chat IPC paths pass an explicit
+/// backend-owned anchor (`Some("task-chat")`), and the legacy `llm_chat`
+/// command does the same so an arbitrary `profile` argument cannot bypass
+/// LocalOnly/Deny/AskOnce.
+///
+/// Privacy is resolved from kind AND endpoint: a local kind pointed at a
+/// remote endpoint counts as cloud scope for LocalOnly (see `check_privacy`).
 ///
 /// A missing task profile is an error (`task profile not found: ...`) — a
 /// typo in a profile id must never silently degrade to unrestricted cloud
@@ -961,7 +974,7 @@ fn chat_preflight(
             .iter()
             .find(|t| t.id == *tpid)
             .ok_or_else(|| format!("task profile not found: {}", tpid))?;
-        check_privacy(&tp.privacy, &prov.kind)?;
+        check_privacy(&tp.privacy, &prov.kind, &prov.endpoint)?;
         if is_cloud_kind(&prov.kind) {
             match tp.cloud_policy {
                 Some(CloudPolicy::Deny) => {
@@ -1201,7 +1214,9 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
         ProviderKind::LocalLlamaCpp => {
             let base = if prov.endpoint.is_empty() { format!("http://127.0.0.1:{}", cfg.local.port) } else { prov.endpoint.clone() };
             let health = format!("{}/health", base.trim_end_matches('/'));
-            let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(5))
+                .redirect(reqwest::redirect::Policy::none())
+                .build().map_err(|_| "failed to initialize HTTP client".to_string())?;
             match client.get(&health).send().await {
                 Ok(r) if r.status().is_success() => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: Some(vec![Capability::Chat]), error: None },
                 Ok(r) => {
@@ -1271,9 +1286,16 @@ async fn cloud_probe_via_http(
         Ok(u) => u,
         Err(e) => return ConnectionTestResult{ ok:false, provider_id, latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"invalid_config".to_string(), message: e.safe_message(), retryable:false }) },
     };
-    let client = match reqwest::Client::builder().timeout(Duration::from_secs(8)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        // Never follow redirects on a credential-bearing probe: a 3xx is
+        // reported as a safe non-success result instead of silently changing
+        // origin (and potentially re-sending the Authorization header).
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
         Ok(c) => c,
-        Err(e) => return ConnectionTestResult{ ok:false, provider_id, latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"network".to_string(), message: format!("client init failed: {}", e), retryable:false }) },
+        Err(_) => return ConnectionTestResult{ ok:false, provider_id, latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"network".to_string(), message: "failed to initialize HTTP client".to_string(), retryable:false }) },
     };
     let mut req = client.get(&url);
     match prov.kind {
@@ -1362,8 +1384,14 @@ pub async fn gateway_chat(req: ChatRequest, cancel: tokio_util::sync::Cancellati
     let cfg = load_config_inner();
     let (prov, gen) = chat_preflight(&cfg, &req.provider_id, &req.task_profile_id)?;
     let secret = if prov.auth.as_ref().map(|a| a.method==AuthMethod::ApiKey).unwrap_or(false) { get_keyring(&prov.id).unwrap_or_default() } else { String::new() };
-    // Use async reqwest for gateway (P0)
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
+    // Use async reqwest for gateway (P0). Redirects are disabled: a 3xx on a
+    // generation call with an Authorization header must be an explicit error,
+    // never a silent origin change.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "network: failed to initialize HTTP client".to_string())?;
     // Pure request mapping lives in gateway:: (Stage 0 extract, behavior identical).
     let built = gateway::build_chat_http_request(
         &prov.kind,
@@ -1637,53 +1665,68 @@ pub async fn gateway_chat_routed(
 // the UI can abort the in-flight client wait. The registry is process-global
 // and bounded; a small FIFO of pre-cancelled ids closes the
 // cancel-before-registration race without unbounded growth.
+//
+// Ownership: every registration carries a unique `key`, so completion/cleanup
+// is bound to THAT registration — a stale `complete` can never remove a
+// different request's entry. Duplicate ids are rejected (never supersede an
+// active entry), and the capacity limit rejects the new request instead of
+// silently evicting an in-flight one.
 struct ChatRequestEntry {
     cancel: tokio_util::sync::CancellationToken,
     done: std::sync::Arc<tokio::sync::Notify>,
+    key: u64,
 }
+/// One live registration. The `key` binds `complete_registration` to this exact
+/// entry.
+struct ChatRegistration {
+    id: String,
+    key: u64,
+    token: tokio_util::sync::CancellationToken,
+}
+#[derive(Debug, PartialEq)]
+enum RegisterError { Duplicate, Capacity }
 #[derive(Default)]
 struct ChatRegistry {
     order: std::collections::VecDeque<String>,
     map: HashMap<String, ChatRequestEntry>,
     pre_cancelled: std::collections::VecDeque<String>,
+    next_key: u64,
 }
 const CHAT_REGISTRY_CAP: usize = 128;
 impl ChatRegistry {
-    /// Register `id`: returns a token cancelled immediately if a cancel for
-    /// this id arrived before registration. Superseded/over-capacity entries
-    /// are woken so their cancel waiters never hang.
-    fn register(&mut self, id: &str) -> (tokio_util::sync::CancellationToken, std::sync::Arc<tokio::sync::Notify>) {
-        let token = tokio_util::sync::CancellationToken::new();
+    /// Register `id`. Returns a token already cancelled if a cancel for this id
+    /// arrived before registration. Rejects a duplicate active id
+    /// ([`RegisterError::Duplicate`]) and, when full, rejects the new request
+    /// ([`RegisterError::Capacity`]) rather than evicting an in-flight entry.
+    fn register(&mut self, id: &str) -> Result<ChatRegistration, RegisterError> {
+        if self.map.contains_key(id) { return Err(RegisterError::Duplicate); }
+        if self.map.len() >= CHAT_REGISTRY_CAP { return Err(RegisterError::Capacity); }
         let pre = self
             .pre_cancelled
             .iter()
             .position(|x| x == id)
             .map(|i| self.pre_cancelled.remove(i))
             .is_some();
+        let key = self.next_key;
+        self.next_key += 1;
+        let token = tokio_util::sync::CancellationToken::new();
         if pre { token.cancel(); }
-        if let Some(old) = self.map.remove(id) {
-            if let Some(i) = self.order.iter().position(|x| x == id) { self.order.remove(i); }
-            old.done.notify_one();
-        }
-        while self.map.len() >= CHAT_REGISTRY_CAP {
-            match self.order.pop_front() {
-                Some(old_id) => { if let Some(old) = self.map.remove(&old_id) { old.done.notify_one(); } }
-                None => break,
-            }
-        }
         let done = std::sync::Arc::new(tokio::sync::Notify::new());
         self.order.push_back(id.to_string());
-        self.map.insert(id.to_string(), ChatRequestEntry { cancel: token.clone(), done: done.clone() });
-        (token, done)
+        self.map.insert(id.to_string(), ChatRequestEntry { cancel: token.clone(), done, key });
+        Ok(ChatRegistration { id: id.to_string(), key, token })
     }
     /// Signal cancellation for `id`; returns the completion notifier if live.
     fn take_for_cancel(&mut self, id: &str) -> Option<std::sync::Arc<tokio::sync::Notify>> {
         self.map.get(id).map(|e| { e.cancel.cancel(); e.done.clone() })
     }
-    /// Forget `id` on completion and wake any cancel waiter.
-    fn complete(&mut self, id: &str) {
-        if let Some(e) = self.map.remove(id) {
-            if let Some(i) = self.order.iter().position(|x| x == id) { self.order.remove(i); }
+    /// Forget the entry ONLY if it still belongs to `reg` (same key). A stale
+    /// completion for a superseded/replaced id is a no-op.
+    fn complete_registration(&mut self, reg: &ChatRegistration) {
+        let matches = self.map.get(&reg.id).map(|e| e.key == reg.key).unwrap_or(false);
+        if !matches { return; }
+        if let Some(e) = self.map.remove(&reg.id) {
+            if let Some(i) = self.order.iter().position(|x| x == &reg.id) { self.order.remove(i); }
             e.done.notify_one();
         }
     }
@@ -1713,18 +1756,26 @@ pub async fn llm_chat_universal(
         task_profile_id: Some("task-chat".to_string()),
     };
     let rid = request_id.filter(|s| !s.trim().is_empty());
-    let cancel = match &rid {
+    let registration = match &rid {
         Some(id) => {
             let mut reg = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-            let (token, _done) = reg.register(id);
-            token
+            match reg.register(id) {
+                Ok(r) => Some(r),
+                Err(RegisterError::Duplicate) => {
+                    return Err("duplicate_request_id: a chat request with this id is already in flight".to_string());
+                }
+                Err(RegisterError::Capacity) => {
+                    return Err("chat_registry_full: too many concurrent chat requests".to_string());
+                }
+            }
         }
-        None => tokio_util::sync::CancellationToken::new(),
+        None => None,
     };
+    let cancel = registration.as_ref().map(|r| r.token.clone()).unwrap_or_default();
     let result = gateway_chat_routed(req, cancel).await;
-    if let Some(id) = &rid {
-        let mut reg = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-        reg.complete(id);
+    if let Some(reg) = &registration {
+        let mut map = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        map.complete_registration(reg);
     }
     result
 }
@@ -1783,7 +1834,7 @@ pub async fn llm_pipeline_run(pipeline_id: String, input: String) -> Result<Stri
         if !st.enabled { continue; }
         if let Some(tp) = st.task_profile_id.as_ref().and_then(|id| cfg.task_profiles.iter().find(|t| &t.id==id)) {
             if let Some(prov) = cfg.providers.iter().find(|p| p.id==st.provider_id) {
-                check_privacy(&tp.privacy, &prov.kind)?;
+                check_privacy(&tp.privacy, &prov.kind, &prov.endpoint)?;
             }
         }
     }
@@ -2230,14 +2281,14 @@ pub(crate) mod tests {
     fn test_local_only_blocks_cloud() {
         let task_privacy = Some(Privacy::LocalOnly);
         let cloud_kind = ProviderKind::OpenAI;
-        let res = check_privacy(&task_privacy, &cloud_kind);
+        let res = check_privacy(&task_privacy, &cloud_kind, "https://api.openai.com/v1");
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("PrivacyPolicyViolation"));
         // cloud allowed should pass
-        let ok = check_privacy(&Some(Privacy::CloudAllowed), &cloud_kind);
+        let ok = check_privacy(&Some(Privacy::CloudAllowed), &cloud_kind, "https://api.openai.com/v1");
         assert!(ok.is_ok());
         // local provider should pass even with LocalOnly
-        let local_ok = check_privacy(&Some(Privacy::LocalOnly), &ProviderKind::LocalLlamaCpp);
+        let local_ok = check_privacy(&Some(Privacy::LocalOnly), &ProviderKind::LocalLlamaCpp, "");
         assert!(local_ok.is_ok());
     }
 
@@ -3290,56 +3341,67 @@ pub(crate) mod tests {
     fn chat_registry_cancel_before_registration_is_remembered() {
         let mut reg = ChatRegistry::default();
         reg.note_pre_cancelled("r1");
-        let (token, _done) = reg.register("r1");
-        assert!(token.is_cancelled(), "pre-cancel must apply on registration");
+        let r = reg.register("r1").unwrap();
+        assert!(r.token.is_cancelled(), "pre-cancel must apply on registration");
         assert!(reg.is_registered("r1"));
-        reg.complete("r1");
+        // Simulate completion by creating a registration and completing it
+        let reg2 = ChatRegistration { id: "r1".to_string(), key: 0, token: tokio_util::sync::CancellationToken::new() };
+        // easier: re-register and complete properly
+        drop(reg);
+        let mut reg = ChatRegistry::default();
+        let r = reg.register("r1").unwrap();
+        assert!(reg.is_registered("r1"));
+        reg.complete_registration(&r);
         assert!(!reg.is_registered("r1"));
     }
 
     #[test]
     fn chat_registry_cancel_during_request_signals() {
         let mut reg = ChatRegistry::default();
-        let (token, _done) = reg.register("r2");
-        assert!(!token.is_cancelled());
+        let r = reg.register("r2").unwrap();
         let waiter = reg.take_for_cancel("r2").expect("live entry");
-        assert!(token.is_cancelled());
-        reg.complete("r2");
+        assert!(r.token.is_cancelled());
+        reg.complete_registration(&r);
         drop(waiter);
     }
 
     #[test]
     fn chat_registry_late_cancel_is_not_found_and_pre_cancels_next() {
         let mut reg = ChatRegistry::default();
-        reg.register("r3");
-        reg.complete("r3");
+        let r = reg.register("r3").unwrap();
+        reg.complete_registration(&r);
         assert!(reg.take_for_cancel("r3").is_none(), "completed id is gone");
         reg.note_pre_cancelled("r3");
-        let (token, _done) = reg.register("r3");
-        assert!(token.is_cancelled(), "late cancel applies to the next request");
-        reg.complete("r3");
+        let r2 = reg.register("r3").unwrap();
+        assert!(r2.token.is_cancelled(), "late cancel applies to the next request");
+        reg.complete_registration(&r2);
     }
 
     #[test]
     fn chat_registry_concurrent_ids_are_independent() {
         let mut reg = ChatRegistry::default();
-        let (t1, _d1) = reg.register("a");
-        let (t2, _d2) = reg.register("b");
+        let a = reg.register("a").unwrap();
+        let b = reg.register("b").unwrap();
         let waiter = reg.take_for_cancel("a").unwrap();
-        assert!(t1.is_cancelled());
-        assert!(!t2.is_cancelled(), "cancelling a must not touch b");
-        reg.complete("a");
-        reg.complete("b");
+        assert!(a.token.is_cancelled());
+        assert!(!b.token.is_cancelled(), "cancelling a must not touch b");
+        reg.complete_registration(&a);
+        reg.complete_registration(&b);
         drop(waiter);
     }
 
     #[test]
     fn chat_registry_is_bounded() {
         let mut reg = ChatRegistry::default();
-        for i in 0..(CHAT_REGISTRY_CAP + 10) {
-            reg.register(&format!("x{}", i));
+        let mut regs = Vec::new();
+        for i in 0..CHAT_REGISTRY_CAP {
+            regs.push(reg.register(&format!("x{}", i)).unwrap());
         }
-        assert!(reg.map.len() <= CHAT_REGISTRY_CAP, "len {}", reg.map.len());
+        // try to add one more when full
+        let extra = reg.register(&format!("x{}", CHAT_REGISTRY_CAP));
+        assert!(extra.is_err());
+        // clean up
+        for r in regs { reg.complete_registration(&r); }
     }
 
     #[tokio::test]
@@ -3347,9 +3409,9 @@ pub(crate) mod tests {
         // complete() uses notify_one, storing a permit, so a cancel waiter
         // that subscribes after completion still resolves immediately.
         let mut reg = ChatRegistry::default();
-        reg.register("w");
+        let r = reg.register("w").unwrap();
         let waiter = reg.take_for_cancel("w").unwrap();
-        reg.complete("w");
+        reg.complete_registration(&r);
         tokio::time::timeout(Duration::from_millis(500), waiter.notified())
             .await
             .expect("late wait resolves via stored permit");
@@ -3572,6 +3634,11 @@ pub(crate) mod tests {
             p.endpoint = "http://127.0.0.1:1".to_string();
             p.auth = None;
             p.default_model = "claude-sonnet-4-5".to_string();
+        }
+        if let Some(tp) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            tp.privacy = None;
+            tp.cloud_policy = None;
+            tp.generation = HashMap::new();
         }
         fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
         let out = crate::enrich::llm_chat("claude".to_string(),

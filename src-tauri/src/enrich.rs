@@ -32,9 +32,13 @@ pub async fn llm_status(profile: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn llm_chat(profile: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
     let provider_id = profile_to_provider(&profile);
-    // task-enrich for legacy enrich, task-chat for generic chat — infer from profile
-    let task = if provider_id=="local" { Some("task-chat".to_string()) } else { None };
-    let req = ChatRequest { provider_id, model_ref: String::new(), messages, task_profile_id: task };
+    // Backend-owned policy anchor: this legacy command always runs under the
+    // task-chat profile. Previously non-"local" providers were passed
+    // `task_profile_id: None`, which skipped the entire privacy/cloud-policy
+    // gate and let an arbitrary `profile` (== provider id) reach the cloud
+    // without consent. The profile argument may only select among configured
+    // providers under task-chat; it can no longer relax policy.
+    let req = ChatRequest { provider_id, model_ref: String::new(), messages, task_profile_id: Some("task-chat".to_string()) };
     gateway_chat_routed(req, tokio_util::sync::CancellationToken::new()).await
 }
 

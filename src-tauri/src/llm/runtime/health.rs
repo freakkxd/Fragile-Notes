@@ -34,10 +34,13 @@ pub fn combine_health(process_state: &str, http: &HealthCheckResult) -> HealthSt
 
 pub async fn check_health(base_url: &str) -> HealthCheckResult {
     let url = format!("{}/health", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .build();
     let client = match client {
         Ok(c) => c,
-        Err(e) => return HealthCheckResult{ state: HealthState::Unknown, http_status: None, body: None, error: Some(e.to_string()) },
+        Err(_) => return HealthCheckResult{ state: HealthState::Unknown, http_status: None, body: None, error: Some("failed to initialize HTTP client".to_string()) },
     };
     match client.get(&url).send().await {
         Ok(resp) => {

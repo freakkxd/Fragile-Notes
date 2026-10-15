@@ -66,8 +66,9 @@ impl OpenAiCompatibleEmbeddingProvider {
 
         let client = reqwest::Client::builder()
             .timeout(config.timeout + Duration::from_secs(5)) // reqwest timeout as fallback, we use tokio::timeout for precise
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| "failed to initialize HTTP client".to_string())?;
         Ok(Self { config, client })
     }
 
