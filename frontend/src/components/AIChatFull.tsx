@@ -322,7 +322,10 @@ export default function AIChatFull() {
     const u: Msg = { role: 'user', content: input }
     const history = [...msgs, u]
     const myId = (reqSeq.current += 1)
-    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${myId}`
+    const rid = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? (crypto as Crypto).randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${myId}`
+    const requestId = rid
     activeReqId.current = requestId
     const isCurrent = () => mounted.current && reqSeq.current === myId
     setMsgs(history)
