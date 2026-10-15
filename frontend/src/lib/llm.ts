@@ -485,6 +485,29 @@ export async function llmTestProvider(providerId: string): Promise<string> {
   if (!inv) throw new Error('no tauri')
   return await inv('llm_test_provider', { providerId }) as string
 }
+// Native Ollama model discovery (GET /api/tags). Reuses the backend
+// ConnectionTestResult shape: `models` carries discovered identifiers.
+export const DiscoverErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  retryable: z.boolean(),
+})
+export type DiscoverError = z.infer<typeof DiscoverErrorSchema>
+export const DiscoverResultSchema = z.object({
+  ok: z.boolean(),
+  provider_id: z.string().optional().default(''),
+  latency_ms: z.number().nullable().optional(),
+  models: z.array(z.string()).nullable().optional(),
+  capabilities: z.array(z.string()).nullable().optional(),
+  error: DiscoverErrorSchema.nullable().optional(),
+}).passthrough()
+export type DiscoverResult = z.infer<typeof DiscoverResultSchema>
+export async function llmDiscoverModels(providerId: string): Promise<DiscoverResult> {
+  const inv = getInvoke()
+  if (!inv) throw new Error('Tauri not available')
+  const raw = await inv('llm_discover_models', { providerId }) as string
+  return DiscoverResultSchema.parse(JSON.parse(raw))
+}
 export async function llmChatUniversal(providerId: string, model: string, messages: {role:string,content:string}[]): Promise<string> {
   const inv = getInvoke()
   if (!inv) throw new Error('no tauri')

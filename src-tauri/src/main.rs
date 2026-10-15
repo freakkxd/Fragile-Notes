@@ -17,6 +17,7 @@ use llm::{
     llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
     llm_runtime_stop, llm_save_config, llm_save_config_confirmed, llm_save_pipeline, llm_scan_models, llm_set_active_model,
     llm_set_provider_credential, llm_start_config_recovery, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
+    llm_discover_models,
 };
 use llm::models::{llm_models_list, llm_models_scan};
 use llm::download::{llm_download_cancel, llm_download_list, llm_download_pause, llm_download_resume, llm_download_start, llm_download_status};
@@ -325,6 +326,7 @@ fn main() {
             llm_set_active_model,
             llm_download_model,
             llm_test_provider,
+            llm_discover_models,
             llm_chat_universal,
             llm_get_pipelines,
             llm_save_pipeline,

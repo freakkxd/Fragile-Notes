@@ -3,6 +3,7 @@ import * as llm from '../lib/llm'
 import {
   SettingsMode, SettingsSection, MODE_LABELS, SECTION_LABELS,
   loadMode, saveMode, snapshotConfig, isDirty, isLocalKind, redactedDiagnostics,
+  ollamaDiscoverErrorText,
 } from './settings/types'
 import { SectionCard, SettingRow, StatusBadge, SecretReferenceField, inputStyle } from './settings/controls'
 import { KNOWN_PROVIDER_KINDS } from '../lib/llm'
@@ -53,6 +54,7 @@ export default function LLMSettings() {
   const [confirming, setConfirming] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [cloudStatus, setCloudStatus] = useState<Record<string,string>>({})
+  const [discover, setDiscover] = useState<Record<string, { state: 'idle'|'loading'|'ready'|'error'; models: string[]; error: string }>>({})
   const [keyring, setKeyring] = useState<Record<string, boolean | undefined>>({})
   const [localTest, setLocalTest] = useState('—')
   const [pipelineInput, setPipelineInput] = useState('Тестовая заметка #идея: сделать Vault умнее')
@@ -220,6 +222,21 @@ export default function LLMSettings() {
       const r = await llm.llmTestProvider(id)
       setCloudStatus(s=>({...s,[id]: r.slice(0,200)}))
     } catch { setCloudStatus(s=>({...s,[id]:'ошибка проверки'})) }
+  }
+
+  // Ollama-native discovery (GET /api/tags). Never substitutes an endpoint.
+  const discoverModels = async (id: string) => {
+    setDiscover(s=>({...s,[id]:{ state:'loading', models:[], error:'' }}))
+    try {
+      const res = await llm.llmDiscoverModels(id)
+      if (res.ok) {
+        setDiscover(s=>({...s,[id]:{ state:'ready', models: res.models ?? [], error:'' }}))
+      } else {
+        setDiscover(s=>({...s,[id]:{ state:'error', models:[], error: ollamaDiscoverErrorText(res.error?.code) }}))
+      }
+    } catch {
+      setDiscover(s=>({...s,[id]:{ state:'error', models:[], error: ollamaDiscoverErrorText(undefined) }}))
+    }
   }
 
   const refreshKeyring = async (id: string) => {
@@ -487,6 +504,36 @@ export default function LLMSettings() {
                       ) : (
                         <div style={{fontSize:11, color:'var(--muted)'}}>Локальный провайдер — ключ не нужен.</div>
                       )}
+                      {p.kind === 'ollama' && (() => {
+                        const d = discover[p.id] ?? { state: 'idle' as const, models: [] as string[], error: '' }
+                        const currentDefault = p.default_model || p.model || ''
+                        return (
+                          <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                            <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                              <button onClick={()=>discoverModels(p.id)} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>Получить модели Ollama</button>
+                              <span style={{fontSize:11, color:'var(--muted)'}}>
+                                {d.state==='loading' ? 'загрузка…'
+                                  : d.state==='ready' ? `найдено: ${d.models.length}`
+                                  : d.state==='error' ? d.error : ''}
+                              </span>
+                            </div>
+                            {d.state==='ready' && d.models.length===0 && (
+                              <span style={{fontSize:11, color:'var(--muted)'}}>Список пуст — выполните <code>ollama pull &lt;name&gt;</code>.</span>
+                            )}
+                            {d.state==='ready' && d.models.length>0 && (
+                              <div style={{display:'flex', flexDirection:'column', gap:4}}>
+                                {d.models.map(m => (
+                                  <label key={m} style={{display:'flex', gap:6, alignItems:'center', fontSize:12}}>
+                                    <input type="radio" name={`ollama-default-${p.id}`} checked={currentDefault===m}
+                                      onChange={()=>patchProvider(p.id,{default_model:m})} />
+                                    <code>{m}</code>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                       <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                         <button onClick={()=>testProvider(p.id)} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>Тест</button>
                         <span style={{fontSize:11, color:'var(--muted)'}}>{cloudStatus[p.id] ?? ''}</span>

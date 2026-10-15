@@ -16,6 +16,7 @@ pub mod download;
 pub mod embeddings;
 pub mod gateway;
 pub mod provider;
+pub mod ollama;
 #[cfg(test)]
 mod e2e_manual;
 
@@ -1124,7 +1125,7 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
     let prov = cfg.providers.iter().find(|p| p.id==provider_id).ok_or("provider not found")?.clone();
     let start = std::time::Instant::now();
     let res = match prov.kind {
-        ProviderKind::LocalLlamaCpp | ProviderKind::Ollama => {
+        ProviderKind::LocalLlamaCpp => {
             let base = if prov.endpoint.is_empty() { format!("http://127.0.0.1:{}", cfg.local.port) } else { prov.endpoint.clone() };
             let health = format!("{}/health", base.trim_end_matches('/'));
             let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
@@ -1135,6 +1136,15 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
                     ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: if status.as_u16()==401 {"unauthorized".to_string()} else {"server_error".to_string()}, message: format!("HTTP {}", status), retryable: status.as_u16()>=500 }) }
                 },
                 Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message: e.to_string().replace('"',"'"), retryable:true }) },
+            }
+        }
+        // Ollama has no llama-server `/health` endpoint; probe the native
+        // tags endpoint instead and surface the discovered models.
+        ProviderKind::Ollama => {
+            let base = if prov.endpoint.is_empty() { String::new() } else { prov.endpoint.clone() };
+            match ollama::discover_models(&base, Duration::from_secs(5)).await {
+                Ok(models) => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: Some(models), capabilities: Some(vec![Capability::Chat]), error: None },
+                Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code:e.code, message:e.message, retryable:e.retryable }) },
             }
         }
         _ => {
@@ -1168,6 +1178,29 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
                 Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message:e.to_string(), retryable:true }) }
             }
         }
+    };
+    serde_json::to_string(&res).map_err(|e| e.to_string())
+}
+
+/// Native Ollama model discovery via `GET /api/tags`.
+///
+/// Provider-kind scoped: non-Ollama kinds are rejected (no endpoint
+/// substitution, no fallback to cloud). The returned `ConnectionTestResult`
+/// carries the discovered identifiers in `models` so the UI keeps one shape.
+#[tauri::command]
+pub async fn llm_discover_models(provider_id: String) -> Result<String, String> {
+    let cfg = load_config_inner();
+    let prov = cfg.providers.iter().find(|p| p.id==provider_id).ok_or("provider not found")?.clone();
+    let start = std::time::Instant::now();
+    let res = match prov.kind {
+        ProviderKind::Ollama => {
+            let base = if prov.endpoint.is_empty() { String::new() } else { prov.endpoint.clone() };
+            match ollama::discover_models(&base, ollama::discovery_timeout()).await {
+                Ok(models) => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: Some(models), capabilities: Some(vec![Capability::Chat]), error: None },
+                Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code:e.code, message:e.message, retryable:e.retryable }) },
+            }
+        }
+        _ => return Err("unsupported provider kind for discovery".to_string()),
     };
     serde_json::to_string(&res).map_err(|e| e.to_string())
 }

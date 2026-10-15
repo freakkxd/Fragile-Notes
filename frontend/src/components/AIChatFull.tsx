@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as llm from '../lib/llm'
-import { isLocalKind } from './settings/types'
+import { isLocalKind, ollamaDiscoverErrorText } from './settings/types'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -84,6 +84,13 @@ export default function AIChatFull() {
   const [configState, setConfigState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [configError, setConfigError] = useState('')
   const [registryLoaded, setRegistryLoaded] = useState(false)
+  // Ollama-native discovery, separate from the GGUF registry. Guarded by a
+  // monotonic generation so a late response never publishes state for another
+  // provider, and a failed refresh never leaves a stale model marked confirmed.
+  const [ollamaModels, setOllamaModels] = useState<string[]>([])
+  const [ollamaState, setOllamaState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [ollamaError, setOllamaError] = useState('')
+  const discoverGen = useRef(0)
   const stale = useRef(false)
   const mounted = useRef(true)
   // Monotonic generation: every load()/retry is a new generation; only the
@@ -141,12 +148,55 @@ export default function AIChatFull() {
   }, [])
 
   const selected = providers.find((p) => p.id === providerId) ?? null
+  const isOllama = selected?.kind === 'ollama'
   const isLocal = !!selected && isLocalKind(selected.kind)
-  const eligible = selected && isLocal ? presentLocalModels(registry, selected.id) : []
+  const eligible = selected && isLocal && !isOllama ? presentLocalModels(registry, selected.id) : []
 
-  // Prefer the first verified registry record once it arrives.
+  const discoverOllama = async (id: string) => {
+    const gen = (discoverGen.current += 1)
+    const isCurrent = () => mounted.current && discoverGen.current === gen
+    setOllamaState('loading')
+    setOllamaError('')
+    setOllamaModels([])
+    try {
+      const res = await llm.llmDiscoverModels(id)
+      if (!isCurrent()) return
+      if (res.ok) {
+        const models = res.models ?? []
+        setOllamaModels(models)
+        setOllamaState('ready')
+        // Select the first model if the current value is not in the list.
+        setModel((cur) => (models.length > 0 && !models.includes(cur) ? models[0] : cur))
+      } else {
+        setOllamaState('error')
+        setOllamaError(ollamaDiscoverErrorText(res.error?.code))
+      }
+    } catch {
+      if (!isCurrent()) return
+      setOllamaState('error')
+      setOllamaError(ollamaDiscoverErrorText(undefined))
+    }
+  }
+
+  // Discover whenever the selected provider is Ollama. Non-Ollama selection
+  // invalidates any in-flight discovery and clears the native model state.
   useEffect(() => {
-    if (!selected || !isLocalKind(selected.kind)) return
+    if (configState !== 'ready') return
+    if (selected?.kind === 'ollama') {
+      discoverOllama(selected.id)
+    } else {
+      discoverGen.current += 1
+      setOllamaState('idle')
+      setOllamaModels([])
+      setOllamaError('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerId, configState])
+
+  // Prefer the first verified registry record once it arrives (GGUF registry
+  // applies only to local_llama_cpp; Ollama uses native discovery).
+  useEffect(() => {
+    if (!selected || !isLocalKind(selected.kind) || selected.kind === 'ollama') return
     const list = presentLocalModels(registry, selected.id)
     if (list.length > 0 && !list.some((r) => r.id === model)) {
       setModel(list[0].id)
@@ -157,7 +207,10 @@ export default function AIChatFull() {
   const onProvider = (id: string) => {
     setProviderId(id)
     const p = providers.find((x) => x.id === id) ?? null
-    if (p && isLocalKind(p.kind)) {
+    if (p?.kind === 'ollama') {
+      // Native discovery fills the list; avoid a flash of a registry path.
+      setModel('')
+    } else if (p && isLocalKind(p.kind)) {
       const list = presentLocalModels(registry, p.id)
       setModel(list.length > 0 ? list[0].id : '')
     } else {
@@ -194,7 +247,24 @@ export default function AIChatFull() {
       setBlocked(blockReason)
       return
     }
-    if (isLocal) {
+    if (isOllama) {
+      if (ollamaState === 'loading' || ollamaState === 'idle') {
+        setBlocked('Дождитесь загрузки списка моделей Ollama.')
+        return
+      }
+      if (ollamaState === 'error') {
+        setBlocked(ollamaError || 'Модели Ollama недоступны. Обновите список.')
+        return
+      }
+      if (ollamaModels.length === 0) {
+        setBlocked('В Ollama нет моделей. Загрузите модель (`ollama pull <name>`) и обновите список.')
+        return
+      }
+      if (!ollamaModels.includes(model)) {
+        setBlocked('Выберите модель из списка Ollama.')
+        return
+      }
+    } else if (isLocal) {
       if (!registryLoaded) {
         setBlocked('Дождитесь загрузки моделей.')
         return
@@ -240,6 +310,28 @@ export default function AIChatFull() {
         </select>
         {configState !== 'ready' ? (
           <span style={{ fontSize:11, color:'var(--muted)' }}>{configState === 'loading' ? 'Загрузка…' : '—'}</span>
+        ) : isOllama ? (
+          ollamaState === 'loading' || ollamaState === 'idle' ? (
+            <span style={{ fontSize:11, color:'var(--muted)' }}>Загрузка моделей Ollama…</span>
+          ) : ollamaState === 'error' ? (
+            <span style={{ fontSize:11, color:'var(--muted)' }}>
+              {ollamaError}{' '}
+              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'2px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}>↻ Обновить</button>
+            </span>
+          ) : ollamaModels.length === 0 ? (
+            <span style={{ fontSize:11, color:'var(--muted)' }}>
+              Нет моделей — выполните <code>ollama pull &lt;name&gt;</code>.{' '}
+              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'2px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}>↻ Обновить</button>
+            </span>
+          ) : (
+            <>
+              <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
+                style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>
+                {ollamaModels.map((mid) => <option key={mid} value={mid}>{mid}</option>)}
+              </select>
+              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>↻</button>
+            </>
+          )
         ) : isLocal ? (
           eligible.length > 0 ? (            <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
               style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>

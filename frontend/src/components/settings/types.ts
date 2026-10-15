@@ -56,6 +56,24 @@ export function isLocalKind(kind: string): boolean {
   return kind === 'local_llama_cpp' || kind === 'ollama'
 }
 
+/** Safe user-facing text for Ollama discovery failures (no bodies/URLs). */
+export function ollamaDiscoverErrorText(code: string | undefined): string {
+  switch (code) {
+    case 'network':
+      return 'Сервер Ollama недоступен. Проверьте, что `ollama serve` запущен, и endpoint в настройках.'
+    case 'malformed_response':
+      return 'Сервер Ollama вернул некорректный ответ.'
+    case 'unauthorized':
+      return 'Сервер Ollama отклонил запрос (unauthorized).'
+    case 'unsupported':
+      return 'Endpoint не похож на Ollama (нет /api/tags).'
+    case 'server_error':
+      return 'Сервер Ollama вернул ошибку. Повторите позже.'
+    default:
+      return 'Не удалось получить список моделей Ollama.'
+  }
+}
+
 /** Never expose raw secrets: masked display for keyring state. */
 export function keyringLabel(hasSecret: boolean | undefined): string {
   if (hasSecret === true) return 'Ключ сохранён в системном хранилище'
