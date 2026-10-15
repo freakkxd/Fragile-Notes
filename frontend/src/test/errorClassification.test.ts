@@ -31,6 +31,23 @@ describe('error_classification_safe', () => {
     expect(long.length).toBeLessThanOrEqual(250)
   })
 
+  it('maps backend consent_required to an actionable cloud-consent message', () => {
+    const out = classifyError(new Error('consent_required: task-chat policy AskOnce'))
+    expect(out).toMatch(/согласие на облако/i)
+    expect(out).toMatch(/Приватность/)
+  })
+
+  it('maps a missing task profile to a safe settings hint', () => {
+    const out = classifyError(new Error('task profile not found: task-chat'))
+    expect(out).toMatch(/Профиль задачи не найден/)
+    expect(out).not.toMatch(/sk-|AIza|keychain:\/\//)
+  })
+
+  it('maps a disabled provider to an actionable message', () => {
+    const out = classifyError(new Error('provider openai is disabled'))
+    expect(out).toMatch(/Провайдер выключен/)
+  })
+
   it('passes through unknown errors capped, never throws', () => {
     expect(classifyError('plain string failure')).toBe('plain string failure')
     expect(classifyError(null)).toBe('null')

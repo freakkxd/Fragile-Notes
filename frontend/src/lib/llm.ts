@@ -508,10 +508,17 @@ export async function llmDiscoverModels(providerId: string): Promise<DiscoverRes
   const raw = await inv('llm_discover_models', { providerId }) as string
   return DiscoverResultSchema.parse(JSON.parse(raw))
 }
-export async function llmChatUniversal(providerId: string, model: string, messages: {role:string,content:string}[]): Promise<string> {
+export async function llmChatUniversal(providerId: string, model: string, messages: {role:string,content:string}[], requestId?: string): Promise<string> {
   const inv = getInvoke()
   if (!inv) throw new Error('no tauri')
-  return await inv('llm_chat_universal', { providerId, model, messages }) as string
+  return await inv('llm_chat_universal', { providerId, model, messages, requestId: requestId ?? null }) as string
+}
+// Ask the backend to abort the client-side wait for an in-flight chat request.
+// Returns "cancelled" | "stopping" | "not_found"; repeated/late calls are safe.
+export async function llmChatCancel(requestId: string): Promise<string> {
+  const inv = getInvoke()
+  if (!inv) throw new Error('no tauri')
+  return await inv('llm_chat_cancel', { requestId }) as string
 }
 export async function llmGetPipelines(): Promise<Pipeline[]> {
   const inv = getInvoke()

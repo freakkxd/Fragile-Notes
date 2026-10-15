@@ -10,6 +10,12 @@ type Msg = { role: 'user' | 'assistant'; content: string }
 export function classifyError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
   const low = raw.toLowerCase()
+  if (low.includes('consent_required')) {
+    return 'Требуется согласие на облако: профиль task-chat использует политику AskOnce. Разрешите облако в Настройки → Приватность (cloud_allowed) или выберите локального провайдера.'
+  }
+  if (low.includes('task profile not found')) {
+    return 'Профиль задачи не найден в конфигурации. Проверьте Настройки → Приватность.'
+  }
   if (low.includes('no api_key in keyring') || low.includes('missing credential') || low.includes('credentials_missing')) {
     return 'Нет ключа: сохраните API-ключ провайдера в настройках (ключ хранится только в системном хранилище).'
   }
@@ -19,13 +25,16 @@ export function classifyError(e: unknown): string {
   if (low.includes('privacy') || low.includes('local-only') || low.includes('cloud deny')) {
     return 'Заблокировано политикой приватности: задача local-only, облако запрещено.'
   }
+  if (low.includes('is disabled')) {
+    return 'Провайдер выключен в настройках нейросетей. Включите его или выберите другого.'
+  }
   if (low.includes('offline') || low.includes('timeout') || low.includes('network')) {
     return 'Сеть/таймаут: провайдер недоступен. Проверьте соединение и endpoint.'
   }
   if (low.includes('provider not found') || low.includes('model')) {
     return `Провайдер/модель недоступны: ${raw.slice(0, 200)}`
   }
-  return raw.slice(0, 500)
+  return raw.slice(0, 250)
 }
 
 /** First enabled local provider, else first enabled provider, else null. */
@@ -92,7 +101,11 @@ export default function AIChatFull() {
   const [ollamaState, setOllamaState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [ollamaError, setOllamaError] = useState('')
   const discoverGen = useRef(0)
-  const stale = useRef(false)
+  // Monotonic request sequence: every send() and stop() bumps it. Only the
+  // send whose captured id still matches may publish state or clear busy, so
+  // a late response after stop / a newer send is dropped deterministically.
+  const reqSeq = useRef(0)
+  const activeReqId = useRef<string | null>(null)
   const mounted = useRef(true)
   // Monotonic generation: every load()/retry is a new generation; only the
   // latest one may publish state. mounted guards unmount, generation guards
@@ -149,7 +162,8 @@ export default function AIChatFull() {
   useEffect(() => {
     mounted.current = true
     load()
-    return () => { mounted.current = false }
+    // Unmount invalidates any in-flight chat so its continuations no-op.
+    return () => { mounted.current = false; reqSeq.current += 1 }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -244,9 +258,15 @@ export default function AIChatFull() {
   }
 
   const stop = () => {
-    stale.current = true
+    // Invalidate the in-flight request (late response/error is dropped) and
+    // ask the backend to abort the client-side wait. Honest message: the
+    // provider may already have processed the request server-side.
+    reqSeq.current += 1
+    const rid = activeReqId.current
+    activeReqId.current = null
     setBusy(false)
     setMsgs((m) => [...m, { role: 'assistant', content: 'Остановлено пользователем.' }])
+    if (rid) { void llm.llmChatCancel(rid).catch(() => { /* best effort */ }) }
   }
 
   const send = async () => {
@@ -295,21 +315,23 @@ export default function AIChatFull() {
     }
     const u: Msg = { role: 'user', content: input }
     const history = [...msgs, u]
+    const myId = (reqSeq.current += 1)
+    const requestId = `${myId}-${Date.now()}`
+    activeReqId.current = requestId
+    const isCurrent = () => mounted.current && reqSeq.current === myId
     setMsgs(history)
     setInput('')
-    stale.current = false
     setBusy(true)
     try {
-      const res = await llm.llmChatUniversal(providerId, model, history.map(m=>({role:m.role, content:m.content})))
-      if (stale.current) return
+      const res = await llm.llmChatUniversal(providerId, model, history.map(m=>({role:m.role, content:m.content})), requestId)
+      if (!isCurrent()) return
       // Local legacy providers return raw JSON; cloud returns normalized text.
       setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res) }])
     } catch (e) {
-      if (stale.current) return
+      if (!isCurrent()) return
       setMsgs((m)=>[...m, {role:'assistant', content: classifyError(e)}])
     } finally {
-      if (!stale.current) setBusy(false)
-      else stale.current = false
+      if (isCurrent()) { setBusy(false); activeReqId.current = null }
     }
   }
 

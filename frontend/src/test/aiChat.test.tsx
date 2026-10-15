@@ -141,6 +141,48 @@ describe('ai_chat_local_only_blocks_cloud_invoke', () => {
   })
 })
 
+describe('ai_chat_stop_invokes_backend_cancel', () => {
+  it('cancels the in-flight request and drops its late answer, then allows a new send', async () => {
+    const user = userEvent.setup()
+    let resolveFirst!: (v: string) => void
+    let chatCalls = 0
+    installTauriMock({
+      llm_get_config_report: JSON.stringify(reportCfg()),
+      llm_models_list: JSON.stringify([
+        { id: 'model-abc', provider_id: 'local', filename: 'qwen.gguf', state: 'Present', size_bytes: 1000 },
+      ]),
+      llm_chat_universal: () => {
+        chatCalls += 1
+        if (chatCalls === 1) return new Promise<string>((res) => { resolveFirst = res })
+        return Promise.resolve(JSON.stringify({ choices: [{ message: { content: 'second answer' } }] }))
+      },
+      llm_chat_cancel: () => 'cancelled',
+    })
+    render(<AIChatFull />)
+    await user.type(await screen.findByPlaceholderText('Сообщение провайдеру…'), 'one')
+    await user.click(screen.getByRole('button', { name: 'Отправить' }))
+    await screen.findByRole('button', { name: 'Стоп' })
+    await user.click(screen.getByRole('button', { name: 'Стоп' }))
+    expect(await screen.findByText('Остановлено пользователем.')).toBeTruthy()
+    // The backend cancel must carry the same request id as the send.
+    const send = tauriMockCalls().find((c) => c.cmd === 'llm_chat_universal')
+    const cancel = tauriMockCalls().find((c) => c.cmd === 'llm_chat_cancel')
+    expect(send).toBeTruthy()
+    expect(cancel).toBeTruthy()
+    expect(typeof send!.args?.requestId).toBe('string')
+    expect(cancel!.args?.requestId).toBe(send!.args?.requestId)
+    // The aborted response is dropped even if it arrives late.
+    resolveFirst(JSON.stringify({ choices: [{ message: { content: 'stale-one' } }] }))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText('stale-one')).toBeNull()
+    // A subsequent send still works (the counter invalidated the aborted one).
+    await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'two')
+    await user.click(screen.getByRole('button', { name: 'Отправить' }))
+    expect(await screen.findByText('second answer')).toBeTruthy()
+    expect(screen.queryByText('stale-one')).toBeNull()
+  })
+})
+
 describe('ai_chat_stop_ignores_late_response', () => {
   it('shows Stop during request and drops the late answer', async () => {
     const user = userEvent.setup()

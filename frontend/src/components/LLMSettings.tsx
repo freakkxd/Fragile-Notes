@@ -66,6 +66,11 @@ export default function LLMSettings() {
   const [saving, setSaving] = useState(false)
   const [showIssueDetails, setShowIssueDetails] = useState(false)
   const statusTimer = useRef<number | null>(null)
+  // Discovery lifecycle: a monotonic generation guards every publish path so
+  // a late response never lands after an endpoint edit, provider removal,
+  // newer discovery request, or unmount.
+  const discoverGen = useRef(0)
+  const mountedRef = useRef(true)
 
   const flash = (msg: string) => {
     setStatus(msg)
@@ -122,6 +127,11 @@ export default function LLMSettings() {
     }
   }
   useEffect(()=>{ load() },[])
+  // Unmount: stop publishing and invalidate any in-flight discovery.
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false; discoverGen.current += 1 }
+  }, [])
 
   const changeMode = (m: SettingsMode) => { setMode(m); saveMode(m) }
 
@@ -226,17 +236,28 @@ export default function LLMSettings() {
 
   // Ollama-native discovery (GET /api/tags). Never substitutes an endpoint.
   const discoverModels = async (id: string) => {
+    const gen = (discoverGen.current += 1)
+    const isCurrent = () => mountedRef.current && discoverGen.current === gen
     setDiscover(s=>({...s,[id]:{ state:'loading', models:[], error:'' }}))
     try {
       const res = await llm.llmDiscoverModels(id)
+      if (!isCurrent()) return
       if (res.ok) {
         setDiscover(s=>({...s,[id]:{ state:'ready', models: res.models ?? [], error:'' }}))
       } else {
         setDiscover(s=>({...s,[id]:{ state:'error', models:[], error: ollamaDiscoverErrorText(res.error?.code) }}))
       }
     } catch {
+      if (!isCurrent()) return
       setDiscover(s=>({...s,[id]:{ state:'error', models:[], error: ollamaDiscoverErrorText(undefined) }}))
     }
+  }
+  // Invalidate any in-flight/finished discovery for a provider: bump the
+  // generation and drop its result so a stale model list can never be shown
+  // or selected (endpoint edit, provider removal).
+  const invalidateDiscovery = (id: string) => {
+    discoverGen.current += 1
+    setDiscover(s => { const n = { ...s }; delete n[id]; return n })
   }
 
   const refreshKeyring = async (id: string) => {
@@ -263,6 +284,7 @@ export default function LLMSettings() {
   const removeProvider = (id: string) => {
     if(!cfg) return
     if(!window.confirm(`Удалить провайдера ${id}? Это изменит конфиг после сохранения.`)) return
+    invalidateDiscovery(id)
     setCfg({...cfg, providers: cfg.providers.filter(p => p.id !== id)})
     if (selectedProvider === id) setSelectedProvider(null)
     if (simpleProvider === id) {
@@ -480,7 +502,7 @@ export default function LLMSettings() {
                       </div>
                       {(mode==='default' || mode==='expert') && (
                       <SettingRow label="Endpoint" hint="Политика: cloud — только https, local — только loopback">
-                        <input value={p.endpoint || p.api_url || ''} onChange={e=>patchProvider(p.id,{endpoint:e.target.value})} placeholder={apiUrlPlaceholder(p.kind)} style={inputStyle} />
+                        <input value={p.endpoint || p.api_url || ''} onChange={e=>{ patchProvider(p.id,{endpoint:e.target.value}); invalidateDiscovery(p.id) }} placeholder={apiUrlPlaceholder(p.kind)} style={inputStyle} />
                       </SettingRow>
                       )}
                       {mode==='expert' && (

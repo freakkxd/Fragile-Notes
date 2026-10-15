@@ -3,7 +3,7 @@
 // settings model list. No GGUF registry is consulted for Ollama.
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import AIChatFull from '../components/AIChatFull'
 import LLMSettings from '../components/LLMSettings'
 import { installTauriMock, tauriMockCalls } from './tauriMock'
@@ -165,5 +165,59 @@ describe('ollama settings discovery', () => {
     await user.click(await screen.findByRole('button', { name: 'Настроить ›' }))
     await user.click(await screen.findByRole('button', { name: 'Получить модели Ollama' }))
     expect(await screen.findByText(/Сервер Ollama недоступен/)).toBeTruthy()
+  })
+})
+
+describe('ollama settings discovery invalidation', () => {
+  // F-4: a discovery result must never be published against a stale endpoint.
+  it('drops a late discovery result after the endpoint is edited', async () => {
+    const user = userEvent.setup()
+    let release!: (v: string) => void
+    const pending = new Promise<string>((res) => { release = res })
+    installTauriMock({
+      llm_get_config_report: JSON.stringify(reportCfg([provider({ id: 'ollama', name: 'Ollama' })])),
+      llm_scan_models: JSON.stringify([]),
+      llm_discover_models: () => pending,
+    })
+    render(<LLMSettings />)
+    await user.click(await screen.findByRole('button', { name: 'Провайдеры' }))
+    await user.click(await screen.findByRole('button', { name: 'Настроить ›' }))
+    await user.click(await screen.findByRole('button', { name: 'Получить модели Ollama' }))
+    expect(await screen.findByText('загрузка…')).toBeTruthy()
+    const endpoint = screen.getByLabelText(/Endpoint/) as HTMLInputElement
+    await user.clear(endpoint)
+    await user.type(endpoint, 'http://127.0.0.1:11434/custom')
+    // The stale response resolves for the now-invalid endpoint: never shown.
+    release(JSON.stringify({ ok: true, models: ['stale-model'] }))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText('stale-model')).toBeNull()
+    expect(screen.queryByText(/найдено:/)).toBeNull()
+    expect(screen.queryByRole('radio')).toBeNull()
+  })
+
+  it('drops a late discovery result after the provider is removed', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let release!: (v: string) => void
+    const pending = new Promise<string>((res) => { release = res })
+    installTauriMock({
+      llm_get_config_report: JSON.stringify(reportCfg([
+        provider({ id: 'ollama', name: 'Ollama' }),
+        provider({ id: 'openai', name: 'OpenAI', kind: 'open_ai', endpoint: 'https://api.openai.com/v1' }),
+      ])),
+      llm_scan_models: JSON.stringify([]),
+      llm_discover_models: () => pending,
+    })
+    render(<LLMSettings />)
+    await user.click(await screen.findByRole('button', { name: 'Провайдеры' }))
+    // Two providers: open the first (Ollama) card.
+    await user.click((await screen.findAllByRole('button', { name: 'Настроить ›' }))[0])
+    await user.click(await screen.findByRole('button', { name: 'Получить модели Ollama' }))
+    expect(await screen.findByText('загрузка…')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Удалить' }))
+    release(JSON.stringify({ ok: true, models: ['stale-model'] }))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText('stale-model')).toBeNull()
+    confirmSpy.mockRestore()
   })
 })
