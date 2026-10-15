@@ -17,6 +17,7 @@ pub mod embeddings;
 pub mod gateway;
 pub mod provider;
 pub mod ollama;
+pub mod auth;
 #[cfg(test)]
 mod e2e_manual;
 
@@ -938,6 +939,52 @@ fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind, e
     Ok(())
 }
 
+// ---------- AskOnce cloud consent (session-scoped) ----------
+// A grant is bound to provider_id + canonical destination + task profile +
+// provider/profile fingerprint. It lives only for the current app session
+// (in-memory) and is invalidated by any endpoint, provider or policy change
+// because the fingerprint is part of the key. This is a UX consent, not a
+// policy bypass: `chat_preflight` re-checks the identical binding on every
+// inference, and the backend owns the decision (never a frontend-supplied
+// destination or profile substitution).
+static CLOUD_CONSENT: Lazy<Mutex<HashMap<String, i64>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Consent key + display destination for a (provider, profile) binding.
+/// `None` when either side is missing.
+fn consent_binding(cfg: &LlmConfig, provider_id: &str, profile_id: &str) -> Option<(String, String)> {
+    let prov = cfg.providers.iter().find(|p| p.id == provider_id)?;
+    let fp = auth::binding_fingerprint(cfg, provider_id, profile_id)?;
+    let dest = auth::canonical_destination(&prov.endpoint);
+    Some((
+        format!("{}\u{1f}{}\u{1f}{}", provider_id, dest, fp),
+        dest,
+    ))
+}
+
+fn consent_granted(cfg: &LlmConfig, provider_id: &str, profile_id: &str) -> bool {
+    match consent_binding(cfg, provider_id, profile_id) {
+        Some((key, _)) => CLOUD_CONSENT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&key),
+        None => false,
+    }
+}
+
+fn revoke_provider_consent(provider_id: &str) {
+    let prefix = format!("{}\u{1f}", provider_id);
+    CLOUD_CONSENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|k, _| !k.starts_with(&prefix));
+}
+
+#[cfg(test)]
+pub(crate) fn clear_cloud_consent_for_test() {
+    CLOUD_CONSENT.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// Route-independent chat preflight shared by every chat HTTP/dispatch path:
 /// provider exists → task-profile resolution (fail-closed) → privacy →
 /// cloud policy → enabled → resolved generation.
@@ -955,8 +1002,10 @@ fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind, e
 ///
 /// A missing task profile is an error (`task profile not found: ...`) — a
 /// typo in a profile id must never silently degrade to unrestricted cloud
-/// access. AskOnce with an active cloud provider returns `consent_required`:
-/// there is no consent flow over IPC, and "ask once" must never read as Allow.
+/// access. AskOnce with an active cloud provider and no matching session
+/// consent grant returns `consent_required: <provider_id>|<destination>`; the
+/// frontend shows a consent dialog and calls `llm_cloud_consent_grant`, after
+/// which the identical binding passes. "Ask once" must never read as Allow.
 fn chat_preflight(
     cfg: &LlmConfig,
     provider_id: &str,
@@ -981,14 +1030,14 @@ fn chat_preflight(
                 Some(CloudPolicy::Deny) => {
                     return Err("PrivacyPolicyViolation: Cloud Deny".to_string());
                 }
-                // AskOnce without a consent flow must never read as Allow.
+                // AskOnce requires a session consent grant bound to this exact
+                // provider+destination+profile. A missing grant must never
+                // read as Allow.
                 Some(CloudPolicy::AskOnce) => {
-                    return Err(
-                        "consent_required: task profile cloud policy is AskOnce; \
-                         set it to cloud_allowed (allow) in Settings → Privacy \
-                         before using a cloud provider"
-                            .to_string(),
-                    );
+                    if !consent_granted(cfg, &prov.id, tpid) {
+                        let dest = auth::canonical_destination(&prov.endpoint);
+                        return Err(format!("consent_required: {}|{}", prov.id, dest));
+                    }
                 }
                 Some(CloudPolicy::Allow) | None => {}
             }
@@ -1116,7 +1165,77 @@ pub fn llm_delete_provider_credential(provider_id: String) -> Result<String, Str
             return Err(format!("credential consistency error: {}", e));
         }
     }
+    // A removed credential also drops any AskOnce consent for this provider.
+    revoke_provider_consent(&pid);
     Ok("deleted".to_string())
+}
+
+// ---------- AskOnce consent commands ----------
+#[tauri::command]
+pub fn llm_cloud_consent_status(provider_id: String, task_profile_id: String) -> Result<String, String> {
+    let cfg = load_config_inner();
+    let prov = cfg
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| "provider not found".to_string())?;
+    let prof = cfg
+        .task_profiles
+        .iter()
+        .find(|t| t.id == task_profile_id)
+        .ok_or_else(|| "task profile not found".to_string())?;
+    let dest = auth::canonical_destination(&prov.endpoint);
+    let granted = consent_granted(&cfg, &provider_id, &task_profile_id);
+    let required =
+        is_cloud_kind(&prov.kind) && prof.cloud_policy == Some(CloudPolicy::AskOnce) && !granted;
+    Ok(serde_json::json!({
+        "provider_id": provider_id,
+        "task_profile_id": task_profile_id,
+        "destination": dest,
+        "granted": granted,
+        "required": required,
+    })
+    .to_string())
+}
+
+#[tauri::command]
+pub fn llm_cloud_consent_grant(provider_id: String, task_profile_id: String) -> Result<String, String> {
+    let cfg = load_config_inner();
+    let prov = cfg
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| "provider not found".to_string())?;
+    let prof = cfg
+        .task_profiles
+        .iter()
+        .find(|t| t.id == task_profile_id)
+        .ok_or_else(|| "task profile not found".to_string())?;
+    // Backend owns the decision. A grant is only meaningful for an enabled
+    // cloud provider bound to an AskOnce profile; it is not a universal bypass
+    // because `chat_preflight` re-derives the same binding per inference.
+    if !is_cloud_kind(&prov.kind) {
+        return Err("consent grant is only valid for cloud providers".to_string());
+    }
+    if prof.cloud_policy != Some(CloudPolicy::AskOnce) {
+        return Err("consent grant is only valid for AskOnce task profiles".to_string());
+    }
+    if !prov.enabled {
+        return Err("provider is disabled".to_string());
+    }
+    let (key, _dest) = consent_binding(&cfg, &provider_id, &task_profile_id)
+        .ok_or_else(|| "cannot resolve consent binding".to_string())?;
+    CLOUD_CONSENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, chrono::Utc::now().timestamp_millis());
+    Ok("granted".to_string())
+}
+
+#[tauri::command]
+pub fn llm_cloud_consent_revoke(provider_id: String) -> Result<String, String> {
+    revoke_provider_consent(&provider_id);
+    Ok("revoked".to_string())
 }
 
 #[tauri::command]
@@ -2227,14 +2346,14 @@ pub(crate) mod tests {
     pub(crate) fn env_guard() -> std::sync::MutexGuard<'static, ()> {
         ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner())
     }
-    struct IsolatedEnv {
+    pub(crate) struct IsolatedEnv {
         _g: std::sync::MutexGuard<'static, ()>,
         tmp: PathBuf,
         old_home: Option<std::ffi::OsString>,
         old_vault: Option<std::ffi::OsString>,
     }
     impl IsolatedEnv {
-        fn lock(name: &str) -> Self {
+        pub(crate) fn lock(name: &str) -> Self {
             let g = env_guard();
             install_mock_keyring();
             let tmp = std::env::temp_dir().join(format!("fragile-gate1-{}-{}-{}", std::process::id(), name, rand_string(6)));
@@ -3351,6 +3470,146 @@ pub(crate) mod tests {
         }
         let err = chat_preflight(&cfg, "claude", &Some("task-chat".to_string())).unwrap_err();
         assert!(err.contains("consent_required"), "got: {}", err);
+    }
+
+    // ---------- Package 12: AskOnce consent + OpenRouter OAuth ----------
+
+    fn consent_test_cfg() -> LlmConfig {
+        let mut cfg = LlmConfig::default();
+        cfg.providers.push(Provider {
+            id: "consent-prov".to_string(),
+            name: "Consent".to_string(),
+            kind: ProviderKind::OpenAI,
+            enabled: true,
+            endpoint: "https://consent.example.com/v1".to_string(),
+            auth: None,
+            default_model: String::new(),
+            extra: HashMap::new(),
+        });
+        cfg
+    }
+
+    fn consent_status_v(pid: &str, tpid: &str) -> serde_json::Value {
+        let s = llm_cloud_consent_status(pid.to_string(), tpid.to_string()).unwrap();
+        serde_json::from_str(&s).unwrap()
+    }
+
+    #[test]
+    fn cloud_consent_granted_binding_allows_chat_preflight() {
+        let _env = IsolatedEnv::lock("consent-grant");
+        clear_cloud_consent_for_test();
+        save_config_inner(&consent_test_cfg()).unwrap();
+        // No grant yet: status says required, and preflight fails closed.
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["required"], true);
+        assert_eq!(v["granted"], false);
+        assert_eq!(v["destination"], "https://consent.example.com/v1");
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "consent-prov", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("consent_required"), "got: {}", err);
+        // Grant flips it; the identical binding now passes.
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        let live = load_config_inner();
+        let (prov, _) =
+            chat_preflight(&live, "consent-prov", &Some("task-chat".to_string())).unwrap();
+        assert_eq!(prov.id, "consent-prov");
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["required"], false);
+        assert_eq!(v["granted"], true);
+    }
+
+    #[test]
+    fn cloud_consent_grant_rejects_non_ask_once_and_local() {
+        let _env = IsolatedEnv::lock("consent-reject");
+        clear_cloud_consent_for_test();
+        // Local kind is never grantable.
+        assert!(llm_cloud_consent_grant("local".to_string(), "task-chat".to_string()).is_err());
+        // Deny profile is not grantable.
+        let mut cfg = consent_test_cfg();
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-enrich") {
+            t.cloud_policy = Some(CloudPolicy::Deny);
+        }
+        save_config_inner(&cfg).unwrap();
+        assert!(
+            llm_cloud_consent_grant("consent-prov".to_string(), "task-enrich".to_string()).is_err()
+        );
+        // Missing provider / profile is an error, not a silent grant.
+        assert!(llm_cloud_consent_grant("nope".to_string(), "task-chat".to_string()).is_err());
+        assert!(llm_cloud_consent_grant("consent-prov".to_string(), "nope".to_string()).is_err());
+    }
+
+    #[test]
+    fn cloud_consent_invalidated_by_endpoint_change() {
+        let _env = IsolatedEnv::lock("consent-invalidate");
+        clear_cloud_consent_for_test();
+        save_config_inner(&consent_test_cfg()).unwrap();
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["required"], false);
+        // Repoint the endpoint: the fingerprint changes, consent is void.
+        let mut cfg = load_config_inner();
+        cfg.providers
+            .iter_mut()
+            .find(|p| p.id == "consent-prov")
+            .unwrap()
+            .endpoint = "https://consent.example.com/v2".to_string();
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["required"], true, "endpoint change must re-require consent");
+        assert_eq!(v["destination"], "https://consent.example.com/v2");
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "consent-prov", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("consent_required"));
+    }
+
+    #[test]
+    fn cloud_consent_revoke_and_delete_credential_clear_grant() {
+        let _env = IsolatedEnv::lock("consent-revoke");
+        clear_cloud_consent_for_test();
+        save_config_inner(&consent_test_cfg()).unwrap();
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["granted"], true);
+        llm_cloud_consent_revoke("consent-prov".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["granted"], false);
+        // Deleting a credential also drops consent.
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["granted"], true);
+        llm_delete_provider_credential("consent-prov".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["granted"], false);
+    }
+
+    #[test]
+    fn cloud_consent_does_not_bypass_local_only() {
+        let _env = IsolatedEnv::lock("consent-local-only");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            t.privacy = Some(Privacy::LocalOnly);
+            t.cloud_policy = Some(CloudPolicy::AskOnce);
+        }
+        save_config_inner(&cfg).unwrap();
+        // A grant is accepted at the binding level...
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        // ...but LocalOnly still blocks the cloud endpoint (grant is not a bypass).
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "consent-prov", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("PrivacyPolicyViolation"), "got: {}", err);
+    }
+
+    #[test]
+    fn chat_preflight_consent_error_carries_safe_binding() {
+        // The error must identify provider + canonical destination, never a secret.
+        let mut cfg = consent_test_cfg();
+        if let Some(p) = cfg.providers.iter_mut().find(|p| p.id == "consent-prov") {
+            p.endpoint = "https://consent.example.com/v1?token=SECRET#frag".to_string();
+        }
+        let err =
+            chat_preflight(&cfg, "consent-prov", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.starts_with("consent_required: consent-prov|https://consent.example.com/v1"));
+        assert!(!err.contains("SECRET"));
+        assert!(!err.contains("frag"));
     }
 
     #[test]

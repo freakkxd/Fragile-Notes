@@ -63,6 +63,7 @@ function mockChat(registry: unknown[]) {
       candidates: [], config: chatConfig(),
     }),
     llm_models_list: JSON.stringify(registry),
+    llm_cloud_consent_status: JSON.stringify({ provider_id: 'openai', task_profile_id: 'task-chat', destination: 'https://api.openai.com/v1', granted: true, required: false }),
   })
 }
 
@@ -163,6 +164,7 @@ describe('cloud_remote_not_filesystem_path', () => {
         candidates: [], config: chatConfig(),
       }),
       llm_models_list: JSON.stringify([]),
+      llm_cloud_consent_status: JSON.stringify({ provider_id: 'openai', task_profile_id: 'task-chat', destination: 'https://api.openai.com/v1', granted: true, required: false }),
       llm_chat_universal: 'cloud ok',
     })
     await user.click(screen.getByRole('button', { name: 'Отправить' }))

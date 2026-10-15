@@ -563,3 +563,70 @@ export async function llmRuntimeRestart(runtimeId: string): Promise<string> { co
 export async function llmTaskRun(taskProfileId: string, messages: {role:string,content:string}[]): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_run', { taskProfileId, messages }) as string }
 export async function llmTaskCancel(runId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_cancel', { runId }) as string }
 export async function llmTaskStatus(runId: string): Promise<string> { const inv=getInvoke(); if(!inv) throw new Error('no tauri'); return await inv('llm_task_status', { runId }) as string }
+
+// ---------- Package 12: OpenRouter browser connect + AskOnce consent ----------
+// The frontend only ever sees safe status here; the OAuth code, PKCE verifier
+// and issued key stay entirely inside the backend.
+
+export type OpenRouterOauthState = 'pending' | 'processing' | 'connected' | 'cancelled' | 'failed' | 'expired'
+
+export interface OpenRouterOauthStart {
+  tx_id: string
+  auth_url: string
+  port: number
+}
+
+export interface OpenRouterOauthStatus {
+  tx_id: string
+  status: OpenRouterOauthState
+  provider_id: string
+  destination: string
+  error?: string | null
+}
+
+export interface CloudConsentStatus {
+  provider_id: string
+  task_profile_id: string
+  destination: string
+  granted: boolean
+  required: boolean
+}
+
+/** Begin a browser authorization transaction. Returns the URL to open. */
+export async function llmOpenRouterOauthStart(providerId: string): Promise<OpenRouterOauthStart> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  const raw = await inv('llm_openrouter_oauth_start', { providerId }) as string
+  return JSON.parse(raw) as OpenRouterOauthStart
+}
+
+/** Poll a transaction. Never returns code/verifier/key. */
+export async function llmOpenRouterOauthStatus(txId: string): Promise<OpenRouterOauthStatus> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  const raw = await inv('llm_openrouter_oauth_status', { txId }) as string
+  return JSON.parse(raw) as OpenRouterOauthStatus
+}
+
+/** Cancel a pending transaction. Idempotent; never reverts a connected tx. */
+export async function llmOpenRouterOauthCancel(txId: string): Promise<string> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  return await inv('llm_openrouter_oauth_cancel', { txId }) as string
+}
+
+/** Read the AskOnce consent state for a provider+profile binding. */
+export async function llmCloudConsentStatus(providerId: string, taskProfileId: string): Promise<CloudConsentStatus> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  const raw = await inv('llm_cloud_consent_status', { providerId, taskProfileId }) as string
+  return JSON.parse(raw) as CloudConsentStatus
+}
+
+/** Grant session consent for the exact provider+destination+profile binding. */
+export async function llmCloudConsentGrant(providerId: string, taskProfileId: string): Promise<void> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  await inv('llm_cloud_consent_grant', { providerId, taskProfileId })
+}
+
+/** Revoke every consent grant for a provider. */
+export async function llmCloudConsentRevoke(providerId: string): Promise<void> {
+  const inv = getInvoke(); if (!inv) throw new Error('no tauri')
+  await inv('llm_cloud_consent_revoke', { providerId })
+}

@@ -63,6 +63,7 @@ function mockConfig(taskPrivacy?: string, chatImpl?: (cmd: string, args?: Record
       { id: 'model-abc', provider_id: 'local', filename: 'qwen.gguf', state: 'Present', size_bytes: 1000 },
     ]),
   }
+  fixtures['llm_cloud_consent_status'] = JSON.stringify({ provider_id: 'openai', task_profile_id: 'task-chat', destination: 'https://api.openai.com/v1', granted: true, required: false })
   if (chatImpl) fixtures['llm_chat_universal'] = chatImpl
   installTauriMock(fixtures)
 }

@@ -17,8 +17,9 @@ use llm::{
     llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
     llm_runtime_stop, llm_save_config, llm_save_config_confirmed, llm_save_pipeline, llm_scan_models, llm_set_active_model,
     llm_set_provider_credential, llm_start_config_recovery, llm_task_cancel, llm_task_run, llm_task_status, llm_test_provider,
-    llm_discover_models,
+    llm_discover_models, llm_cloud_consent_status, llm_cloud_consent_grant, llm_cloud_consent_revoke,
 };
+use llm::auth::openrouter::{llm_openrouter_oauth_start, llm_openrouter_oauth_status, llm_openrouter_oauth_cancel};
 use llm::models::{llm_models_list, llm_models_scan};
 use llm::download::{llm_download_cancel, llm_download_list, llm_download_pause, llm_download_resume, llm_download_start, llm_download_status};
 use tasks::{tasks_archive, tasks_create, tasks_list, tasks_update_status};
@@ -336,6 +337,12 @@ fn main() {
             llm_has_provider_credential,
             llm_set_provider_credential,
             llm_delete_provider_credential,
+            llm_cloud_consent_status,
+            llm_cloud_consent_grant,
+            llm_cloud_consent_revoke,
+            llm_openrouter_oauth_start,
+            llm_openrouter_oauth_status,
+            llm_openrouter_oauth_cancel,
             llm_runtime_list,
             llm_runtime_start,
             llm_runtime_stop,

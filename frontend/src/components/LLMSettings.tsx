@@ -64,6 +64,11 @@ export default function LLMSettings() {
   const [simpleModel, setSimpleModel] = useState<string>('')
   const [scopeFilter, setScopeFilter] = useState<'all'|'local'|'cloud'>('all')
   const [saving, setSaving] = useState(false)
+  // OpenRouter browser-connect transactions, keyed by provider id. The
+  // frontend only ever holds a tx id + safe status; the code/verifier/key stay
+  // in the backend.
+  const [orOauth, setOrOauth] = useState<Record<string, { txId?: string; status?: llm.OpenRouterOauthState; destination?: string; error?: string }>>({})
+  const orPoll = useRef<Record<string, number>>({})
   const [showIssueDetails, setShowIssueDetails] = useState(false)
   const statusTimer = useRef<number | null>(null)
   // Discovery lifecycle: a monotonic generation guards every publish path so
@@ -130,7 +135,13 @@ export default function LLMSettings() {
   // Unmount: stop publishing and invalidate any in-flight discovery.
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false; discoverGen.current += 1 }
+    return () => {
+      mountedRef.current = false
+      discoverGen.current += 1
+      // Stop any OpenRouter status polling; the backend tx keeps its own TTL.
+      Object.values(orPoll.current).forEach((t) => window.clearTimeout(t))
+      orPoll.current = {}
+    }
   }, [])
 
   const changeMode = (m: SettingsMode) => { setMode(m); saveMode(m) }
@@ -263,6 +274,59 @@ export default function LLMSettings() {
   const refreshKeyring = async (id: string) => {
     try { setKeyring(s => ({...s, [id]: undefined})); const v = await llm.llmHasProviderCredential(id); setKeyring(s => ({...s, [id]: v})) }
     catch { setKeyring(s => ({...s, [id]: undefined})) }
+  }
+
+  const patchOrOauth = (pid: string, patch: Partial<{ txId?: string; status?: llm.OpenRouterOauthState; destination?: string; error?: string }>) => {
+    setOrOauth(s => ({ ...s, [pid]: { ...(s[pid] ?? {}), ...patch } }))
+  }
+
+  // Poll a transaction to a terminal state. Stops on connected/cancelled/
+  // failed/expired or after a safety deadline (the backend TTL is the real cap).
+  const pollOrOauth = (pid: string, txId: string, deadline: number) => {
+    const tick = async () => {
+      if (!mountedRef.current) return
+      try {
+        const st = await llm.llmOpenRouterOauthStatus(txId)
+        if (!mountedRef.current) return
+        patchOrOauth(pid, { txId, status: st.status, destination: st.destination, error: st.error ?? undefined })
+        if (st.status === 'connected') {
+          await refreshKeyring(pid)
+          return
+        }
+        if (st.status === 'pending' || st.status === 'processing') {
+          if (Date.now() < deadline) {
+            orPoll.current[pid] = window.setTimeout(tick, 1500)
+          } else {
+            void cancelOrOauth(pid, txId)
+          }
+        }
+      } catch (e) {
+        if (!mountedRef.current) return
+        patchOrOauth(pid, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+    orPoll.current[pid] = window.setTimeout(tick, 1200)
+  }
+
+  const startOrOauth = async (pid: string) => {
+    if (!mountedRef.current) return
+    try {
+      const s = await llm.llmOpenRouterOauthStart(pid)
+      if (!mountedRef.current) return
+      patchOrOauth(pid, { txId: s.tx_id, status: 'pending', error: undefined, destination: undefined })
+      await openExternal(s.auth_url)
+      pollOrOauth(pid, s.tx_id, Date.now() + 6 * 60 * 1000)
+    } catch (e) {
+      patchOrOauth(pid, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  const cancelOrOauth = async (pid: string, txIdOverride?: string) => {
+    const t = orPoll.current[pid]
+    if (t) { window.clearTimeout(t); delete orPoll.current[pid] }
+    const txId = txIdOverride ?? orOauth[pid]?.txId
+    if (txId) { try { await llm.llmOpenRouterOauthCancel(txId) } catch { /* best effort */ } }
+    patchOrOauth(pid, { status: 'cancelled', txId: undefined })
   }
 
   const patchProvider = (id: string, patch: Partial<llm.Provider>) => {
@@ -522,10 +586,37 @@ export default function LLMSettings() {
                       {!isLocalKind(p.kind) ? (
                         <SecretReferenceField hasSecret={keyring[p.id]}
                           onReplace={async (s)=>{ await llm.llmSetProviderCredential(p.id, s); await refreshKeyring(p.id) }}
-                          onDelete={async ()=>{ await llm.llmDeleteProviderCredential(p.id); await refreshKeyring(p.id) }} />
+                          onDelete={async ()=>{ await llm.llmDeleteProviderCredential(p.id); await refreshKeyring(p.id); patchOrOauth(p.id, { status: undefined, txId: undefined, error: undefined }) }} />
                       ) : (
                         <div style={{fontSize:11, color:'var(--muted)'}}>Локальный провайдер — ключ не нужен.</div>
                       )}
+                      {p.kind === 'open_router' && (() => {
+                        const st = orOauth[p.id] ?? {}
+                        const waiting = st.status === 'pending' || st.status === 'processing'
+                        return (
+                          <div style={{display:'flex', flexDirection:'column', gap:6, padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8}}>
+                            <div style={{fontSize:12, fontWeight:600}}>Вход через браузер (OAuth)</div>
+                            <div style={{fontSize:11, color:'var(--muted)'}}>
+                              Откроется официальная страница авторизации OpenRouter. Ключ создаётся там и сохраняется в системном хранилище — приложение его не отображает и не пересылает.
+                            </div>
+                            <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                              <button type="button" onClick={()=>startOrOauth(p.id)} disabled={waiting}
+                                style={{padding:'6px 10px', background:'var(--accent)', color:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:12, opacity: waiting ? 0.6 : 1}}>
+                                {waiting ? 'Ожидание авторизации…' : 'Подключить через браузер'}
+                              </button>
+                              {waiting && (
+                                <button type="button" onClick={()=>cancelOrOauth(p.id)} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>Отмена</button>
+                              )}
+                              {st.status === 'connected' && <span style={{fontSize:11, color:'var(--accent)'}}>Подключено</span>}
+                              {(st.status === 'cancelled' || st.status === 'expired') && <span style={{fontSize:11, color:'var(--muted)'}}>Не подключено</span>}
+                              {st.status === 'failed' && <span style={{fontSize:11, color:'#e57373'}}>Ошибка: {st.error ?? 'не удалось'}</span>}
+                            </div>
+                            {waiting && st.destination && (
+                              <div style={{fontSize:11, color:'var(--muted)'}}>Назначение: <code>{st.destination}</code></div>
+                            )}
+                          </div>
+                        )
+                      })()}
                       {p.kind === 'ollama' && (() => {
                         const d = discover[p.id] ?? { state: 'idle' as const, models: [] as string[], error: '' }
                         const currentDefault = p.default_model || p.model || ''

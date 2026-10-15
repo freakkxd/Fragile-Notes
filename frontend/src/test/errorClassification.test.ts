@@ -33,8 +33,7 @@ describe('error_classification_safe', () => {
 
   it('maps backend consent_required to an actionable cloud-consent message', () => {
     const out = classifyError(new Error('consent_required: task-chat policy AskOnce'))
-    expect(out).toMatch(/согласие на облако/i)
-    expect(out).toMatch(/Приватность/)
+    expect(out).toMatch(/согласие/i)
   })
 
   it('maps a missing task profile to a safe settings hint', () => {

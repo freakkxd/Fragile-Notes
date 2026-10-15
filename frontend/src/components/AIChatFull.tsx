@@ -11,7 +11,7 @@ export function classifyError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
   const low = raw.toLowerCase()
   if (low.includes('consent_required')) {
-    return 'Требуется согласие на облако: профиль task-chat использует политику AskOnce. Разрешите облако в Настройки → Приватность (cloud_allowed) или выберите локального провайдера.'
+    return 'Требуется согласие на отправку в облако: повторите отправку и подтвердите запрос согласия.'
   }
   if (low.includes('task profile not found')) {
     return 'Профиль задачи не найден в конфигурации. Проверьте Настройки → Приватность.'
@@ -88,6 +88,11 @@ export default function AIChatFull() {
   const [privacy, setPrivacy] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [blocked, setBlocked] = useState('')
+  // AskOnce consent gate: when the backend reports `required`, we surface a
+  // real pre-send dialog instead of a static error. The draft is preserved and
+  // no message/request is created until the user confirms.
+  const [pendingConsent, setPendingConsent] = useState<{ providerId: string; providerName: string; model: string; text: string; destination: string } | null>(null)
+  const [consentChecking, setConsentChecking] = useState(false)
   const [registry, setRegistry] = useState<llm.RegistryModel[]>([])
   // Config lifecycle: never render a provider-shaped model control before
   // the config is resolved (initial null must not look like cloud).
@@ -275,8 +280,36 @@ export default function AIChatFull() {
     if (rid) { void llm.llmChatCancel(rid).catch(() => { /* best effort */ }) }
   }
 
+  // Actual dispatch. Only ever called once per user-confirmed message, so a
+  // cancelled consent dialog cannot create a duplicate message/request.
+  const doSend = async (text: string, pid: string, mdl: string) => {
+    const u: Msg = { role: 'user', content: text }
+    const history = [...msgs, u]
+    const myId = (reqSeq.current += 1)
+    const rid = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? (crypto as Crypto).randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${myId}`
+    const requestId = rid
+    activeReqId.current = requestId
+    const isCurrent = () => mounted.current && reqSeq.current === myId
+    setMsgs(history)
+    setInput('')
+    setBusy(true)
+    try {
+      const res = await llm.llmChatUniversal(pid, mdl, history.map(m=>({role:m.role, content:m.content})), requestId)
+      if (!isCurrent()) return
+      // Local legacy providers return raw JSON; cloud returns normalized text.
+      setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res) }])
+    } catch (e) {
+      if (!isCurrent()) return
+      setMsgs((m)=>[...m, {role:'assistant', content: classifyError(e)}])
+    } finally {
+      if (isCurrent()) { setBusy(false); activeReqId.current = null }
+    }
+  }
+
   const send = async () => {
-    if (!input.trim() || busy) return
+    if (!input.trim() || busy || consentChecking) return
     setBlocked('')
     if (configState !== 'ready') {
       setBlocked(configState === 'loading' ? 'Дождитесь загрузки конфигурации.' : 'Конфигурация недоступна. Нажмите «Повторить» выше.')
@@ -319,30 +352,51 @@ export default function AIChatFull() {
         return
       }
     }
-    const u: Msg = { role: 'user', content: input }
-    const history = [...msgs, u]
-    const myId = (reqSeq.current += 1)
-    const rid = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-      ? (crypto as Crypto).randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${myId}`
-    const requestId = rid
-    activeReqId.current = requestId
-    const isCurrent = () => mounted.current && reqSeq.current === myId
-    setMsgs(history)
-    setInput('')
-    setBusy(true)
-    try {
-      const res = await llm.llmChatUniversal(providerId, model, history.map(m=>({role:m.role, content:m.content})), requestId)
-      if (!isCurrent()) return
-      // Local legacy providers return raw JSON; cloud returns normalized text.
-      setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res) }])
-    } catch (e) {
-      if (!isCurrent()) return
-      setMsgs((m)=>[...m, {role:'assistant', content: classifyError(e)}])
-    } finally {
-      if (isCurrent()) { setBusy(false); activeReqId.current = null }
+    // Cloud AskOnce gate: query the backend consent binding before dispatch.
+    // A `required` result opens the dialog; nothing is sent or cleared.
+    if (selected && !isLocalKind(selected.kind)) {
+      setConsentChecking(true)
+      try {
+        const st = await llm.llmCloudConsentStatus(providerId, 'task-chat')
+        if (!mounted.current) return
+        if (st.required) {
+          setPendingConsent({ providerId, providerName: selected.name, model, text: input, destination: st.destination })
+          return
+        }
+      } catch (e) {
+        // Never silently bypass the consent check on a backend error.
+        setBlocked('Не удалось проверить согласие на отправку в облако: ' + (e instanceof Error ? e.message : String(e)))
+        return
+      } finally {
+        setConsentChecking(false)
+      }
     }
+    await doSend(input, providerId, model)
   }
+
+  // Confirm consent: re-verify the provider/model/draft snapshot is still
+  // current, grant the binding, then perform the single dispatch.
+  const confirmConsent = async () => {
+    const pc = pendingConsent
+    if (!pc) return
+    if (pc.providerId !== providerId || pc.model !== model || pc.text !== input) {
+      setPendingConsent(null)
+      setBlocked('Провайдер, модель или текст изменились — отправьте сообщение заново.')
+      return
+    }
+    try {
+      await llm.llmCloudConsentGrant(pc.providerId, 'task-chat')
+    } catch (e) {
+      setBlocked('Не удалось сохранить согласие: ' + (e instanceof Error ? e.message : String(e)))
+      return
+    }
+    if (!mounted.current) return
+    setPendingConsent(null)
+    await doSend(pc.text, pc.providerId, pc.model)
+  }
+
+  // Cancel keeps the draft untouched and sends nothing.
+  const cancelConsent = () => setPendingConsent(null)
 
   // Collapsed/expanded is a max-width + chrome change; height stays natural
   // so every control is always inside the visible card.
@@ -467,6 +521,23 @@ export default function AIChatFull() {
           </div>
         </div>
       </div>
+      {pendingConsent && (
+        <div role="dialog" aria-modal="true" aria-label="Согласие на отправку в облако" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:12, padding:16, maxWidth:460, width:'90%', fontSize:13, display:'flex', flexDirection:'column', gap:10 }}>
+            <div style={{ fontWeight:700 }}>Отправка в облако — требуется согласие</div>
+            <div>Провайдер: <b>{pendingConsent.providerName}</b></div>
+            <div>Назначение: <code>{pendingConsent.destination}</code></div>
+            <div style={{ color:'var(--muted)' }}>
+              В облако будет отправлена история диалога, включая это сообщение. Запрос не будет выполнен до явного подтверждения.
+              Согласие привязано к провайдеру, назначению и профилю task-chat и действует для этой сессии.
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button type="button" onClick={cancelConsent} style={{ padding:'6px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6 }}>Отмена</button>
+              <button type="button" onClick={confirmConsent} style={{ padding:'6px 12px', background:'var(--accent)', color:'#fff', border:'1px solid var(--border)', borderRadius:6 }}>Разрешить и отправить</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
