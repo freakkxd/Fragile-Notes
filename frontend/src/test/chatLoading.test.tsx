@@ -80,8 +80,8 @@ describe('chat_loading_no_premature_cloud_input', () => {
     expect(screen.queryByRole('combobox', { name: 'Модель' })).toBeNull()
     // Both the disabled provider select and the model placeholder show it.
     expect(screen.getAllByText('Загрузка…').length).toBe(2)
-    const prov = screen.getByLabelText('Провайдер') as HTMLSelectElement
-    expect(prov.disabled).toBe(true)
+    const prov = screen.getByLabelText('Провайдер')
+    expect(prov.getAttribute('aria-disabled')).toBe('true')
     cfg.resolve(reportFor([localProvider()]))
     reg.resolve(JSON.stringify([]))
     // Local with empty registry: hint, still no cloud input.
@@ -104,8 +104,8 @@ describe('chat_loading_local_registry_select', () => {
     reg.resolve(JSON.stringify([
       { id: 'm1', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 },
     ]))
-    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    expect(combo.value).toBe('m1')
+    const combo = await screen.findByRole('combobox', { name: 'Модель' })
+    expect(combo.textContent).toContain('a.gguf')
     expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
   })
 })
@@ -189,8 +189,8 @@ describe('chat_retry_stale_registry_ignored', () => {
     // The registry request for B is issued by B's continuation: wait for it.
     await waitFor(() => expect(regQ.pending.length).toBe(2))
     regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
-    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    expect(combo.value).toBe('mB')
+    const combo = await screen.findByRole('combobox', { name: 'Модель' })
+    expect(combo.textContent).toContain('b.gguf')
     // Stale A registry resolves late with a different record: must be ignored.
     regQ.pending[0].resolve(
       JSON.stringify([{ id: 'mA', provider_id: 'local', filename: 'a.gguf', state: 'Present', size_bytes: 1 }]),
@@ -198,8 +198,11 @@ describe('chat_retry_stale_registry_ignored', () => {
     // Flush: one macrotask drains the whole stale chain, then assert the
     // stale update never landed.
     await flushAsync()
-    expect((screen.getByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value).toBe('mB')
+    expect(screen.getByRole('combobox', { name: 'Модель' }).textContent).toContain('b.gguf')
+    // Opening the picked list is the only real way to observe eligible ids.
+    await user.click(screen.getByRole('combobox', { name: 'Модель' }))
     expect(screen.queryByRole('option', { name: 'a.gguf' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'b.gguf' })).toBeTruthy()
     expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
   })
 })
@@ -232,8 +235,9 @@ describe('chat_retry_stale_registry_mirror_order', () => {
     cfgQ.pending[1].resolve(reportFor([localProvider()]))
     await waitFor(() => expect(regQ.pending.length).toBe(2))
     regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
-    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    expect(combo.value).toBe('mB')
+    const combo = await screen.findByRole('combobox', { name: 'Модель' })
+    expect(combo.textContent).toContain('b.gguf')
+    await user.click(combo)
     expect(screen.queryByRole('option', { name: 'a.gguf' })).toBeNull()
   })
 })
@@ -262,13 +266,12 @@ describe('chat_retry_stale_registry_error_ignored', () => {
     cfgQ.pending[1].resolve(reportFor([localProvider()]))
     await waitFor(() => expect(regQ.pending.length).toBe(2))
     regQ.pending[1].resolve(JSON.stringify([geminiRecord()]))
-    expect(
-      (await screen.findByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value,
-    ).toBe('mB')
+    expect(await screen.findByRole('combobox', { name: 'Модель' })).toBeTruthy()
     // Stale A registry rejects late: must be ignored, select stays intact.
     regQ.pending[0].reject(new Error('boom-stale-registry'))
     await flushAsync()
-    expect((screen.getByRole('combobox', { name: 'Модель' }) as HTMLSelectElement).value).toBe('mB')
+    expect(screen.getByRole('combobox', { name: 'Модель' }).textContent).toContain('b.gguf')
+    await user.click(screen.getByRole('combobox', { name: 'Модель' }))
     expect(screen.queryByRole('option', { name: 'b.gguf' })).toBeTruthy()
     expect(screen.queryByText(/Не удалось загрузить конфигурацию/)).toBeNull()
   })
@@ -301,6 +304,7 @@ describe('chat_typed_failure_not_a_fake_cloud_control', () => {
 
 describe('chat_missing_first_run_defaults_to_local', () => {
   it('selects the local provider on a missing first-run report, never cloud', async () => {
+    const user = userEvent.setup()
     // Backend default config: local enabled, cloud providers disabled.
     installTauriMock({
       llm_get_config_report: reportFor(
@@ -313,10 +317,12 @@ describe('chat_missing_first_run_defaults_to_local', () => {
       llm_models_list: JSON.stringify([]),
     })
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    expect(combo.value).toBe('local')
+    const combo = await screen.findByLabelText('Провайдер')
+    expect(combo.textContent).toContain('Local')
     // Missing must not render the cloud model text input.
     expect(screen.queryByPlaceholderText('модель (пусто = default провайдера)')).toBeNull()
+    await user.click(combo)
+    expect(screen.getByRole('option', { name: /Local \(local\)/ })).toBeTruthy()
     expect(screen.queryByRole('option', { name: /OpenAI/ })).toBeNull()
   })
 })

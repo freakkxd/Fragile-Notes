@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as llm from '../lib/llm'
 import { isLocalKind, ollamaDiscoverErrorText } from './settings/types'
+import ComposerMenu from './chat/ComposerMenu'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -97,6 +98,11 @@ export default function AIChatFull() {
   // latest one may publish state. mounted guards unmount, generation guards
   // staleness between overlapping attempts on a live component.
   const loadGen = useRef(0)
+  // Composer presentation state: collapsed until focused / has content.
+  // The card itself uses natural height (container decides the space), only
+  // the textarea grows — no fixed pixel height that can clip its controls.
+  const [focused, setFocused] = useState(false)
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   const load = async () => {
     const gen = (loadGen.current += 1)
@@ -204,6 +210,15 @@ export default function AIChatFull() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registry, providerId])
 
+  // Auto-grow the textarea up to the reference cap (160px), min one line.
+  useEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const next = Math.min(160, Math.max(24, el.scrollHeight))
+    el.style.height = `${next}px`
+  }, [input])
+
   const onProvider = (id: string) => {
     setProviderId(id)
     const p = providers.find((x) => x.id === id) ?? null
@@ -298,53 +313,69 @@ export default function AIChatFull() {
     }
   }
 
+  // Collapsed/expanded is a max-width + chrome change; height stays natural
+  // so every control is always inside the visible card.
+  const expanded = focused || input.trim().length > 0
+
+  // Provider/model pickers. Data is exclusively project config + real
+  // discovery; cloud keeps the existing free-text model input because the
+  // project exposes no remote model list.
+  const modelControl = (() => {
+    if (configState !== 'ready') {
+      return <span className="ai-chip">{configState === 'loading' ? 'Загрузка…' : '—'}</span>
+    }
+    if (isOllama) {
+      if (ollamaState === 'loading' || ollamaState === 'idle') {
+        return <span className="ai-chip">Загрузка моделей Ollama…</span>
+      }
+      if (ollamaState === 'error') {
+        return (
+          <span className="ai-chip ai-chip-error">
+            {ollamaError}{' '}
+            <button type="button" className="ai-mini-btn" onClick={() => selected && discoverOllama(selected.id)}>↻ Обновить</button>
+          </span>
+        )
+      }
+      if (ollamaModels.length === 0) {
+        return (
+          <span className="ai-chip">
+            Нет моделей — выполните <code>ollama pull &lt;name&gt;</code>.{' '}
+            <button type="button" className="ai-mini-btn" onClick={() => selected && discoverOllama(selected.id)}>↻ Обновить</button>
+          </span>
+        )
+      }
+      return (
+        <>
+          <ComposerMenu ariaLabel="Модель" options={ollamaModels.map((mid) => ({ id: mid, label: mid }))} value={model} onSelect={setModel}>
+            <span className="ai-menu-label">{model || 'Модель'}</span>
+          </ComposerMenu>
+          <button type="button" className="ai-mini-btn" aria-label="↻ Обновить" onClick={() => selected && discoverOllama(selected.id)}>↻</button>
+        </>
+      )
+    }
+    if (isLocal) {
+      if (!registryLoaded) return <span className="ai-chip">Загрузка моделей…</span>
+      if (eligible.length === 0) {
+        return <span className="ai-chip">Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».</span>
+      }
+      return (
+        <ComposerMenu ariaLabel="Модель" options={eligible.map((r) => ({ id: r.id, label: r.filename }))} value={model} onSelect={setModel}>
+          <span className="ai-menu-label">{eligible.find((r) => r.id === model)?.filename ?? (model || 'Модель')}</span>
+        </ComposerMenu>
+      )
+    }
+    // Cloud: the project exposes no real remote model list — keep the field.
+    return (
+      <input className="ai-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель" />
+    )
+  })()
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+    <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
+      <div className="ai-chat-head">
         <span style={{ fontWeight:700 }}>AI Чат{selected ? ` — ${selected.name}` : ''}</span>
-        <select value={providerId} onChange={(e)=>onProvider(e.target.value)} aria-label="Провайдер" disabled={configState !== 'ready'}
-          style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:220 }}>
-          {configState === 'loading' && <option value="">Загрузка…</option>}
-          {configState !== 'loading' && providers.length === 0 && <option value="">Нет включённых провайдеров</option>}
-          {providers.map((p) => <option key={p.id} value={p.id}>{p.name} ({isLocalKind(p.kind) ? 'local' : 'cloud'})</option>)}
-        </select>
-        {configState !== 'ready' ? (
-          <span style={{ fontSize:11, color:'var(--muted)' }}>{configState === 'loading' ? 'Загрузка…' : '—'}</span>
-        ) : isOllama ? (
-          ollamaState === 'loading' || ollamaState === 'idle' ? (
-            <span style={{ fontSize:11, color:'var(--muted)' }}>Загрузка моделей Ollama…</span>
-          ) : ollamaState === 'error' ? (
-            <span style={{ fontSize:11, color:'var(--muted)' }}>
-              {ollamaError}{' '}
-              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'2px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}>↻ Обновить</button>
-            </span>
-          ) : ollamaModels.length === 0 ? (
-            <span style={{ fontSize:11, color:'var(--muted)' }}>
-              Нет моделей — выполните <code>ollama pull &lt;name&gt;</code>.{' '}
-              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'2px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}>↻ Обновить</button>
-            </span>
-          ) : (
-            <>
-              <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
-                style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>
-                {ollamaModels.map((mid) => <option key={mid} value={mid}>{mid}</option>)}
-              </select>
-              <button onClick={()=>selected && discoverOllama(selected.id)} style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>↻</button>
-            </>
-          )
-        ) : isLocal ? (
-          eligible.length > 0 ? (            <select value={model} onChange={(e)=>setModel(e.target.value)} aria-label="Модель"
-              style={{ padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, maxWidth:260 }}>
-              {eligible.map((r) => <option key={r.id} value={r.id}>{r.filename}</option>)}
-            </select>
-          ) : (
-            <span style={{ fontSize:11, color:'var(--muted)' }}>{registryLoaded ? 'Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».' : 'Загрузка моделей…'}</span>
-          )
-        ) : (
-          <input value={model} onChange={(e)=>setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель"
-            style={{ padding:'4px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, width:200 }} />
-        )}
-        <button onClick={check} style={{ marginLeft:'auto', padding:'4px 8px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>Статус</button>
+        <span style={{ flex:1 }} />
+        <button onClick={check} className="ai-ghost-btn">Статус</button>
         <span style={{ fontSize:11, color:'var(--muted)' }}>{status}</span>
       </div>
       {blocked && <div role="alert" style={{ margin:'8px 12px 0', padding:'8px 10px', background:'rgba(255,180,80,.08)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}>{blocked}</div>}
@@ -354,16 +385,56 @@ export default function AIChatFull() {
           <button onClick={load} style={{ padding:'4px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>↻ Повторить</button>
         </div>
       )}
-      <div style={{ flex:1, overflow:'auto', padding:12, display:'flex', flexDirection:'column', gap:8 }}>
+      <div style={{ flex:1, minHeight:0, overflow:'auto', padding:12, display:'flex', flexDirection:'column', gap:8 }}>
         {msgs.map((m,i)=> (
           <div key={i} style={{ alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'80%', padding:'8px 12px', borderRadius:12, background: m.role==='user'?'rgba(130,168,255,.14)':'var(--panel-2)', border:'1px solid var(--border)', fontSize:13 }}>{m.content}</div>
         ))}
       </div>
-      <div style={{ padding:10, borderTop:'1px solid var(--border)', display:'flex', gap:8 }}>
-        <input value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=> e.key==='Enter' && send()} placeholder="Сообщение провайдеру…" style={{ flex:1, padding:'10px 12px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:10, color:'var(--fg)', fontSize:12 }} />
-        {busy
-          ? <button onClick={stop} style={{ padding:'10px 14px', background:'rgba(255,80,80,.85)', color:'#fff', border:0, borderRadius:10, fontWeight:700 }}>Стоп</button>
-          : <button onClick={send} style={{ padding:'10px 14px', background:'var(--accent)', border:0, borderRadius:10, fontWeight:700 }}>Отправить</button>}
+      <div className={`ai-composer${expanded ? ' is-expanded' : ' is-collapsed'}`}>
+        <div className="ai-card">
+          <textarea
+            ref={taRef}
+            className="ai-input"
+            value={input}
+            rows={1}
+            placeholder="Сообщение провайдеру…"
+            aria-label="Сообщение провайдеру"
+            onChange={(e) => setInput(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                send()
+              }
+            }}
+          />
+          <div className="ai-actions">
+            <div className="ai-left">
+              <ComposerMenu
+                ariaLabel="Провайдер"
+                options={providers.map((p) => ({ id: p.id, label: `${p.name} (${isLocalKind(p.kind) ? 'local' : 'cloud'})` }))}
+                value={providerId}
+                onSelect={onProvider}
+                disabled={configState !== 'ready' || providers.length === 0}
+              >
+                <span className="ai-menu-label">
+                  {configState === 'loading'
+                    ? 'Загрузка…'
+                    : providers.length === 0
+                      ? (configState === 'ready' ? 'Нет провайдеров' : '—')
+                      : selected?.name ?? 'Провайдер'}
+                </span>
+              </ComposerMenu>
+              {modelControl}
+            </div>
+            <div className="ai-right">
+              {busy
+                ? <button type="button" className="ai-send ai-stop" aria-label="Стоп" onClick={stop}><span aria-hidden="true">■</span></button>
+                : <button type="button" className="ai-send" aria-label="Отправить" onClick={send} disabled={!input.trim()}><span aria-hidden="true">↑</span></button>}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

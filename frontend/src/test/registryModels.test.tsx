@@ -68,8 +68,10 @@ function mockChat(registry: unknown[]) {
 
 describe('registry_present_onlySelectable', () => {
   it('offers only Present records of the selected provider', async () => {
+    const user = userEvent.setup()
     mockChat(mixedRegistry())
     render(<AIChatFull />)
+    await user.click(await screen.findByRole('combobox', { name: 'Модель' }))
     expect(await screen.findByRole('option', { name: 'qwen.gguf' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'second.gguf' })).toBeTruthy()
   })
@@ -91,22 +93,24 @@ describe('registry_order_deterministic', () => {
   })
 
   it('selects the first sorted record by default in chat', async () => {
+    const user = userEvent.setup()
     mockChat(shuffled)
     render(<AIChatFull />)
-    // NOTE: findByLabelText would match the initial cloud-branch input
-    // (rendered before config loads); combobox matches <select> only.
-    const combo = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    // Registry arrives async; the correction effect applies the default after.
-    await waitFor(() => expect(combo.value).toBe('model-aaa'))
-    const options = Array.from(combo.querySelectorAll('option')).map((o) => o.value)
-    expect(options).toEqual(['model-aaa', 'model-abc', 'model-def'])
+    // The composer shows the selected model's filename on the trigger.
+    const combo = await screen.findByRole('combobox', { name: 'Модель' })
+    await waitFor(() => expect(combo.textContent).toContain('aaa.gguf'))
+    await user.click(combo)
+    const options = screen.getAllByRole('option').map((o) => o.querySelector('.cm-opt-label')?.textContent)
+    expect(options).toEqual(['aaa.gguf', 'qwen.gguf', 'second.gguf'])
   })
 })
 
 describe('registry_missing_invalid_unselectable', () => {
   it('hides Missing/Invalid/Changed/Unverified and foreign-provider records', async () => {
+    const user = userEvent.setup()
     mockChat(mixedRegistry())
     render(<AIChatFull />)
+    await user.click(await screen.findByRole('combobox', { name: 'Модель' }))
     await screen.findByRole('option', { name: 'qwen.gguf' })
     for (const name of ['gone.gguf', 'broken.gguf', 'changed.gguf', 'new.gguf', 'cloud-only.gguf']) {
       expect(screen.queryByRole('option', { name })).toBeNull()
@@ -146,8 +150,8 @@ describe('cloud_remote_not_filesystem_path', () => {
     const user = userEvent.setup()
     mockChat([])
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    await user.selectOptions(combo, 'openai')
+    await user.click(await screen.findByLabelText('Провайдер'))
+    await user.click(await screen.findByRole('option', { name: /OpenAI \(cloud\)/ }))
     const model = screen.getByLabelText('Модель') as HTMLInputElement
     await user.clear(model)
     await user.type(model, 'models/gemini-2.0-flash')

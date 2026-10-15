@@ -53,8 +53,10 @@ describe('ollama chat discovery', () => {
       llm_chat_universal: () => JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
     })
     render(<AIChatFull />)
-    const modelSelect = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    expect(modelSelect.value).toBe('llama3.1:latest')
+    const modelSelect = await screen.findByRole('combobox', { name: 'Модель' })
+    expect(modelSelect.textContent).toContain('llama3.1:latest')
+    await user.click(modelSelect)
+    expect(screen.getByRole('option', { name: 'llama3.1:latest' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'qwen2.5:7b' })).toBeTruthy()
     await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'hi')
     await user.click(screen.getByRole('button', { name: 'Отправить' }))
@@ -63,6 +65,7 @@ describe('ollama chat discovery', () => {
   })
 
   it('does not use GGUF registry records for Ollama', async () => {
+    const user = userEvent.setup()
     installTauriMock({
       llm_get_config_report: JSON.stringify(reportCfg([provider({ id: 'ollama' })])),
       llm_models_list: JSON.stringify([
@@ -71,6 +74,7 @@ describe('ollama chat discovery', () => {
       llm_discover_models: JSON.stringify({ ok: true, models: ['llama3.1:latest'] }),
     })
     render(<AIChatFull />)
+    await user.click(await screen.findByRole('combobox', { name: 'Модель' }))
     await screen.findByRole('option', { name: 'llama3.1:latest' })
     expect(screen.queryByRole('option', { name: 'should-not-appear.gguf' })).toBeNull()
   })
@@ -88,6 +92,7 @@ describe('ollama chat discovery', () => {
     render(<AIChatFull />)
     await screen.findByText(/Сервер Ollama недоступен/)
     await user.click(screen.getByRole('button', { name: '↻ Обновить' }))
+    await user.click(await screen.findByRole('combobox', { name: 'Модель' }))
     expect(await screen.findByRole('option', { name: 'llama3.1:latest' })).toBeTruthy()
   })
 
@@ -119,9 +124,10 @@ describe('ollama chat discovery', () => {
       llm_discover_models: () => pending,
     })
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    expect(combo.value).toBe('ollama')
-    await user.selectOptions(combo, 'openai')
+    const combo = await screen.findByLabelText('Провайдер')
+    expect(combo.textContent).toContain('Ollama')
+    await user.click(combo)
+    await user.click(await screen.findByRole('option', { name: /OpenAI \(cloud\)/ }))
     release(JSON.stringify({ ok: true, models: ['late-model'] }))
     await new Promise((r) => setTimeout(r, 50))
     expect(screen.queryByRole('option', { name: 'late-model' })).toBeNull()

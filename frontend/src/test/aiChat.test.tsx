@@ -69,8 +69,10 @@ function mockConfig(taskPrivacy?: string, chatImpl?: (cmd: string, args?: Record
 
 describe('ai_chat_renders_enabled_providers', () => {
   it('lists enabled providers and hides disabled ones', async () => {
+    const user = userEvent.setup()
     mockConfig()
     render(<AIChatFull />)
+    await user.click(await screen.findByLabelText('Провайдер'))
     expect(await screen.findByRole('option', { name: /Local \(local\)/ })).toBeTruthy()
     expect(screen.getByRole('option', { name: /OpenAI \(cloud\)/ })).toBeTruthy()
     expect(screen.queryByRole('option', { name: /Dead/ })).toBeNull()
@@ -79,13 +81,16 @@ describe('ai_chat_renders_enabled_providers', () => {
 
 describe('ai_chat_default_local_selection', () => {
   it('selects local provider and first Present registry model by default', async () => {
+    const user = userEvent.setup()
     mockConfig()
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    expect(combo.value).toBe('local')
-    const model = (await screen.findByRole('combobox', { name: 'Модель' })) as HTMLSelectElement
-    expect(model.value).toBe('model-abc')
-    expect(screen.getByRole('option', { name: 'qwen.gguf' })).toBeTruthy()
+    const combo = await screen.findByLabelText('Провайдер')
+    expect(combo.textContent).toContain('Local')
+    const model = await screen.findByRole('combobox', { name: 'Модель' })
+    expect(model.textContent).toContain('qwen.gguf')
+    await user.click(model)
+    const opt = screen.getByRole('option', { name: 'qwen.gguf' })
+    expect(opt.getAttribute('aria-selected')).toBe('true')
   })
 })
 
@@ -109,8 +114,8 @@ describe('ai_chat_cloud_text_response_displayed', () => {
     const user = userEvent.setup()
     mockConfig(undefined, () => 'cloud plain answer')
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    await user.selectOptions(combo, 'openai')
+    await user.click(await screen.findByLabelText('Провайдер'))
+    await user.click(await screen.findByRole('option', { name: /OpenAI \(cloud\)/ }))
     await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'hi')
     await user.click(screen.getByRole('button', { name: 'Отправить' }))
     expect(await screen.findByText('cloud plain answer')).toBeTruthy()
@@ -126,8 +131,8 @@ describe('ai_chat_local_only_blocks_cloud_invoke', () => {
       return 'must not happen'
     })
     render(<AIChatFull />)
-    const combo = (await screen.findByLabelText('Провайдер')) as HTMLSelectElement
-    await user.selectOptions(combo, 'openai')
+    await user.click(await screen.findByLabelText('Провайдер'))
+    await user.click(await screen.findByRole('option', { name: /OpenAI \(cloud\)/ }))
     await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'hi')
     await user.click(screen.getByRole('button', { name: 'Отправить' }))
     expect(await screen.findByText(/Отправка заблокирована/)).toBeTruthy()
