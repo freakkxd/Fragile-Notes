@@ -760,6 +760,7 @@ struct TokenRecord {
 }
 static RECOVERY_TOKENS: Lazy<Mutex<HashMap<String, TokenRecord>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static CRED_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 const RECOVERY_TOKEN_TTL_SECS: u64 = 600;
 
 fn new_token_string() -> String {
@@ -1057,22 +1058,63 @@ pub fn llm_has_provider_credential(provider_id: String) -> Result<String, String
 #[tauri::command]
 pub fn llm_set_provider_credential(provider_id: String, secret: String) -> Result<String, String> {
     if secret.trim().is_empty() { return Err("empty secret".to_string()); }
-    set_keyring(&provider_id, &secret).map_err(|e| format!("keyring unavailable: {} — [Повторить][Настроить вручную][Отмена]", e))?;
-    // update config to have secret_ref
+    let pid = provider_id.clone();
+    let new_secret = secret.clone();
+    // Serialize credential mutations to reduce race window without blocking await
+    let _guard = CRED_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    // Snapshot previous state
+    let prev_has = has_keyring(&pid);
+    let prev_secret: Option<String> = if prev_has { get_keyring(&pid).ok() } else { None };
     let mut cfg = load_config_inner();
-    if let Some(pr) = cfg.providers.iter_mut().find(|p| p.id==provider_id) {
-        pr.auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: Some(secret_ref_for(&provider_id)), account_id: None });
-        save_config_inner(&cfg)?;
+    let prev_auth: Option<AuthRef> = cfg.providers.iter().find(|p| p.id==pid).and_then(|p| p.auth.clone());
+    // Write new credential
+    set_keyring(&pid, &new_secret).map_err(|e| format!("keyring unavailable: {} — [Повторить][Настроить вручную][Отмена]", e))?;
+    // Update config
+    let mut cfg2 = cfg.clone();
+    if let Some(pr) = cfg2.providers.iter_mut().find(|p| p.id==pid) {
+        pr.auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: Some(secret_ref_for(&pid)), account_id: None });
+    }
+    // Save config
+    match save_config_inner(&cfg2) {
+        Ok(_) => {},
+        Err(e) => {
+            // Compensation: restore previous state
+            if prev_has && prev_secret.is_some() {
+                let _ = set_keyring(&pid, prev_secret.as_ref().unwrap());
+            } else if !prev_has {
+                // Was new entry; try to remove newly created one
+                let _ = delete_keyring(&pid);
+            }
+            // Also attempt to restore config to original if we can
+            let _ = save_config_inner(&cfg);
+            return Err(format!("credential consistency error: {}", e));
+        }
     }
     Ok("saved to keyring".to_string())
 }
 #[tauri::command]
 pub fn llm_delete_provider_credential(provider_id: String) -> Result<String, String> {
-    delete_keyring(&provider_id)?;
-    let mut cfg = load_config_inner();
-    if let Some(pr) = cfg.providers.iter_mut().find(|p| p.id==provider_id) {
+    let pid = provider_id.clone();
+    let _guard = CRED_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let prev_has = has_keyring(&pid);
+    let prev_secret: Option<String> = if prev_has { get_keyring(&pid).ok() } else { None };
+    let cfg = load_config_inner();
+    let mut cfg_new = cfg.clone();
+    if let Some(pr) = cfg_new.providers.iter_mut().find(|p| p.id==pid) {
         pr.auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: None, account_id: None });
-        save_config_inner(&cfg)?;
+    }
+    // Try to delete from keyring first; but be careful
+    delete_keyring(&pid)?;
+    match save_config_inner(&cfg_new) {
+        Ok(_) => {},
+        Err(e) => {
+            // Compensation: restore
+            if prev_has && prev_secret.is_some() {
+                let _ = set_keyring(&pid, prev_secret.as_ref().unwrap());
+            }
+            let _ = save_config_inner(&cfg);
+            return Err(format!("credential consistency error: {}", e));
+        }
     }
     Ok("deleted".to_string())
 }
