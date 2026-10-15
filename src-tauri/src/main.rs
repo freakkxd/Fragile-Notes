@@ -12,7 +12,7 @@ use collect::{collect_sources, web_clip};
 use enrich::{enrich_notes, llm_chat, llm_status};
 use search::{LexicalSearchBackend, SearchBackend, SearchQuery, SearchQueryMode};
 use llm::{
-    llm_chat_universal, llm_delete_pipeline, llm_delete_provider_credential, llm_download_model,
+    llm_chat_universal, llm_chat_cancel, llm_delete_pipeline, llm_delete_provider_credential, llm_download_model,
     llm_get_config, llm_get_config_report, llm_get_pipelines, llm_has_provider_credential, llm_pipeline_run,
     llm_runtime_health, llm_runtime_list, llm_runtime_logs, llm_runtime_restart, llm_runtime_start,
     llm_runtime_stop, llm_save_config, llm_save_config_confirmed, llm_save_pipeline, llm_scan_models, llm_set_active_model,
@@ -328,6 +328,7 @@ fn main() {
             llm_test_provider,
             llm_discover_models,
             llm_chat_universal,
+            llm_chat_cancel,
             llm_get_pipelines,
             llm_save_pipeline,
             llm_delete_pipeline,

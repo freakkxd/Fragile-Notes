@@ -1,11 +1,18 @@
 //! Stage 0 (v0.5.9): pure chat request builder extracted from `gateway_chat`.
 //!
-//! Byte-identical behavior to the inline `match prov.kind` branches that lived
-//! in `llm.rs`. No network, no config, no keyring access here — the caller
-//! resolves `secret` (possibly empty) beforehand. Snapshot tests pin the exact
-//! URL/headers/body per provider kind so the Stage 2+ adapters cannot drift
-//! silently.
+//! URL/headers/body per provider kind. No network, no config, no keyring
+//! access here — the caller resolves `secret` (possibly empty) beforehand.
+//! Snapshot tests pin the exact URL/headers/body per provider kind so the
+//! Stage 2+ adapters cannot drift silently.
+//!
+//! v0.5.9 (Package 9): version prefixes are joined via
+//! [`join_api_path`] — an endpoint already ending in `/v1` no longer yields
+//! `/v1/v1/...`. Empty endpoints resolve per kind: local runtimes keep the
+//! assigned port, cloud kinds use their documented bases, and CustomOpenAI
+//! requires an explicit endpoint (validation error, never a silent fallback).
 
+use crate::llm::provider::openai::join_api_path;
+use crate::llm::provider::types::default_endpoint;
 use crate::llm::{ChatGeneration, ProviderKind};
 use std::collections::HashMap;
 
@@ -33,7 +40,7 @@ pub fn build_chat_http_request(
     messages: &[serde_json::Value],
     gen: &ChatGeneration,
     secret: &str,
-) -> ChatHttpRequest {
+) -> Result<ChatHttpRequest, String> {
     let (url, headers) = match kind {
         ProviderKind::LocalLlamaCpp
         | ProviderKind::Ollama
@@ -41,12 +48,29 @@ pub fn build_chat_http_request(
         | ProviderKind::OpenAI
         | ProviderKind::DeepSeek
         | ProviderKind::OpenRouter => {
-            let base = if endpoint.is_empty() {
-                format!("http://127.0.0.1:{}", default_port)
+            let base = if endpoint.trim().is_empty() {
+                match kind {
+                    // Local runtime: the assigned port on loopback. Never
+                    // applies to cloud kinds (F-7: no localhost guessing).
+                    ProviderKind::LocalLlamaCpp => format!("http://127.0.0.1:{}", default_port),
+                    // Custom gateways must be explicit: no silent fallback
+                    // to localhost or a vendor default.
+                    ProviderKind::CustomOpenAI => {
+                        return Err(
+                            "endpoint is required for custom OpenAI-compatible providers"
+                                .to_string(),
+                        );
+                    }
+                    // Cloud kinds use their documented base URLs.
+                    _ => default_endpoint(kind).unwrap_or_default(),
+                }
             } else {
                 endpoint.to_string()
             };
-            let u = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+            // Shared layout detection: `/v1` in the endpoint and `/v1/...` in
+            // the operation are joined, never doubled.
+            let u = join_api_path(&base, "/v1/chat/completions")
+                .map_err(|e| e.safe_message())?;
             let mut h = HashMap::new();
             if !secret.is_empty() {
                 h.insert(
@@ -57,8 +81,9 @@ pub fn build_chat_http_request(
             (u, h)
         }
         ProviderKind::Gemini => {
-            let base = if endpoint.is_empty() {
-                "https://generativelanguage.googleapis.com".to_string()
+            let base = if endpoint.trim().is_empty() {
+                default_endpoint(&ProviderKind::Gemini)
+                    .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string())
             } else {
                 endpoint.to_string()
             };
@@ -83,12 +108,13 @@ pub fn build_chat_http_request(
             (u, h)
         }
         ProviderKind::Claude => {
-            let base = if endpoint.is_empty() {
-                "https://api.anthropic.com".to_string()
+            let base = if endpoint.trim().is_empty() {
+                default_endpoint(&ProviderKind::Claude)
+                    .unwrap_or_else(|| "https://api.anthropic.com".to_string())
             } else {
                 endpoint.to_string()
             };
-            let u = format!("{}/v1/messages", base.trim_end_matches('/'));
+            let u = join_api_path(&base, "/v1/messages").map_err(|e| e.safe_message())?;
             let mut h = HashMap::new();
             if !secret.is_empty() {
                 h.insert("x-api-key".to_string(), secret.to_string());
@@ -144,7 +170,7 @@ pub fn build_chat_http_request(
             serde_json::json!({"model": mdl, "messages": messages, "temperature": gen.temperature, "top_p": gen.top_p, "max_tokens": gen.max_tokens, "stream": false})
         }
     };
-    ChatHttpRequest { url, headers, body }
+    Ok(ChatHttpRequest { url, headers, body })
 }
 
 #[cfg(test)]
@@ -183,10 +209,11 @@ mod tests {
             &msgs(),
             &gen(),
             "sk-test",
-        );
-        // NOTE: Stage 0 freezes existing behavior verbatim, including the
-        // doubled `/v1` segment when the endpoint already ends with `/v1`.
-        assert_eq!(r.url, "https://api.openai.com/v1/v1/chat/completions");
+        )
+        .unwrap();
+        // Endpoint already ends with `/v1`: the operation prefix is joined,
+        // not doubled (F-1 — the old builder produced /v1/v1/... here).
+        assert_eq!(r.url, "https://api.openai.com/v1/chat/completions");
         assert_eq!(
             r.headers.get("Authorization").map(String::as_str),
             Some("Bearer sk-test")
@@ -200,6 +227,84 @@ mod tests {
     }
 
     #[test]
+    fn openai_empty_endpoint_uses_documented_default() {
+        let r = build_chat_http_request(
+            &ProviderKind::OpenAI,
+            "",
+            "gpt-4o",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "sk-test",
+        )
+        .unwrap();
+        // F-7: cloud kinds never fall back to the local llama.cpp port.
+        assert_eq!(r.url, "https://api.openai.com/v1/chat/completions");
+    }
+
+    #[test]
+    fn cloud_empty_endpoints_use_documented_defaults() {
+        let ds = build_chat_http_request(
+            &ProviderKind::DeepSeek,
+            "",
+            "deepseek-chat",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "sk-x",
+        )
+        .unwrap();
+        assert_eq!(ds.url, "https://api.deepseek.com/v1/chat/completions");
+        let or = build_chat_http_request(
+            &ProviderKind::OpenRouter,
+            "",
+            "openrouter/model",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "sk-x",
+        )
+        .unwrap();
+        assert_eq!(or.url, "https://openrouter.ai/api/v1/chat/completions");
+    }
+
+    #[test]
+    fn custom_openai_empty_endpoint_is_validation_error() {
+        let err = build_chat_http_request(
+            &ProviderKind::CustomOpenAI,
+            "",
+            "m",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "sk-x",
+        )
+        .unwrap_err();
+        // Explicit endpoint required — never a silent localhost/OpenAI fallback.
+        assert!(err.contains("endpoint is required"), "{}", err);
+    }
+
+    #[test]
+    fn custom_prefix_endpoint_appends_operation() {
+        let r = build_chat_http_request(
+            &ProviderKind::CustomOpenAI,
+            "https://gw.example.com/openai",
+            "m",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "sk-x",
+        )
+        .unwrap();
+        assert_eq!(r.url, "https://gw.example.com/openai/v1/chat/completions");
+    }
+
+    #[test]
     fn local_defaults_and_no_auth_header() {
         let r = build_chat_http_request(
             &ProviderKind::LocalLlamaCpp,
@@ -210,7 +315,8 @@ mod tests {
             &msgs(),
             &ChatGeneration::default(),
             "",
-        );
+        )
+        .unwrap();
         assert_eq!(r.url, "http://127.0.0.1:8010/v1/chat/completions");
         assert!(r.headers.get("Authorization").is_none());
         assert_eq!(r.body["model"], "local");
@@ -228,7 +334,8 @@ mod tests {
             &msgs(),
             &gen(),
             "key-123",
-        );
+        )
+        .unwrap();
         // Header-only auth: no ?key= in the URL (security invariant).
         assert_eq!(
             r.url,
@@ -259,7 +366,8 @@ mod tests {
             &msgs(),
             &gen(),
             "ant-key",
-        );
+        )
+        .unwrap();
         assert_eq!(r.url, "https://api.anthropic.com/v1/messages");
         assert_eq!(
             r.headers.get("x-api-key").map(String::as_str),
@@ -288,7 +396,8 @@ mod tests {
             &msgs(),
             &gen(),
             "",
-        );
+        )
+        .unwrap();
         assert_eq!(r.url, "http://127.0.0.1:11434/v1/chat/completions");
         assert_eq!(r.body["model"], "llama3.1");
     }

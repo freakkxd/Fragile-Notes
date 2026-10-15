@@ -918,12 +918,73 @@ fn save_config_guarded_with(
 }
 
 // ---------- privacy guard ----------
-fn is_cloud_kind(kind: &ProviderKind) -> bool { matches!(kind, ProviderKind::OpenAI | ProviderKind::Gemini | ProviderKind::Claude | ProviderKind::CustomOpenAI) }
+// Fail-closed local/cloud split: only explicitly local runtimes count as
+// local. Any other kind (including future/unknown ones) is treated as cloud,
+// so a local-only task can never silently reach a remote endpoint.
+fn is_local_kind(kind: &ProviderKind) -> bool { matches!(kind, ProviderKind::LocalLlamaCpp | ProviderKind::Ollama) }
+fn is_cloud_kind(kind: &ProviderKind) -> bool { !is_local_kind(kind) }
 fn check_privacy(task_privacy: &Option<Privacy>, provider_kind: &ProviderKind) -> Result<(), String> {
     if let Some(Privacy::LocalOnly) = task_privacy {
         if is_cloud_kind(provider_kind) { return Err("PrivacyPolicyViolation: local-only task cannot use cloud provider".to_string()); }
     }
     Ok(())
+}
+
+/// Route-independent chat preflight shared by every chat HTTP/dispatch path:
+/// provider exists → task-profile resolution (fail-closed) → privacy →
+/// cloud policy → enabled → resolved generation.
+///
+/// `task_profile_id: None` skips the profile gate entirely (legacy internal
+/// callers such as enrich and the task executor RealGateway keep their own
+/// selection/policy layers). The chat IPC path (`llm_chat_universal`) always
+/// passes `Some("task-chat")`, so AskOnce/Deny are enforced there.
+///
+/// A missing task profile is an error (`task profile not found: ...`) — a
+/// typo in a profile id must never silently degrade to unrestricted cloud
+/// access. AskOnce with an active cloud provider returns `consent_required`:
+/// there is no consent flow over IPC, and "ask once" must never read as Allow.
+fn chat_preflight(
+    cfg: &LlmConfig,
+    provider_id: &str,
+    task_profile_id: &Option<String>,
+) -> Result<(Provider, ChatGeneration), String> {
+    let prov = cfg
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or("provider not found")?
+        .clone();
+    let mut gen = ChatGeneration::default();
+    if let Some(tpid) = task_profile_id {
+        let tp = cfg
+            .task_profiles
+            .iter()
+            .find(|t| t.id == *tpid)
+            .ok_or_else(|| format!("task profile not found: {}", tpid))?;
+        check_privacy(&tp.privacy, &prov.kind)?;
+        if is_cloud_kind(&prov.kind) {
+            match tp.cloud_policy {
+                Some(CloudPolicy::Deny) => {
+                    return Err("PrivacyPolicyViolation: Cloud Deny".to_string());
+                }
+                // AskOnce without a consent flow must never read as Allow.
+                Some(CloudPolicy::AskOnce) => {
+                    return Err(
+                        "consent_required: task profile cloud policy is AskOnce; \
+                         set it to cloud_allowed (allow) in Settings → Privacy \
+                         before using a cloud provider"
+                            .to_string(),
+                    );
+                }
+                Some(CloudPolicy::Allow) | None => {}
+            }
+        }
+        gen = resolve_chat_generation(&tp.generation);
+    }
+    if !prov.enabled {
+        return Err(format!("provider {} is disabled", prov.id));
+    }
+    Ok((prov, gen))
 }
 
 // ---------- commands ----------
@@ -1119,6 +1180,18 @@ async fn gemini_test_via_adapter(
     }
 }
 
+/// Fixed, safe classification for transport errors: no raw reqwest text
+/// (which embeds full URLs) ever reaches a user-visible result.
+fn safe_network_error(e: &reqwest::Error) -> (String, String) {
+    if e.is_timeout() {
+        ("timeout".to_string(), "request timed out".to_string())
+    } else if e.is_connect() {
+        ("network".to_string(), "connection failed".to_string())
+    } else {
+        ("network".to_string(), "network error".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
     let cfg = load_config_inner();
@@ -1135,7 +1208,11 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
                     let status = r.status();
                     ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: if status.as_u16()==401 {"unauthorized".to_string()} else {"server_error".to_string()}, message: format!("HTTP {}", status), retryable: status.as_u16()>=500 }) }
                 },
-                Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message: e.to_string().replace('"',"'"), retryable:true }) },
+                // Same safe classification as the cloud branch (no raw text).
+                Err(e) => {
+                    let (code, message) = safe_network_error(&e);
+                    ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code, message, retryable:true }) }
+                },
             }
         }
         // Ollama has no llama-server `/health` endpoint; probe the native
@@ -1158,28 +1235,64 @@ pub async fn llm_test_provider(provider_id: String) -> Result<String, String> {
                     &gemini_test_via_adapter(&prov, start, std::sync::Arc::new(provider::KeyringSecretStore)).await
                 ).unwrap());
             }
-            let base = if prov.endpoint.is_empty() { "https://api.openai.com/v1".to_string() } else { prov.endpoint.clone() };
-            let url = match prov.kind {
-                ProviderKind::OpenAI | ProviderKind::CustomOpenAI => format!("{}/models", base.trim_end_matches('/')),
-                ProviderKind::Claude => format!("{}/v1/models", base.trim_end_matches('/')),
-                _ => base,
+            // Endpoint resolution mirrors the chat builder: documented
+            // default per kind; CustomOpenAI requires an explicit endpoint
+            // (no silent fallback to localhost or api.openai.com).
+            let base = if prov.endpoint.trim().is_empty() {
+                match prov.kind {
+                    ProviderKind::CustomOpenAI => {
+                        return Ok(serde_json::to_string(&ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"invalid_config".to_string(), message:"endpoint is required for custom OpenAI-compatible providers".to_string(), retryable:false }) }).unwrap());
+                    }
+                    _ => provider::types::default_endpoint(&prov.kind).unwrap_or_default(),
+                }
+            } else {
+                prov.endpoint.clone()
             };
-            let client = reqwest::Client::builder().timeout(Duration::from_secs(8)).build().map_err(|e| e.to_string())?;
-            let mut req = client.get(&url);
-            if prov.kind==ProviderKind::OpenAI || prov.kind==ProviderKind::CustomOpenAI { req = req.header("Authorization", format!("Bearer {}", secret)); }
-            if prov.kind==ProviderKind::Claude { req = req.header("x-api-key", secret.clone()).header("anthropic-version","2023-06-01"); }
-            match req.send().await {
-                Ok(r) if r.status().is_success() => ConnectionTestResult{ ok:true, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: Some(vec![Capability::Chat, Capability::Streaming]), error: None },
-                Ok(r) => {
-                    let status = r.status();
-                    let txt = r.text().await.unwrap_or_default().chars().take(300).collect::<String>();
-                    ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: match status.as_u16() { 401 => "unauthorized", 429 => "rate_limited", 404 => "unsupported", 500..=599 => "server_error", _ => "network" }.to_string(), message: format!("HTTP {} {}", status, txt), retryable: status.as_u16()>=500 || status.as_u16()==429 }) }
-                },
-                Err(e) => ConnectionTestResult{ ok:false, provider_id: provider_id.clone(), latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code:"network".to_string(), message:e.to_string(), retryable:true }) }
-            }
+            cloud_probe_via_http(&prov, &base, &secret, start).await
         }
     };
     serde_json::to_string(&res).map_err(|e| e.to_string())
+}
+
+/// OpenAI-compatible / Claude cloud probe: `GET <base>/v1/models`.
+///
+/// All OpenAI-compatible kinds (incl. DeepSeek/OpenRouter) authenticate with
+/// a real `Authorization: Bearer` header; Claude uses `x-api-key`. Errors are
+/// safe: HTTP status only (never response bodies) and fixed network
+/// classifications (never raw reqwest text, which embeds URLs).
+async fn cloud_probe_via_http(
+    prov: &Provider,
+    base: &str,
+    secret: &str,
+    start: std::time::Instant,
+) -> ConnectionTestResult {
+    let provider_id = prov.id.clone();
+    let url = match provider::openai::join_api_path(base, "/v1/models") {
+        Ok(u) => u,
+        Err(e) => return ConnectionTestResult{ ok:false, provider_id, latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"invalid_config".to_string(), message: e.safe_message(), retryable:false }) },
+    };
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(8)).build() {
+        Ok(c) => c,
+        Err(e) => return ConnectionTestResult{ ok:false, provider_id, latency_ms:None, models:None, capabilities:None, error: Some(ConnectionError{ code:"network".to_string(), message: format!("client init failed: {}", e), retryable:false }) },
+    };
+    let mut req = client.get(&url);
+    match prov.kind {
+        ProviderKind::Claude => { req = req.header("x-api-key", secret.to_string()).header("anthropic-version","2023-06-01"); }
+        _ => { req = req.header("Authorization", format!("Bearer {}", secret)); }
+    }
+    match req.send().await {
+        Ok(r) if r.status().is_success() => ConnectionTestResult{ ok:true, provider_id, latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: Some(vec![Capability::Chat, Capability::Streaming]), error: None },
+        Ok(r) => {
+            // Safe errors: HTTP status only — never response bodies (they may
+            // echo request fragments or provider details).
+            let status = r.status();
+            ConnectionTestResult{ ok:false, provider_id, latency_ms: Some(start.elapsed().as_millis() as u64), models: None, capabilities: None, error: Some(ConnectionError{ code: match status.as_u16() { 401 => "unauthorized", 429 => "rate_limited", 404 => "unsupported", 500..=599 => "server_error", _ => "network" }.to_string(), message: format!("HTTP {}", status), retryable: status.as_u16()>=500 || status.as_u16()==429 }) }
+        },
+        Err(e) => {
+            let (code, message) = safe_network_error(&e);
+            ConnectionTestResult{ ok:false, provider_id, latency_ms: None, models: None, capabilities: None, error: Some(ConnectionError{ code, message, retryable:true }) }
+        }
+    }
 }
 
 /// Native Ollama model discovery via `GET /api/tags`.
@@ -1245,20 +1358,9 @@ pub fn resolve_chat_generation(generation: &HashMap<String, String>) -> ChatGene
     }
     out
 }
-pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
+pub async fn gateway_chat(req: ChatRequest, cancel: tokio_util::sync::CancellationToken) -> Result<String, String> {
     let cfg = load_config_inner();
-    // privacy guard + profile generation (single lookup)
-    let mut gen = ChatGeneration::default();
-    if let Some(tpid) = &req.task_profile_id {
-        if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
-            let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
-            check_privacy(&tp.privacy, &prov.kind)?;
-            if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
-            gen = resolve_chat_generation(&tp.generation);
-        }
-    }
-    // route via provider + model
-    let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).cloned().ok_or("provider not found")?;
+    let (prov, gen) = chat_preflight(&cfg, &req.provider_id, &req.task_profile_id)?;
     let secret = if prov.auth.as_ref().map(|a| a.method==AuthMethod::ApiKey).unwrap_or(false) { get_keyring(&prov.id).unwrap_or_default() } else { String::new() };
     // Use async reqwest for gateway (P0)
     let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
@@ -1272,18 +1374,25 @@ pub async fn gateway_chat(req: ChatRequest) -> Result<String, String> {
         &req.messages,
         &gen,
         &secret,
-    );
+    )?;
     let (url, headers, body) = (built.url, built.headers, built.body);
-    let mut r = client.post(&url).json(&body);
-    for (k,v) in headers { r = r.header(k, v); }
     // Never leak credentials: errors carry host/path only, never the query.
     let safe_url = safe_url_for_error(&url);
-    let resp = r.send().await.map_err(|e| format!("LLM offline {}: {}", safe_url, e))?;
-    if !resp.status().is_success() {
-        return Err(format!("LLM HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default().chars().take(600).collect::<String>()));
+    // Legacy gateway path joins the same cancellation contract as the
+    // adapter paths: dropping the HTTP future closes the client-side wait.
+    let send = async {
+        let mut r = client.post(&url).json(&body);
+        for (k,v) in headers { r = r.header(k, v); }
+        let resp = r.send().await.map_err(|e| format!("LLM offline {}: {}", safe_url, e))?;
+        if !resp.status().is_success() {
+            return Err(format!("LLM HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default().chars().take(600).collect::<String>()));
+        }
+        resp.text().await.map_err(|e| e.to_string())
+    };
+    tokio::select! {
+        _ = cancel.cancelled() => Err("LLM cancelled".to_string()),
+        r = send => r,
     }
-    let txt = resp.text().await.map_err(|e| e.to_string())?;
-    Ok(txt)
 }
 
 // ---------- Claude dispatch foundation (non-breaking) ----------
@@ -1299,22 +1408,10 @@ pub async fn gateway_chat_via_registry(
     timeout: Duration,
 ) -> Result<String, String> {
     let cfg = load_config_inner();
-    // privacy guard + profile generation (same policy as gateway_chat)
-    let mut gen = ChatGeneration::default();
-    if let Some(tpid) = &req.task_profile_id {
-        if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
-            let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
-            check_privacy(&tp.privacy, &prov.kind)?;
-            if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
-            gen = resolve_chat_generation(&tp.generation);
-        }
-    }
-    let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).cloned().ok_or("provider not found")?;
+    // Route-independent preflight (privacy, cloud policy, enabled, generation).
+    let (prov, gen) = chat_preflight(&cfg, &req.provider_id, &req.task_profile_id)?;
     if prov.kind != ProviderKind::Claude {
         return Err(format!("dispatch unsupported for {:?}: use gateway_chat", prov.kind));
-    }
-    if !prov.enabled {
-        return Err(format!("provider {} is disabled", prov.id));
     }
     // Model identity: internal id + provider ownership enforced here;
     // only remote_id ever goes upstream (enforced again by the adapter).
@@ -1404,22 +1501,10 @@ pub async fn gateway_gemini_via_registry(
     timeout: Duration,
 ) -> Result<String, String> {
     let cfg = load_config_inner();
-    // privacy guard + profile generation (same policy as gateway_chat)
-    let mut gen = ChatGeneration::default();
-    if let Some(tpid) = &req.task_profile_id {
-        if let Some(tp) = cfg.task_profiles.iter().find(|t| t.id==*tpid) {
-            let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).ok_or("provider not found")?;
-            check_privacy(&tp.privacy, &prov.kind)?;
-            if let Some(CloudPolicy::Deny) = tp.cloud_policy { if is_cloud_kind(&prov.kind) { return Err("PrivacyPolicyViolation: Cloud Deny".to_string()); } }
-            gen = resolve_chat_generation(&tp.generation);
-        }
-    }
-    let prov = cfg.providers.iter().find(|p| p.id==req.provider_id).cloned().ok_or("provider not found")?;
+    // Route-independent preflight (privacy, cloud policy, enabled, generation).
+    let (prov, gen) = chat_preflight(&cfg, &req.provider_id, &req.task_profile_id)?;
     if prov.kind != ProviderKind::Gemini {
         return Err(format!("dispatch unsupported for {:?}: use gateway_chat", prov.kind));
-    }
-    if !prov.enabled {
-        return Err(format!("provider {} is disabled", prov.id));
     }
     // Model identity: internal id + provider ownership enforced here;
     // only remote_id ever goes upstream (adapter prefixes models/ itself).
@@ -1543,15 +1628,127 @@ pub async fn gateway_chat_routed(
             )
             .await
         }
-        _ => gateway_chat(req).await,
+        _ => gateway_chat(req, cancel).await,
     }
 }
 
+// ---------- request-scoped chat cancellation (IPC) ----------
+// The chat IPC path registers a per-request cancellation token so `stop()` in
+// the UI can abort the in-flight client wait. The registry is process-global
+// and bounded; a small FIFO of pre-cancelled ids closes the
+// cancel-before-registration race without unbounded growth.
+struct ChatRequestEntry {
+    cancel: tokio_util::sync::CancellationToken,
+    done: std::sync::Arc<tokio::sync::Notify>,
+}
+#[derive(Default)]
+struct ChatRegistry {
+    order: std::collections::VecDeque<String>,
+    map: HashMap<String, ChatRequestEntry>,
+    pre_cancelled: std::collections::VecDeque<String>,
+}
+const CHAT_REGISTRY_CAP: usize = 128;
+impl ChatRegistry {
+    /// Register `id`: returns a token cancelled immediately if a cancel for
+    /// this id arrived before registration. Superseded/over-capacity entries
+    /// are woken so their cancel waiters never hang.
+    fn register(&mut self, id: &str) -> (tokio_util::sync::CancellationToken, std::sync::Arc<tokio::sync::Notify>) {
+        let token = tokio_util::sync::CancellationToken::new();
+        let pre = self
+            .pre_cancelled
+            .iter()
+            .position(|x| x == id)
+            .map(|i| self.pre_cancelled.remove(i))
+            .is_some();
+        if pre { token.cancel(); }
+        if let Some(old) = self.map.remove(id) {
+            if let Some(i) = self.order.iter().position(|x| x == id) { self.order.remove(i); }
+            old.done.notify_one();
+        }
+        while self.map.len() >= CHAT_REGISTRY_CAP {
+            match self.order.pop_front() {
+                Some(old_id) => { if let Some(old) = self.map.remove(&old_id) { old.done.notify_one(); } }
+                None => break,
+            }
+        }
+        let done = std::sync::Arc::new(tokio::sync::Notify::new());
+        self.order.push_back(id.to_string());
+        self.map.insert(id.to_string(), ChatRequestEntry { cancel: token.clone(), done: done.clone() });
+        (token, done)
+    }
+    /// Signal cancellation for `id`; returns the completion notifier if live.
+    fn take_for_cancel(&mut self, id: &str) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        self.map.get(id).map(|e| { e.cancel.cancel(); e.done.clone() })
+    }
+    /// Forget `id` on completion and wake any cancel waiter.
+    fn complete(&mut self, id: &str) {
+        if let Some(e) = self.map.remove(id) {
+            if let Some(i) = self.order.iter().position(|x| x == id) { self.order.remove(i); }
+            e.done.notify_one();
+        }
+    }
+    /// Remember a cancel that arrived before registration (bounded FIFO).
+    fn note_pre_cancelled(&mut self, id: &str) {
+        if self.pre_cancelled.iter().any(|x| x == id) { return; }
+        while self.pre_cancelled.len() >= CHAT_REGISTRY_CAP { self.pre_cancelled.pop_front(); }
+        self.pre_cancelled.push_back(id.to_string());
+    }
+    fn is_registered(&self, id: &str) -> bool { self.map.contains_key(id) }
+}
+static CHAT_REGISTRY: Lazy<Mutex<ChatRegistry>> = Lazy::new(|| Mutex::new(ChatRegistry::default()));
+
 #[tauri::command]
-pub async fn llm_chat_universal(provider_id: String, model: String, messages: Vec<serde_json::Value>) -> Result<String, String> {
-    // wrap with privacy via default task
-    let req = ChatRequest{ provider_id: provider_id.clone(), model_ref: model.clone(), messages, task_profile_id: None };
-    gateway_chat_routed(req, tokio_util::sync::CancellationToken::new()).await
+pub async fn llm_chat_universal(
+    provider_id: String,
+    model: String,
+    messages: Vec<serde_json::Value>,
+    request_id: Option<String>,
+) -> Result<String, String> {
+    // Server-side privacy anchor: the chat IPC path always runs under the
+    // task-chat profile (privacy/AskOnce/generation enforced in chat_preflight).
+    let req = ChatRequest {
+        provider_id: provider_id.clone(),
+        model_ref: model.clone(),
+        messages,
+        task_profile_id: Some("task-chat".to_string()),
+    };
+    let rid = request_id.filter(|s| !s.trim().is_empty());
+    let cancel = match &rid {
+        Some(id) => {
+            let mut reg = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+            let (token, _done) = reg.register(id);
+            token
+        }
+        None => tokio_util::sync::CancellationToken::new(),
+    };
+    let result = gateway_chat_routed(req, cancel).await;
+    if let Some(id) = &rid {
+        let mut reg = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        reg.complete(id);
+    }
+    result
+}
+
+/// Cancel an in-flight chat request started by `llm_chat_universal`.
+/// Returns `"cancelled"` once the request task finished winding down,
+/// `"stopping"` if it is still unwinding after a short grace period, or
+/// `"not_found"` for an unknown/already-completed id (idempotent: a late
+/// cancel is harmless and remembered briefly to close the race).
+#[tauri::command]
+pub async fn llm_chat_cancel(request_id: String) -> Result<String, String> {
+    let id = request_id.trim().to_string();
+    if id.is_empty() { return Err("request_id is empty".to_string()); }
+    let done = {
+        let mut reg = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+        match reg.take_for_cancel(&id) {
+            Some(done) => done,
+            None => { reg.note_pre_cancelled(&id); return Ok("not_found".to_string()); }
+        }
+    };
+    match tokio::time::timeout(Duration::from_millis(2000), done.notified()).await {
+        Ok(()) => Ok("cancelled".to_string()),
+        Err(_) => Ok("stopping".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -2841,7 +3038,7 @@ pub(crate) mod tests {
         // Legacy frozen mapping for the same input.
         let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
         let legacy = gateway::build_chat_http_request(&ProviderKind::Claude, &endpoint,
-            "claude-3-5-sonnet-latest", 8010, "", &claude_legacy_msgs(), &gen, "sk-ant-test-key");
+            "claude-3-5-sonnet-latest", 8010, "", &claude_legacy_msgs(), &gen, "sk-ant-test-key").unwrap();
         let out = gateway_chat_via_registry(dispatch_req("", Some("tp-parity")), dispatch_cancel(),
             Arc::new(MapSecrets), Duration::from_secs(5)).await.unwrap();
         assert_eq!(out, "ok");
@@ -3049,6 +3246,202 @@ pub(crate) mod tests {
         assert!(err.contains("disabled"), "got: {}", err);
     }
 
+    // ---------- Package 9: chat preflight / cancellation / cloud probe ----------
+
+    #[test]
+    fn chat_preflight_ask_once_requires_consent_for_cloud() {
+        // Default config: task-chat is CloudAllowed + AskOnce. Without a
+        // consent flow it must never read as Allow for a cloud provider.
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "claude") {
+            p.enabled = true;
+        }
+        let err = chat_preflight(&cfg, "claude", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("consent_required"), "got: {}", err);
+    }
+
+    #[test]
+    fn chat_preflight_local_ignores_ask_once() {
+        // AskOnce only gates cloud kinds; local chat with task-chat is fine.
+        let cfg = LlmConfig::default();
+        let (prov, _gen) = chat_preflight(&cfg, "local", &Some("task-chat".to_string())).unwrap();
+        assert_eq!(prov.id, "local");
+    }
+
+    #[test]
+    fn chat_preflight_missing_profile_fails_closed() {
+        // A missing profile must never silently fall back to unrestricted.
+        let cfg = LlmConfig::default();
+        let err = chat_preflight(&cfg, "local", &Some("nope".to_string())).unwrap_err();
+        assert!(err.contains("task profile not found"), "got: {}", err);
+    }
+
+    #[test]
+    fn chat_preflight_disabled_provider_errors() {
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "openai") {
+            p.enabled = false;
+        }
+        let err = chat_preflight(&cfg, "openai", &None).unwrap_err();
+        assert!(err.contains("disabled"), "got: {}", err);
+    }
+
+    #[test]
+    fn chat_registry_cancel_before_registration_is_remembered() {
+        let mut reg = ChatRegistry::default();
+        reg.note_pre_cancelled("r1");
+        let (token, _done) = reg.register("r1");
+        assert!(token.is_cancelled(), "pre-cancel must apply on registration");
+        assert!(reg.is_registered("r1"));
+        reg.complete("r1");
+        assert!(!reg.is_registered("r1"));
+    }
+
+    #[test]
+    fn chat_registry_cancel_during_request_signals() {
+        let mut reg = ChatRegistry::default();
+        let (token, _done) = reg.register("r2");
+        assert!(!token.is_cancelled());
+        let waiter = reg.take_for_cancel("r2").expect("live entry");
+        assert!(token.is_cancelled());
+        reg.complete("r2");
+        drop(waiter);
+    }
+
+    #[test]
+    fn chat_registry_late_cancel_is_not_found_and_pre_cancels_next() {
+        let mut reg = ChatRegistry::default();
+        reg.register("r3");
+        reg.complete("r3");
+        assert!(reg.take_for_cancel("r3").is_none(), "completed id is gone");
+        reg.note_pre_cancelled("r3");
+        let (token, _done) = reg.register("r3");
+        assert!(token.is_cancelled(), "late cancel applies to the next request");
+        reg.complete("r3");
+    }
+
+    #[test]
+    fn chat_registry_concurrent_ids_are_independent() {
+        let mut reg = ChatRegistry::default();
+        let (t1, _d1) = reg.register("a");
+        let (t2, _d2) = reg.register("b");
+        let waiter = reg.take_for_cancel("a").unwrap();
+        assert!(t1.is_cancelled());
+        assert!(!t2.is_cancelled(), "cancelling a must not touch b");
+        reg.complete("a");
+        reg.complete("b");
+        drop(waiter);
+    }
+
+    #[test]
+    fn chat_registry_is_bounded() {
+        let mut reg = ChatRegistry::default();
+        for i in 0..(CHAT_REGISTRY_CAP + 10) {
+            reg.register(&format!("x{}", i));
+        }
+        assert!(reg.map.len() <= CHAT_REGISTRY_CAP, "len {}", reg.map.len());
+    }
+
+    #[tokio::test]
+    async fn chat_registry_notify_one_allows_late_wait() {
+        // complete() uses notify_one, storing a permit, so a cancel waiter
+        // that subscribes after completion still resolves immediately.
+        let mut reg = ChatRegistry::default();
+        reg.register("w");
+        let waiter = reg.take_for_cancel("w").unwrap();
+        reg.complete("w");
+        tokio::time::timeout(Duration::from_millis(500), waiter.notified())
+            .await
+            .expect("late wait resolves via stored permit");
+    }
+
+    #[tokio::test]
+    async fn llm_chat_cancel_aborts_inflight_request() {
+        let env = IsolatedEnv::lock("chatcancel");
+        // Server captures the request, then waits 3s before replying: the
+        // client-side wait must be aborted well before that.
+        let w = spawn_dispatch_wire(
+            200,
+            r#"{"choices":[{"message":{"content":"late"}}]}"#.to_string(),
+            3000,
+        )
+        .await;
+        let mut cfg = LlmConfig::default();
+        if let Some(p) = cfg.providers.iter_mut().find(|x| x.id == "local") {
+            p.endpoint = format!("http://127.0.0.1:{}", w.port);
+        }
+        fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        let rid = "chat-req-1".to_string();
+        let rid2 = rid.clone();
+        let handle = tokio::spawn(async move {
+            llm_chat_universal(
+                "local".to_string(),
+                String::new(),
+                vec![serde_json::json!({"role": "user", "content": "hi"})],
+                Some(rid2),
+            )
+            .await
+        });
+        // Synchronize on the wire capture (no arbitrary sleep): once the
+        // request reached the server, the token is registered.
+        for _ in 0..200 {
+            if !w.captured.lock().unwrap().is_empty() { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!w.captured.lock().unwrap().is_empty(), "request reached wire");
+        let outcome = llm_chat_cancel(rid).await.unwrap();
+        assert_eq!(outcome, "cancelled", "cancel awaited completion");
+        let err = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("chat task returns")
+            .unwrap()
+            .unwrap_err();
+        assert!(err.contains("cancelled"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn llm_chat_cancel_unknown_id_is_not_found() {
+        let outcome = llm_chat_cancel("does-not-exist".to_string()).await.unwrap();
+        assert_eq!(outcome, "not_found");
+    }
+
+    fn cloud_prov(kind: ProviderKind, endpoint: String) -> Provider {
+        Provider {
+            id: "p-cloud".to_string(),
+            name: "cloud".to_string(),
+            kind,
+            enabled: true,
+            endpoint,
+            auth: Some(AuthRef { method: AuthMethod::ApiKey, secret_ref: None, account_id: None }),
+            default_model: "m".to_string(),
+            extra: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_probe_deepseek_uses_models_with_bearer() {
+        let w = spawn_dispatch_wire(200, r#"{"data":[]}"#.to_string(), 0).await;
+        let prov = cloud_prov(ProviderKind::DeepSeek, format!("http://127.0.0.1:{}", w.port));
+        let res = cloud_probe_via_http(&prov, &prov.endpoint, "sk-test-secret", std::time::Instant::now()).await;
+        assert!(res.ok, "probe ok: {:?}", res.error);
+        let raw = w.captured.lock().unwrap().join("\n").to_lowercase();
+        assert!(raw.contains("get /v1/models "), "models probe, got: {}", raw);
+        assert!(raw.contains("authorization: bearer sk-test-secret"), "bearer auth, got: {}", raw);
+    }
+
+    #[tokio::test]
+    async fn cloud_probe_error_hides_body_and_secret() {
+        // Server error body carries a key-like string; the result must not.
+        let w = spawn_dispatch_wire(500, r#"{"error":"leak sk-LIVE-1234567890"}"#.to_string(), 0).await;
+        let prov = cloud_prov(ProviderKind::OpenAI, format!("http://127.0.0.1:{}", w.port));
+        let res = cloud_probe_via_http(&prov, &prov.endpoint, "sk-test-secret", std::time::Instant::now()).await;
+        assert!(!res.ok);
+        let e = res.error.expect("error present");
+        assert_eq!(e.code, "server_error");
+        assert!(e.message.starts_with("HTTP 500"), "status-derived only: {}", e.message);
+        assert!(!e.message.contains("leak") && !e.message.contains("sk-LIVE"), "body leaked: {}", e.message);
+    }
+
     #[tokio::test]
     async fn wiring_router_task_profile_passthrough() {
         let env = IsolatedEnv::lock("wireprofile");
@@ -3097,9 +3490,16 @@ pub(crate) mod tests {
                 secret_ref: Some("keychain://fragile-notes/cld".to_string()), account_id: None });
             p.default_model = "claude-sonnet-4-5".to_string();
         }
-        cfg.task_profiles.push(TaskProfile { id: "task-chat".to_string(), name: "Chat".to_string(),
-            model_ref: String::new(), runtime_profile_id: None, privacy: None, cloud_policy: None,
-            generation: HashMap::new() });
+        // Replace the default task-chat in place: it ships with
+        // cloud_policy=AskOnce, which now (correctly) blocks cloud chat with
+        // consent_required. This RAG-shaped fixture must exercise an allowed
+        // profile — pushing a second task-chat would be ignored (first match
+        // wins in chat_preflight).
+        if let Some(tp) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            tp.privacy = None;
+            tp.cloud_policy = None;
+            tp.generation = HashMap::new();
+        }
         fs::write(env.cfg_path(), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
         let req = ChatRequest { provider_id: "claude".to_string(), model_ref: "claude-sonnet-4-5".to_string(),
             messages: vec![
@@ -3324,7 +3724,7 @@ pub(crate) mod tests {
         // Legacy frozen mapping (now header-auth) for the same input.
         let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
         let legacy = gateway::build_chat_http_request(&ProviderKind::Gemini, &endpoint,
-            "gemini-2.0-flash", 8010, "", &gemini_req("", None).messages, &gen, "AIza-test-key-12345");
+            "gemini-2.0-flash", 8010, "", &gemini_req("", None).messages, &gen, "AIza-test-key-12345").unwrap();
         let out = gateway_gemini_via_registry(gemini_req("", Some("tp-gem")), dispatch_cancel(),
             Arc::new(MapGeminiSecrets), Duration::from_secs(5)).await.unwrap();
         assert_eq!(out, "ok");
@@ -3396,7 +3796,7 @@ pub(crate) mod tests {
         // endpoint shape and body mapping as before, only auth moved.
         let gen = ChatGeneration { temperature: 0.2, top_p: 0.5, max_tokens: 512 };
         let r = gateway::build_chat_http_request(&ProviderKind::Gemini, "",
-            "gemini-2.0-flash", 8010, "custom-model", &gemini_req("", None).messages, &gen, "k");
+            "gemini-2.0-flash", 8010, "custom-model", &gemini_req("", None).messages, &gen, "k").unwrap();
         assert_eq!(r.url, "https://generativelanguage.googleapis.com/v1beta/models/custom-model:generateContent");
         // Legacy folds system text into the first user part (3 contents);
         // the native adapter lifts it to systemInstruction instead.
