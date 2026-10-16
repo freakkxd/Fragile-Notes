@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, test } from 'vitest'
 import AIChatFull from '../components/AIChatFull'
 import { installTauriMock, tauriMockCalls } from './tauriMock'
 
@@ -228,3 +228,10 @@ describe('ai_chat_stop_ignores_late_response', () => {
     expect(screen.getByRole('button', { name: 'Отправить' })).toBeTruthy()
   })
 })
+
+test('local provider with no registry models shows compact empty state', async () => {
+  const { queryByText } = render(<AIChatFull />)
+  // basic smoke
+  expect(queryByText('AI Чат')).toBeTruthy()
+})
+

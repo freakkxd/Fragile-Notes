@@ -22,7 +22,7 @@ export const inputStyle: React.CSSProperties = {
   width: '100%',
   marginTop: 4,
   padding: '6px 8px',
-  background: 'rgba(0,0,0,.25)',
+  background: 'var(--panel-2)',
   border: '1px solid var(--border)',
   borderRadius: 8,
   color: 'var(--fg)',

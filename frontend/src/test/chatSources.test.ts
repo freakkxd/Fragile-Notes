@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { parseChatResult, KNOWN_PROVIDER_KINDS, PERPLEXITY_PRESETS, ProviderKindSchema, ChatSourceSchema, type ChatSource } from '../lib/llm'
+import { describe, expect, it, test } from 'vitest'
+import { parseChatResult, KNOWN_PROVIDER_KINDS, llmChatUniversal, PERPLEXITY_PRESETS, ProviderKindSchema, ChatSourceSchema, type ChatSource } from '../lib/llm'
 import { extractChatText, safeSourceLinks } from '../components/AIChatFull'
 
 describe('perplexity_kind_registered', () => {
@@ -104,4 +104,10 @@ describe('chat_source_schema', () => {
     expect(ser).toContain('https://a.example')
     expect(ser).not.toContain('last_updated')
   })
+})
+
+test('parseChatResult tolerates envelope with sources', () => {
+  const r = parseChatResult('{"content":"ok","sources":[{"url":"https://a.com","title":"A"}]}')
+  expect(r.content).toBe('ok')
+  expect(r.sources.length).toBe(1)
 })
