@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as llm from '../lib/llm'
-import { isLocalKind, ollamaDiscoverErrorText } from './settings/types'
+import { isLocalKind, providerIsCloud, ollamaDiscoverErrorText } from './settings/types'
 import ComposerMenu from './chat/ComposerMenu'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
@@ -51,11 +51,19 @@ export function defaultModelForProvider(p: llm.Provider | null): string {
 
 /** Non-empty explanation when send must be blocked; '' means allowed. */
 export function chatPrivacyBlocked(provider: llm.Provider | null, privacy: string | undefined): string {
-  if (provider && privacy === 'local_only' && !isLocalKind(provider.kind)) {
-    return `Отправка заблокирована: профиль task-chat — local_only, а провайдер «${provider.name}» облачный. Выберите локальный провайдер или смените политику в настройках.`
-  }
   if (!provider) {
     return 'Нет включённого провайдера. Включите провайдера в настройках нейросетей.'
+  }
+  // A disabled provider must be blocked with a clear message and NO consent
+  // dialog: the backend refuses it before the consent branch, so prompting
+  // would be misleading.
+  if (provider.enabled === false) {
+    return `Провайдер «${provider.name}» выключен в настройках нейросетей. Включите его или выберите другого.`
+  }
+  // Endpoint-aware: a local *kind* pointed at a remote host is cloud scope, so
+  // local_only cannot silently reach it (mirrors the backend `endpoint_scope`).
+  if (privacy === 'local_only' && providerIsCloud(provider.kind, provider.endpoint || provider.api_url)) {
+    return `Отправка заблокирована: профиль task-chat — local_only, а провайдер «${provider.name}» облачный. Выберите локальный провайдер или смените политику в настройках.`
   }
   return ''
 }
@@ -354,7 +362,7 @@ export default function AIChatFull() {
     }
     // Cloud AskOnce gate: query the backend consent binding before dispatch.
     // A `required` result opens the dialog; nothing is sent or cleared.
-    if (selected && !isLocalKind(selected.kind)) {
+    if (selected && providerIsCloud(selected.kind, selected.endpoint || selected.api_url)) {
       setConsentChecking(true)
       try {
         const st = await llm.llmCloudConsentStatus(providerId, 'task-chat')

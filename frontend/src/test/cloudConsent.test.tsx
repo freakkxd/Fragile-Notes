@@ -142,4 +142,19 @@ describe('cloud_consent_dialog', () => {
     // Draft is untouched so the user can retry.
     expect((screen.getByPlaceholderText('Сообщение провайдеру…') as HTMLTextAreaElement).value).toBe('hi')
   })
+
+  it('does not offer a disabled provider for chat', async () => {
+    const user = userEvent.setup()
+    const c = cfg()
+    c.config.providers = c.config.providers.map((p) => (p.id === 'openai' ? { ...p, enabled: false } : p))
+    installTauriMock({
+      llm_get_config_report: JSON.stringify(c),
+      llm_models_list: JSON.stringify([]),
+    })
+    render(<AIChatFull />)
+    await user.click(await screen.findByLabelText('Провайдер'))
+    // The disabled cloud provider is filtered from the menu entirely.
+    expect(screen.queryByRole('option', { name: /OpenAI \(cloud\)/ })).toBeNull()
+    expect(screen.getByRole('option', { name: /Local \(local\)/ })).toBeTruthy()
+  })
 })

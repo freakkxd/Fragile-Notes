@@ -56,6 +56,27 @@ export function isLocalKind(kind: string): boolean {
   return kind === 'local_llama_cpp' || kind === 'ollama'
 }
 
+/**
+ * Loopback (or built-in local) endpoint. Mirrors the backend `is_loopback`
+ * check exactly (`127.0.0.1` / `localhost` / `::1`, or empty = built-in local)
+ * so the UI and the backend never disagree about a provider's scope.
+ */
+export function isLoopbackEndpoint(endpoint: string | undefined | null): boolean {
+  const e = (endpoint ?? '').trim()
+  return e === '' || e.includes('127.0.0.1') || e.includes('localhost') || e.includes('::1')
+}
+
+/**
+ * Endpoint-aware cloud classification. Mirrors the backend `endpoint_scope`:
+ * a local kind is local only when its endpoint is empty or loopback; any other
+ * endpoint classifies as cloud, so a remotely-pointed `ollama` provider is
+ * gated exactly like a real cloud provider. Non-local kinds are always cloud.
+ */
+export function providerIsCloud(kind: string, endpoint: string | undefined | null): boolean {
+  if (!isLocalKind(kind)) return true
+  return !isLoopbackEndpoint(endpoint)
+}
+
 /** Safe user-facing text for Ollama discovery failures (no bodies/URLs). */
 export function ollamaDiscoverErrorText(code: string | undefined): string {
   switch (code) {

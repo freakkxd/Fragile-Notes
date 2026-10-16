@@ -761,7 +761,84 @@ struct TokenRecord {
 }
 static RECOVERY_TOKENS: Lazy<Mutex<HashMap<String, TokenRecord>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static CRED_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// The single serialization point for *every* config/credential mutation, plus
+/// the provider-scoped monotonic auth revision it carries.
+///
+/// Why one lock for both concerns: a browser authorization must be committed
+/// atomically with respect to provider edits/deletes *and* credential
+/// mutations. A provider fingerprint alone is insufficient — deleting the
+/// credential keeps `id`/`kind`/`endpoint` unchanged, so an in-flight
+/// transaction would silently re-persist a key after an explicit disconnect.
+///
+/// Protocol (see `auth/openrouter.rs`):
+///   * every `llm_*` config writer and credential mutation takes this lock;
+///   * a transaction captures the provider's revision at `start`;
+///   * a credential mutation bumps the provider's revision;
+///   * the commit re-checks the revision (and fingerprint) *under this lock*
+///     before writing, so an older transaction is always rejected.
+///
+/// Lock ordering: `OAUTH_TXS -> CRED_MUTEX -> CLOUD_CONSENT`. Nothing takes
+/// these in the reverse order.
+#[derive(Default)]
+pub(crate) struct MutationState {
+    auth_rev: HashMap<String, u64>,
+}
+
+impl MutationState {
+    pub(crate) fn auth_rev_of(&self, provider_id: &str) -> u64 {
+        self.auth_rev.get(provider_id).copied().unwrap_or(0)
+    }
+    /// Invalidate every authorization started before this point for `provider_id`.
+    pub(crate) fn bump_auth_rev(&mut self, provider_id: &str) {
+        let e = self.auth_rev.entry(provider_id.to_string()).or_insert(0);
+        *e = e.wrapping_add(1);
+    }
+}
+
+static CRED_MUTEX: Lazy<Mutex<MutationState>> = Lazy::new(|| Mutex::new(MutationState::default()));
+
+/// Acquire the shared config/credential mutation lock.
+pub(crate) fn cred_guard() -> std::sync::MutexGuard<'static, MutationState> {
+    CRED_MUTEX.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Does this provider currently reference a stored credential? An empty or
+/// whitespace-only `secret_ref` counts as "no credential".
+fn provider_has_credential_ref(p: &Provider) -> bool {
+    p.auth
+        .as_ref()
+        .and_then(|a| a.secret_ref.as_deref())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// A config edit that drops (or adds) a credential is a *credential mutation*:
+/// it must invalidate in-flight authorizations exactly like an explicit
+/// disconnect, otherwise a transaction started before the edit could persist a
+/// key the user just removed through the settings form.
+///
+/// The caller MUST hold the [`CRED_MUTEX`] guard; taking it here would re-enter
+/// the same non-reentrant mutex.
+fn bump_auth_rev_for_credential_changes(
+    before: &LlmConfig,
+    after: &LlmConfig,
+    state: &mut MutationState,
+) {
+    for prev in &before.providers {
+        let had = provider_has_credential_ref(prev);
+        let has = after
+            .providers
+            .iter()
+            .find(|p| p.id == prev.id)
+            .map(provider_has_credential_ref)
+            .unwrap_or(false);
+        if had != has {
+            state.bump_auth_rev(&prev.id);
+        }
+    }
+}
+
 const RECOVERY_TOKEN_TTL_SECS: u64 = 600;
 
 fn new_token_string() -> String {
@@ -923,8 +1000,9 @@ fn save_config_guarded_with(
 // Fail-closed local/cloud split: only explicitly local runtimes count as
 // local. Any other kind (including future/unknown ones) is treated as cloud,
 // so a local-only task can never silently reach a remote endpoint.
-fn is_local_kind(kind: &ProviderKind) -> bool { matches!(kind, ProviderKind::LocalLlamaCpp | ProviderKind::Ollama) }
-fn is_cloud_kind(kind: &ProviderKind) -> bool { !is_local_kind(kind) }
+pub(crate) fn provider_is_cloud(kind: &ProviderKind, endpoint: &str) -> bool {
+    provider::types::endpoint_scope(kind, endpoint) == crate::llm::task::policy::ProviderScope::Cloud
+}
 /// LocalOnly gate. Scope is derived from BOTH kind and endpoint (see
 /// [`provider::types::endpoint_scope`]): a local kind with a remote endpoint
 /// classifies as `Cloud`, so `LocalOnly` cannot pass it. This is a policy
@@ -1017,6 +1095,11 @@ fn chat_preflight(
         .find(|p| p.id == provider_id)
         .ok_or("provider not found")?
         .clone();
+    // Fail fast on a disabled provider so the UI shows a clear "disabled"
+    // state instead of a misleading consent prompt.
+    if !prov.enabled {
+        return Err(format!("provider {} is disabled", prov.id));
+    }
     let mut gen = ChatGeneration::default();
     if let Some(tpid) = task_profile_id {
         let tp = cfg
@@ -1025,7 +1108,9 @@ fn chat_preflight(
             .find(|t| t.id == *tpid)
             .ok_or_else(|| format!("task profile not found: {}", tpid))?;
         check_privacy(&tp.privacy, &prov.kind, &prov.endpoint)?;
-        if is_cloud_kind(&prov.kind) {
+        // Endpoint-aware: a local kind with a remote endpoint is Cloud, so
+        // AskOnce/Deny cannot be bypassed by `kind` alone.
+        if provider_is_cloud(&prov.kind, &prov.endpoint) {
             match tp.cloud_policy {
                 Some(CloudPolicy::Deny) => {
                     return Err("PrivacyPolicyViolation: Cloud Deny".to_string());
@@ -1043,9 +1128,6 @@ fn chat_preflight(
             }
         }
         gen = resolve_chat_generation(&tp.generation);
-    }
-    if !prov.enabled {
-        return Err(format!("provider {} is disabled", prov.id));
     }
     Ok((prov, gen))
 }
@@ -1087,16 +1169,25 @@ pub fn llm_start_config_recovery() -> Result<String, String> {
 pub fn llm_save_config(config_json: String) -> Result<String, String> {
     let mut cfg: LlmConfig = serde_json::from_str(&config_json).map_err(|e| format!("parse config: {}", e))?;
     cfg.schema_version = 2;
+    // Serialize with the credential/authorization commit so a provider
+    // edit/delete can never interleave with an OAuth fingerprint/revision
+    // check. `cred_guard()` is held for the whole read-modify-write.
+    let mut guard = cred_guard();
     restore_masked_secrets(&mut cfg);
+    let before = load_config_inner();
     save_config_inner(&cfg)?;
+    bump_auth_rev_for_credential_changes(&before, &cfg, &mut guard);
     Ok("saved".to_string())
 }
 #[tauri::command]
 pub fn llm_save_config_confirmed(config_json: String, confirm_token: String) -> Result<String, String> {
     let mut cfg: LlmConfig = serde_json::from_str(&config_json).map_err(|e| format!("CorruptInput: {}", e))?;
     cfg.schema_version = 2;
+    let mut guard = cred_guard();
     restore_masked_secrets(&mut cfg);
+    let before = load_config_inner();
     let outcome = save_config_guarded(&cfg, Some(&confirm_token))?;
+    bump_auth_rev_for_credential_changes(&before, &cfg, &mut guard);
     serde_json::to_string(&outcome).map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -1104,47 +1195,58 @@ pub fn llm_has_provider_credential(provider_id: String) -> Result<String, String
     let has = has_keyring(&provider_id);
     Ok(if has { "true".to_string() } else { "false".to_string() })
 }
-#[tauri::command]
-pub fn llm_set_provider_credential(provider_id: String, secret: String) -> Result<String, String> {
+
+/// Write a provider credential and its config reference. The caller MUST hold
+/// [`CRED_MUTEX`]; this preserves the F-9 compensation contract (on a
+/// config-save failure the previous keyring entry and config are restored).
+fn write_provider_credential(provider_id: &str, secret: &str) -> Result<(), String> {
     if secret.trim().is_empty() { return Err("empty secret".to_string()); }
-    let pid = provider_id.clone();
-    let new_secret = secret.clone();
-    // Serialize credential mutations to reduce race window without blocking await
-    let _guard = CRED_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-    // Snapshot previous state
-    let prev_has = has_keyring(&pid);
-    let prev_secret: Option<String> = if prev_has { get_keyring(&pid).ok() } else { None };
-    let mut cfg = load_config_inner();
-    let prev_auth: Option<AuthRef> = cfg.providers.iter().find(|p| p.id==pid).and_then(|p| p.auth.clone());
-    // Write new credential
-    set_keyring(&pid, &new_secret).map_err(|e| format!("keyring unavailable: {} — [Повторить][Настроить вручную][Отмена]", e))?;
-    // Update config
+    let pid = provider_id;
+    let prev_has = has_keyring(pid);
+    let prev_secret: Option<String> = if prev_has { get_keyring(pid).ok() } else { None };
+    let cfg = load_config_inner();
+    set_keyring(pid, secret).map_err(|e| format!("keyring unavailable: {} — [Повторить][Настроить вручную][Отмена]", e))?;
     let mut cfg2 = cfg.clone();
     if let Some(pr) = cfg2.providers.iter_mut().find(|p| p.id==pid) {
-        pr.auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: Some(secret_ref_for(&pid)), account_id: None });
+        pr.auth = Some(AuthRef{ method: AuthMethod::ApiKey, secret_ref: Some(secret_ref_for(pid)), account_id: None });
     }
-    // Save config
     match save_config_inner(&cfg2) {
-        Ok(_) => {},
+        Ok(_) => Ok(()),
         Err(e) => {
-            // Compensation: restore previous state
             if prev_has && prev_secret.is_some() {
-                let _ = set_keyring(&pid, prev_secret.as_ref().unwrap());
+                let _ = set_keyring(pid, prev_secret.as_ref().unwrap());
             } else if !prev_has {
-                // Was new entry; try to remove newly created one
-                let _ = delete_keyring(&pid);
+                let _ = delete_keyring(pid);
             }
-            // Also attempt to restore config to original if we can
             let _ = save_config_inner(&cfg);
-            return Err(format!("credential consistency error: {}", e));
+            Err(format!("credential consistency error: {}", e))
         }
     }
+}
+
+/// Persist a credential for the OAuth commit. Called while holding the same
+/// [`CRED_MUTEX`] guard that performed the revision/fingerprint check. Does NOT
+/// bump the revision: the new transaction is the current one.
+pub(crate) fn set_provider_credential_locked(
+    _state: &mut MutationState,
+    provider_id: &str,
+    secret: &str,
+) -> Result<(), String> {
+    write_provider_credential(provider_id, secret)
+}
+
+#[tauri::command]
+pub fn llm_set_provider_credential(provider_id: String, secret: String) -> Result<String, String> {
+    let mut guard = cred_guard();
+    set_provider_credential_locked(&mut guard, &provider_id, &secret)?;
+    // A manual credential change invalidates any in-flight authorization.
+    guard.bump_auth_rev(&provider_id);
     Ok("saved to keyring".to_string())
 }
 #[tauri::command]
 pub fn llm_delete_provider_credential(provider_id: String) -> Result<String, String> {
     let pid = provider_id.clone();
-    let _guard = CRED_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = cred_guard();
     let prev_has = has_keyring(&pid);
     let prev_secret: Option<String> = if prev_has { get_keyring(&pid).ok() } else { None };
     let cfg = load_config_inner();
@@ -1165,6 +1267,10 @@ pub fn llm_delete_provider_credential(provider_id: String) -> Result<String, Str
             return Err(format!("credential consistency error: {}", e));
         }
     }
+    // Successful disconnect: invalidate every authorization started before now
+    // (so an older transaction can never re-persist a key) and drop consent.
+    guard.bump_auth_rev(&pid);
+    drop(guard);
     // A removed credential also drops any AskOnce consent for this provider.
     revoke_provider_consent(&pid);
     Ok("deleted".to_string())
@@ -1186,14 +1292,63 @@ pub fn llm_cloud_consent_status(provider_id: String, task_profile_id: String) ->
         .ok_or_else(|| "task profile not found".to_string())?;
     let dest = auth::canonical_destination(&prov.endpoint);
     let granted = consent_granted(&cfg, &provider_id, &task_profile_id);
-    let required =
-        is_cloud_kind(&prov.kind) && prof.cloud_policy == Some(CloudPolicy::AskOnce) && !granted;
+    // ONE shared remote/cloud classification (`endpoint_scope`) for the whole
+    // consent contract: status, grant and `chat_preflight` must never disagree,
+    // otherwise a local *kind* pointed at a remote endpoint would bypass
+    // AskOnce/Deny here while being blocked on inference.
+    let cloud = provider_is_cloud(&prov.kind, &prov.endpoint);
+    let local_only = matches!(prof.privacy, Some(Privacy::LocalOnly));
+    // LocalOnly is a hard privacy gate evaluated independently of any grant:
+    // `chat_preflight` rejects it before the consent lookup, so a grant can
+    // never rescue it and the UI must not offer a pointless dialog.
+    let privacy_ok = !(local_only && cloud);
+    let policy_ok = !cloud
+        || match prof.cloud_policy {
+            Some(CloudPolicy::Deny) => false,
+            Some(CloudPolicy::AskOnce) => granted,
+            Some(CloudPolicy::Allow) | None => true,
+        };
+    // `required` is true only for an enabled, endpoint-cloud AskOnce binding
+    // that actually reaches the consent branch of `chat_preflight`. A disabled
+    // provider is never offered a grant the backend would reject, and a
+    // privacy/Deny block is never dressed up as a solvable consent prompt.
+    let required = prov.enabled
+        && cloud
+        && privacy_ok
+        && prof.cloud_policy == Some(CloudPolicy::AskOnce)
+        && !granted;
+    // Explicit, UI-facing classification. `disabled` is the non-sendable state
+    // the UI must surface instead of a consent dialog.
+    let state = if !prov.enabled {
+        "disabled"
+    } else if !cloud {
+        "local"
+    } else if !privacy_ok {
+        "local_only"
+    } else {
+        match prof.cloud_policy {
+            Some(CloudPolicy::Deny) => "denied",
+            Some(CloudPolicy::AskOnce) => {
+                if granted {
+                    "granted"
+                } else {
+                    "consent_required"
+                }
+            }
+            Some(CloudPolicy::Allow) | None => "not_required",
+        }
+    };
     Ok(serde_json::json!({
         "provider_id": provider_id,
         "task_profile_id": task_profile_id,
         "destination": dest,
         "granted": granted,
         "required": required,
+        "enabled": prov.enabled,
+        // False whenever the backend would refuse to dispatch this binding:
+        // disabled provider, LocalOnly-to-cloud, Deny, or an ungranted AskOnce.
+        "sendable": prov.enabled && privacy_ok && policy_ok,
+        "state": state,
     })
     .to_string())
 }
@@ -1211,20 +1366,21 @@ pub fn llm_cloud_consent_grant(provider_id: String, task_profile_id: String) -> 
         .iter()
         .find(|t| t.id == task_profile_id)
         .ok_or_else(|| "task profile not found".to_string())?;
-    // Backend owns the decision. A grant is only meaningful for an enabled
-    // cloud provider bound to an AskOnce profile; it is not a universal bypass
-    // because `chat_preflight` re-derives the same binding per inference.
-    if !is_cloud_kind(&prov.kind) {
-        return Err("consent grant is only valid for cloud providers".to_string());
+    // Backend owns the decision. A grant requires an enabled, endpoint-cloud
+    // provider with an AskOnce profile; it is not a policy bypass because
+    // `chat_preflight` re-derives the same binding per inference.
+    if !prov.enabled {
+        return Err(format!("provider {} is disabled", prov.id));
+    }
+    if !provider_is_cloud(&prov.kind, &prov.endpoint) {
+        return Err("provider is not a cloud destination".to_string());
     }
     if prof.cloud_policy != Some(CloudPolicy::AskOnce) {
-        return Err("consent grant is only valid for AskOnce task profiles".to_string());
+        return Err("provider is not configured for AskOnce".to_string());
     }
-    if !prov.enabled {
-        return Err("provider is disabled".to_string());
-    }
-    let (key, _dest) = consent_binding(&cfg, &provider_id, &task_profile_id)
-        .ok_or_else(|| "cannot resolve consent binding".to_string())?;
+    let Some((key, _dest)) = consent_binding(&cfg, &provider_id, &task_profile_id) else {
+        return Err("cannot resolve consent binding".to_string());
+    };
     CLOUD_CONSENT
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1263,6 +1419,7 @@ pub fn llm_scan_models(models_dir: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 pub fn llm_set_active_model(model_path: String) -> Result<String, String> {
+    let _guard = cred_guard();
     let mut cfg = load_config_inner();
     cfg.local.active_model = model_path.clone();
     if let Some(rp) = cfg.runtime_profiles.iter_mut().find(|r| r.id=="runtime-local") {
@@ -1973,6 +2130,7 @@ pub fn llm_save_pipeline(pipeline_json: String) -> Result<String, String> {
     let pipe: Pipeline = serde_json::from_str(&pipeline_json).map_err(|e| e.to_string())?;
     // validate: on_save not allowed in P0
     if pipe.trigger=="on_save" || pipe.trigger=="scheduled" { return Err("on_save/scheduled not allowed in v0.5.6 — only manual".to_string()); }
+    let _guard = cred_guard();
     let mut cfg = load_config_inner();
     if let Some(pos) = cfg.pipelines.iter().position(|p| p.id==pipe.id) { cfg.pipelines[pos]=pipe; } else { cfg.pipelines.push(pipe); }
     save_config_inner(&cfg)?;
@@ -1980,6 +2138,7 @@ pub fn llm_save_pipeline(pipeline_json: String) -> Result<String, String> {
 }
 #[tauri::command]
 pub fn llm_delete_pipeline(id: String) -> Result<String, String> {
+    let _guard = cred_guard();
     let mut cfg = load_config_inner();
     cfg.pipelines.retain(|p| p.id!=id);
     save_config_inner(&cfg)?;
@@ -3596,6 +3755,245 @@ pub(crate) mod tests {
         let err =
             chat_preflight(&live, "consent-prov", &Some("task-chat".to_string())).unwrap_err();
         assert!(err.contains("PrivacyPolicyViolation"), "got: {}", err);
+    }
+
+    // A disabled provider must never be dressed up as a solvable consent prompt.
+    #[test]
+    fn consent_status_disabled_provider_is_non_sendable_and_not_required() {
+        let _env = IsolatedEnv::lock("consent-status-disabled");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        cfg.providers
+            .iter_mut()
+            .find(|p| p.id == "consent-prov")
+            .unwrap()
+            .enabled = false;
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["enabled"], false);
+        assert_eq!(v["state"], "disabled");
+        assert_eq!(v["required"], false, "disabled must not prompt for consent");
+        assert_eq!(v["sendable"], false);
+        // The grant command must agree and refuse.
+        assert!(llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).is_err());
+    }
+
+    // A local kind with a loopback/empty endpoint needs no consent.
+    #[test]
+    fn consent_status_local_kind_is_sendable_without_consent() {
+        let _env = IsolatedEnv::lock("consent-status-local");
+        clear_cloud_consent_for_test();
+        let v = consent_status_v("local", "task-chat");
+        assert_eq!(v["state"], "local");
+        assert_eq!(v["required"], false);
+        assert_eq!(v["sendable"], true);
+    }
+
+    // LocalOnly-to-cloud is a hard privacy block, not a solvable prompt.
+    #[test]
+    fn consent_status_local_only_cloud_is_unsolvable() {
+        let _env = IsolatedEnv::lock("consent-status-local-only");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            t.privacy = Some(Privacy::LocalOnly);
+            t.cloud_policy = Some(CloudPolicy::AskOnce);
+        }
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["state"], "local_only");
+        assert_eq!(v["required"], false, "privacy block is not a consent prompt");
+        assert_eq!(v["sendable"], false);
+    }
+
+    // Cloud Deny is a hard policy block, not a solvable prompt.
+    #[test]
+    fn consent_status_deny_is_unsolvable() {
+        let _env = IsolatedEnv::lock("consent-status-deny");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            t.cloud_policy = Some(CloudPolicy::Deny);
+        }
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["state"], "denied");
+        assert_eq!(v["required"], false);
+        assert_eq!(v["sendable"], false);
+    }
+
+    // Allow needs no grant and is immediately sendable.
+    #[test]
+    fn consent_status_allow_needs_no_grant() {
+        let _env = IsolatedEnv::lock("consent-status-allow");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            t.cloud_policy = Some(CloudPolicy::Allow);
+        }
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("consent-prov", "task-chat");
+        assert_eq!(v["state"], "not_required");
+        assert_eq!(v["required"], false);
+        assert_eq!(v["sendable"], true);
+    }
+
+    // Endpoint-aware: a local kind pointed at a remote host is cloud scope, so
+    // it must require consent and agree with `chat_preflight`.
+    #[test]
+    fn consent_status_remote_endpoint_on_local_kind_requires_consent() {
+        let _env = IsolatedEnv::lock("consent-status-remote-ollama");
+        clear_cloud_consent_for_test();
+        let mut cfg = LlmConfig::default();
+        cfg.providers.push(Provider {
+            id: "ollama-remote".to_string(),
+            name: "Remote Ollama".to_string(),
+            kind: ProviderKind::Ollama,
+            enabled: true,
+            endpoint: "https://gpu.example.com:11434".to_string(),
+            auth: None,
+            default_model: String::new(),
+            extra: HashMap::new(),
+        });
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("ollama-remote", "task-chat");
+        assert_eq!(v["state"], "consent_required", "remote local-kind must be cloud");
+        assert_eq!(v["required"], true);
+        assert_eq!(v["sendable"], false);
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "ollama-remote", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("consent_required"), "got: {}", err);
+        // Granting flips both status and preflight consistently.
+        llm_cloud_consent_grant("ollama-remote".to_string(), "task-chat".to_string()).unwrap();
+        let v = consent_status_v("ollama-remote", "task-chat");
+        assert_eq!(v["state"], "granted");
+        assert_eq!(v["sendable"], true);
+        let live = load_config_inner();
+        assert!(chat_preflight(&live, "ollama-remote", &Some("task-chat".to_string())).is_ok());
+    }
+
+    // LocalOnly must block a remote local-kind even though it is "local" by
+    // kind, and the status must not offer a consent prompt for it.
+    #[test]
+    fn local_only_blocks_remote_local_kind_without_solvable_prompt() {
+        let _env = IsolatedEnv::lock("consent-status-local-only-remote");
+        clear_cloud_consent_for_test();
+        let mut cfg = LlmConfig::default();
+        cfg.providers.push(Provider {
+            id: "ollama-remote".to_string(),
+            name: "Remote Ollama".to_string(),
+            kind: ProviderKind::Ollama,
+            enabled: true,
+            endpoint: "https://gpu.example.com:11434".to_string(),
+            auth: None,
+            default_model: String::new(),
+            extra: HashMap::new(),
+        });
+        if let Some(t) = cfg.task_profiles.iter_mut().find(|t| t.id == "task-chat") {
+            t.privacy = Some(Privacy::LocalOnly);
+            t.cloud_policy = Some(CloudPolicy::AskOnce);
+        }
+        save_config_inner(&cfg).unwrap();
+        let v = consent_status_v("ollama-remote", "task-chat");
+        assert_eq!(v["state"], "local_only");
+        assert_eq!(v["required"], false);
+        assert_eq!(v["sendable"], false);
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "ollama-remote", &Some("task-chat".to_string())).unwrap_err();
+        assert!(err.contains("PrivacyPolicyViolation"), "got: {}", err);
+    }
+
+    // Consent is bound to the profile *identity*, not just its policy tuple:
+    // two profiles with identical privacy/cloud policy must not share a grant.
+    #[test]
+    fn consent_grant_is_isolated_per_profile_identity() {
+        let _env = IsolatedEnv::lock("consent-profile-isolation");
+        clear_cloud_consent_for_test();
+        let mut cfg = consent_test_cfg();
+        cfg.task_profiles.push(TaskProfile {
+            id: "task-chat-b".to_string(),
+            name: "Chat B".to_string(),
+            model_ref: String::new(),
+            runtime_profile_id: None,
+            privacy: Some(Privacy::CloudAllowed),
+            cloud_policy: Some(CloudPolicy::AskOnce),
+            generation: HashMap::new(),
+        });
+        save_config_inner(&cfg).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["required"], true);
+        assert_eq!(consent_status_v("consent-prov", "task-chat-b")["required"], true);
+        llm_cloud_consent_grant("consent-prov".to_string(), "task-chat".to_string()).unwrap();
+        assert_eq!(consent_status_v("consent-prov", "task-chat")["required"], false);
+        assert_eq!(
+            consent_status_v("consent-prov", "task-chat-b")["required"],
+            true,
+            "a grant for one profile must not leak to an identical-policy sibling"
+        );
+        let live = load_config_inner();
+        let err =
+            chat_preflight(&live, "consent-prov", &Some("task-chat-b".to_string())).unwrap_err();
+        assert!(err.contains("consent_required"), "got: {}", err);
+    }
+
+    // F1: a config edit that adds or drops a stored credential is a credential
+    // mutation and must bump the provider's auth revision, so an in-flight
+    // authorization can never re-persist a key the user just removed via the
+    // settings form. A cosmetic edit (rename) must not bump.
+    #[test]
+    fn config_edit_credential_transitions_bump_auth_rev_but_cosmetic_edits_do_not() {
+        let _env = IsolatedEnv::lock("save-cred-bump");
+        const PID: &str = "consent-prov";
+        let cfg = consent_test_cfg();
+        save_config_inner(&cfg).unwrap();
+
+        let before = cred_guard().auth_rev_of(PID);
+        let mut cosmetic = cfg.clone();
+        cosmetic
+            .providers
+            .iter_mut()
+            .find(|p| p.id == PID)
+            .unwrap()
+            .name = "Renamed".to_string();
+        llm_save_config(serde_json::to_string(&cosmetic).unwrap()).unwrap();
+        assert_eq!(
+            cred_guard().auth_rev_of(PID),
+            before,
+            "a cosmetic edit must not bump auth_rev"
+        );
+
+        let mut added = cosmetic.clone();
+        added
+            .providers
+            .iter_mut()
+            .find(|p| p.id == PID)
+            .unwrap()
+            .auth = Some(AuthRef {
+            method: AuthMethod::ApiKey,
+            secret_ref: Some(PID.to_string()),
+            account_id: None,
+        });
+        llm_save_config(serde_json::to_string(&added).unwrap()).unwrap();
+        let after_add = cred_guard().auth_rev_of(PID);
+        assert!(after_add > before, "adding a credential ref must bump auth_rev");
+
+        let mut removed = added.clone();
+        removed
+            .providers
+            .iter_mut()
+            .find(|p| p.id == PID)
+            .unwrap()
+            .auth = Some(AuthRef {
+            method: AuthMethod::ApiKey,
+            secret_ref: None,
+            account_id: None,
+        });
+        llm_save_config(serde_json::to_string(&removed).unwrap()).unwrap();
+        assert!(
+            cred_guard().auth_rev_of(PID) > after_add,
+            "removing a credential ref must bump auth_rev"
+        );
     }
 
     #[test]

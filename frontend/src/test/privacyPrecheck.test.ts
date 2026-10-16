@@ -32,4 +32,21 @@ describe('privacy_local_only_blocks_cloud', () => {
     expect(chatPrivacyBlocked(null, 'local_only')).not.toBe('')
     expect(chatPrivacyBlocked(null, undefined)).not.toBe('')
   })
+
+  it('blocks a disabled provider with a clear message regardless of policy', () => {
+    const msg = chatPrivacyBlocked({ ...prov('openai', 'open_ai'), enabled: false }, 'cloud_allowed')
+    expect(msg).toMatch(/выключен/)
+  })
+
+  it('blocks a local kind pointed at a remote endpoint under local_only', () => {
+    const remote = { ...prov('ollama-remote', 'ollama'), endpoint: 'https://gpu.example.com:11434' }
+    const msg = chatPrivacyBlocked(remote, 'local_only')
+    expect(msg.length).toBeGreaterThan(0)
+    expect(msg).toMatch(/local_only/)
+  })
+
+  it('allows a loopback local kind under local_only', () => {
+    expect(chatPrivacyBlocked({ ...prov('ollama', 'ollama'), endpoint: 'http://127.0.0.1:11434' }, 'local_only')).toBe('')
+    expect(chatPrivacyBlocked({ ...prov('llama', 'local_llama_cpp'), endpoint: 'http://localhost:8010' }, 'local_only')).toBe('')
+  })
 })

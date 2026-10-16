@@ -69,6 +69,11 @@ export default function LLMSettings() {
   // in the backend.
   const [orOauth, setOrOauth] = useState<Record<string, { txId?: string; status?: llm.OpenRouterOauthState; destination?: string; error?: string }>>({})
   const orPoll = useRef<Record<string, number>>({})
+  // OAuth poll lifecycle: a per-provider monotonic generation guards every
+  // publish/reschedule path so a stale in-flight status response (from an
+  // earlier transaction, a reconnect, a cancel or an unmount) can never
+  // overwrite the current state or reschedule itself.
+  const orPollGen = useRef<Record<string, number>>({})
   const [showIssueDetails, setShowIssueDetails] = useState(false)
   const statusTimer = useRef<number | null>(null)
   // Discovery lifecycle: a monotonic generation guards every publish path so
@@ -282,12 +287,15 @@ export default function LLMSettings() {
 
   // Poll a transaction to a terminal state. Stops on connected/cancelled/
   // failed/expired or after a safety deadline (the backend TTL is the real cap).
-  const pollOrOauth = (pid: string, txId: string, deadline: number) => {
+  // Every publish and reschedule is guarded by `gen` so a superseded poll can
+  // never land state for a stale transaction.
+  const pollOrOauth = (pid: string, txId: string, deadline: number, gen: number) => {
+    const isCurrent = () => mountedRef.current && orPollGen.current[pid] === gen
     const tick = async () => {
-      if (!mountedRef.current) return
+      if (!isCurrent()) return
       try {
         const st = await llm.llmOpenRouterOauthStatus(txId)
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         patchOrOauth(pid, { txId, status: st.status, destination: st.destination, error: st.error ?? undefined })
         if (st.status === 'connected') {
           await refreshKeyring(pid)
@@ -301,7 +309,7 @@ export default function LLMSettings() {
           }
         }
       } catch (e) {
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         patchOrOauth(pid, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
       }
     }
@@ -309,19 +317,29 @@ export default function LLMSettings() {
   }
 
   const startOrOauth = async (pid: string) => {
+    // Bump the generation synchronously so a rapid second start (or a cancel)
+    // invalidates this attempt before its first await resolves.
+    const gen = (orPollGen.current[pid] = (orPollGen.current[pid] ?? 0) + 1)
+    const prev = orPoll.current[pid]
+    if (prev) { window.clearTimeout(prev); delete orPoll.current[pid] }
     if (!mountedRef.current) return
     try {
       const s = await llm.llmOpenRouterOauthStart(pid)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || orPollGen.current[pid] !== gen) return
       patchOrOauth(pid, { txId: s.tx_id, status: 'pending', error: undefined, destination: undefined })
       await openExternal(s.auth_url)
-      pollOrOauth(pid, s.tx_id, Date.now() + 6 * 60 * 1000)
+      if (!mountedRef.current || orPollGen.current[pid] !== gen) return
+      pollOrOauth(pid, s.tx_id, Date.now() + 6 * 60 * 1000, gen)
     } catch (e) {
+      if (!mountedRef.current || orPollGen.current[pid] !== gen) return
       patchOrOauth(pid, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
   }
 
   const cancelOrOauth = async (pid: string, txIdOverride?: string) => {
+    // Invalidate any in-flight poll for this pid so a late status response
+    // cannot resurrect the cancelled transaction.
+    orPollGen.current[pid] = (orPollGen.current[pid] ?? 0) + 1
     const t = orPoll.current[pid]
     if (t) { window.clearTimeout(t); delete orPoll.current[pid] }
     const txId = txIdOverride ?? orOauth[pid]?.txId
