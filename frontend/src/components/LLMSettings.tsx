@@ -6,7 +6,7 @@ import {
   ollamaDiscoverErrorText,
 } from './settings/types'
 import { SectionCard, SettingRow, StatusBadge, SecretReferenceField, inputStyle } from './settings/controls'
-import { KNOWN_PROVIDER_KINDS } from '../lib/llm'
+import { KNOWN_PROVIDER_KINDS, PERPLEXITY_PRESETS } from '../lib/llm'
 
 // Helper to open external URL (OAuth login)
 async function openExternal(url: string) {
@@ -635,6 +635,35 @@ export default function LLMSettings() {
                           </div>
                         )
                       })()}
+                      {p.kind === 'perplexity' && (() => {
+                        const current = p.default_model || p.model || ''
+                        return (
+                          <div style={{display:'flex', flexDirection:'column', gap:6, padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8}}>
+                            <div style={{fontSize:12, fontWeight:600}}>Perplexity Agent API</div>
+                            <div style={{fontSize:11, color:'var(--muted)'}}>
+                              Веб-ответы с источниками. Ключ API покупается отдельно в Perplexity API Console и не входит в подписку Pro/Max — оплата API независима от подписки.
+                            </div>
+                            <div style={{fontSize:11, color:'var(--muted)'}}>
+                              Кнопка «Тест» проверяет доступность API (endpoint); сам ключ подтверждается при первом запросе.
+                            </div>
+                            <div style={{fontSize:11, color:'var(--muted)'}}>Пресет (поле <code>preset</code>):</div>
+                            <div style={{display:'flex', gap:12, flexWrap:'wrap'}}>
+                              {PERPLEXITY_PRESETS.map(pr => (
+                                <label key={pr} style={{display:'flex', gap:6, alignItems:'center', fontSize:12}}>
+                                  <input type="radio" name={`pplx-preset-${p.id}`} checked={current===pr}
+                                    onChange={()=>patchProvider(p.id,{default_model:pr})} />
+                                  <code>{pr}</code>
+                                </label>
+                              ))}
+                            </div>
+                            {mode==='expert' && (
+                              <div style={{fontSize:11, color:'var(--muted)'}}>
+                                Либо укажите id модели (например <code>openai/gpt-6-luna</code>) в поле «Model mapping» — значение с «/» уходит в поле <code>model</code>.
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                       {p.kind === 'ollama' && (() => {
                         const d = discover[p.id] ?? { state: 'idle' as const, models: [] as string[], error: '' }
                         const currentDefault = p.default_model || p.model || ''
@@ -850,6 +879,7 @@ function apiUrlPlaceholder(kind: string): string {
     case 'claude': return 'https://api.anthropic.com'
     case 'deep_seek': return 'https://api.deepseek.com/v1'
     case 'open_router': return 'https://openrouter.ai/api/v1'
+    case 'perplexity': return 'https://api.perplexity.ai'
     case 'ollama': return 'http://127.0.0.1:11434'
     case 'local_llama_cpp': return 'http://127.0.0.1:8010'
     default: return 'https://…'

@@ -29,6 +29,7 @@ export const KNOWN_PROVIDER_KINDS = [
   'custom_open_ai',
   'deep_seek',
   'open_router',
+  'perplexity',
 ] as const
 export type ProviderKind = (typeof KNOWN_PROVIDER_KINDS)[number]
 export const ProviderKindSchema = z.enum(KNOWN_PROVIDER_KINDS)
@@ -508,10 +509,59 @@ export async function llmDiscoverModels(providerId: string): Promise<DiscoverRes
   const raw = await inv('llm_discover_models', { providerId }) as string
   return DiscoverResultSchema.parse(JSON.parse(raw))
 }
-export async function llmChatUniversal(providerId: string, model: string, messages: {role:string,content:string}[], requestId?: string): Promise<string> {
+// ---------- Package 14: chat result envelope with web sources ----------
+// The backend returns a JSON envelope `{ content, sources }`. `content` is the
+// exact legacy value (normalized cloud/native text, or a raw provider body that
+// extractChatText still normalizes), so this stays backward compatible: a plain
+// string (older backend / test mocks) is treated as text with no sources.
+export const ChatSourceSchema = z.object({
+  url: z.string().min(1),
+  title: z.string().optional().default(''),
+  snippet: z.string().optional().default(''),
+  date: z.string().nullable().optional(),
+  last_updated: z.string().nullable().optional(),
+}).passthrough()
+export type ChatSource = z.infer<typeof ChatSourceSchema>
+
+export interface ChatResult {
+  content: string
+  sources: ChatSource[]
+}
+
+// Perplexity Agent API presets. Mirrors the backend `PERPLEXITY_PRESETS`; the
+// selected value is sent as the Agent API `preset` field (see backend adapter).
+export const PERPLEXITY_PRESETS = ['fast', 'low', 'medium', 'high', 'xhigh'] as const
+export type PerplexityPreset = (typeof PERPLEXITY_PRESETS)[number]
+
+/** Tolerant parse of the chat IPC result: envelope, or legacy plain string. */
+export function parseChatResult(raw: unknown): ChatResult {
+  if (typeof raw !== 'string') {
+    return { content: raw == null ? '' : String(raw), sources: [] }
+  }
+  try {
+    const j: unknown = JSON.parse(raw)
+    if (j && typeof j === 'object' && !Array.isArray(j)) {
+      const obj = j as Record<string, unknown>
+      if (typeof obj['content'] === 'string') {
+        const sources: ChatSource[] = []
+        if (Array.isArray(obj['sources'])) {
+          for (const s of obj['sources']) {
+            const p = ChatSourceSchema.safeParse(s)
+            if (p.success) sources.push(p.data)
+          }
+        }
+        return { content: obj['content'], sources }
+      }
+    }
+  } catch { /* not JSON: legacy plain text */ }
+  return { content: raw, sources: [] }
+}
+
+export async function llmChatUniversal(providerId: string, model: string, messages: {role:string,content:string}[], requestId?: string): Promise<ChatResult> {
   const inv = getInvoke()
   if (!inv) throw new Error('no tauri')
-  return await inv('llm_chat_universal', { providerId, model, messages, requestId: requestId ?? null }) as string
+  const raw = await inv('llm_chat_universal', { providerId, model, messages, requestId: requestId ?? null }) as string
+  return parseChatResult(raw)
 }
 // Ask the backend to abort the client-side wait for an in-flight chat request.
 // Returns "cancelled" | "stopping" | "not_found"; repeated/late calls are safe.

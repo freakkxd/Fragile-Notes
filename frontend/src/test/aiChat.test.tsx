@@ -123,6 +123,32 @@ describe('ai_chat_cloud_text_response_displayed', () => {
   })
 })
 
+describe('ai_chat_sources_rendered_as_safe_links', () => {
+  it('renders envelope sources as clickable http(s) links and drops unsafe schemes', async () => {
+    const user = userEvent.setup()
+    mockConfig(undefined, () => JSON.stringify({
+      content: 'grounded answer',
+      sources: [
+        { url: 'https://example.com/a', title: 'A' },
+        { url: 'javascript:alert(1)', title: 'evil' },
+      ],
+    }))
+    render(<AIChatFull />)
+    await user.click(await screen.findByLabelText('Провайдер'))
+    await user.click(await screen.findByRole('option', { name: /OpenAI \(cloud\)/ }))
+    await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'hi')
+    await user.click(screen.getByRole('button', { name: 'Отправить' }))
+    expect(await screen.findByText('grounded answer')).toBeTruthy()
+    expect(screen.getByText('Источники')).toBeTruthy()
+    const link = screen.getByRole('link', { name: 'A' })
+    expect(link.getAttribute('href')).toBe('https://example.com/a')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toContain('noopener')
+    // A dangerous scheme must never become a clickable link.
+    expect(screen.queryByRole('link', { name: 'evil' })).toBeNull()
+  })
+})
+
 describe('ai_chat_local_only_blocks_cloud_invoke', () => {
   it('blocks send with explanation and never invokes backend', async () => {
     const user = userEvent.setup()

@@ -478,3 +478,182 @@ async fn oversized_success_body_rejected() {
         .unwrap_err();
     assert_eq!(err.code(), "malformed_response");
 }
+
+// ---------------------------------------------------------------------------
+// Package 14 — Perplexity Agent API transport (mock server only).
+// ---------------------------------------------------------------------------
+
+use super::perplexity::PerplexityAdapter;
+
+fn pplx_conn(port: u16) -> ProviderConnection {
+    ProviderConnection {
+        id: "pplx".to_string(),
+        kind: ProviderKind::Perplexity,
+        name: "Perplexity".to_string(),
+        enabled: true,
+        // Cloud scope with a loopback http endpoint is allowed for tests only.
+        scope: ProviderScope::Cloud,
+        endpoint: Some(format!("http://127.0.0.1:{}", port)),
+        auth: Some(AuthReference::new("keychain://fragile-notes/test".to_string()).unwrap()),
+    }
+}
+
+fn pplx_model(preset: &str) -> ProviderModel {
+    ProviderModel {
+        id: format!("pplx:{}", preset),
+        provider_id: "pplx".to_string(),
+        remote_id: preset.to_string(),
+        display_name: preset.to_string(),
+        capabilities: vec![Capability::Chat],
+        capability_source: Some(CapabilitySource::Manual),
+        context_length: None,
+        dimensions: None,
+        pricing: None,
+        source: ModelSource::Manual,
+    }
+}
+
+fn pplx_adapter(port: u16, timeout: Duration) -> PerplexityAdapter {
+    PerplexityAdapter::new(
+        pplx_conn(port),
+        secrets(),
+        timeout,
+        vec![Capability::Chat],
+        CapabilitySource::Manual,
+    )
+    .unwrap()
+}
+
+fn agent_ok_body() -> String {
+    r#"{"id":"r1","object":"response","status":"completed","model":"openai/gpt-6-luna",
+"output":[
+  {"type":"search_results","queries":["q"],"results":[{"id":1,"url":"https://ex.com/a","title":"A","snippet":"sa"}]},
+  {"type":"message","role":"assistant","status":"completed","id":"m1","content":[
+     {"type":"output_text","text":"Hello from the web","annotations":[{"type":"url_citation","url":"https://ex.com/b","title":"B"}]}]}
+],
+"usage":{"input_tokens":7,"output_tokens":3,"cost":0.0}}"#
+        .to_string()
+}
+
+#[tokio::test]
+async fn perplexity_chat_full_preserves_sources_and_sends_preset() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let full = a
+        .chat_full(&pplx_model("low"), chat_req(), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(full.content, "Hello from the web");
+    assert_eq!(full.model, "openai/gpt-6-luna");
+    assert_eq!(full.usage.unwrap().total_tokens, Some(10));
+    let urls: Vec<&str> = full.sources.iter().map(|s| s.url.as_str()).collect();
+    assert_eq!(urls, vec!["https://ex.com/a", "https://ex.com/b"]);
+    // Wire assertions: POST /v1/agent, preset form, remote_id never the internal id.
+    let raw = m.captured.lock().unwrap().join("\n");
+    assert!(raw.starts_with("POST /v1/agent"), "got: {}", raw.lines().next().unwrap_or(""));
+    assert!(raw.contains("\"preset\":\"low\""));
+    assert!(!raw.contains("pplx:low"), "internal id never sent");
+    let lower = raw.to_lowercase();
+    assert_eq!(lower.matches("bearer test-key-123").count(), 1);
+    assert_eq!(m.hits.load(Ordering::SeqCst), 1, "no retry / no fallback");
+}
+
+#[tokio::test]
+async fn perplexity_model_selector_posts_model_field() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    a.chat_full(&pplx_model("openai/gpt-6-luna"), chat_req(), CancellationToken::new())
+        .await
+        .unwrap();
+    let raw = m.captured.lock().unwrap().join("\n");
+    assert!(raw.contains("\"model\":\"openai/gpt-6-luna\""));
+    assert!(!raw.contains("\"preset\""));
+}
+
+#[tokio::test]
+async fn perplexity_missing_credential_no_network() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = PerplexityAdapter::new(
+        pplx_conn(m.port),
+        Arc::new(NoSecretStore),
+        Duration::from_secs(5),
+        vec![Capability::Chat],
+        CapabilitySource::Manual,
+    )
+    .unwrap();
+    let err = a
+        .chat_full(&pplx_model("low"), chat_req(), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "credentials_missing");
+    assert_eq!(m.hits.load(Ordering::SeqCst), 0, "no network before credential");
+}
+
+#[tokio::test]
+async fn perplexity_error_status_mapped_and_no_fallback() {
+    for (status, code) in [(401u16, "unauthorized"), (429, "rate_limited"), (500, "server_error")] {
+        let m = spawn_wire(status, format!(r#"{{"error":"e{}"}}"#, status), 0).await;
+        let a = pplx_adapter(m.port, Duration::from_secs(5));
+        let err = a
+            .chat_full(&pplx_model("low"), chat_req(), CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), code, "status {}", status);
+        assert_eq!(m.hits.load(Ordering::SeqCst), 1, "no retry on {}", status);
+    }
+}
+
+#[tokio::test]
+async fn perplexity_cancel_before_request_no_network() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let err = a
+        .chat_full(&pplx_model("low"), chat_req(), cancel)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "cancelled");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(m.hits.load(Ordering::SeqCst), 0, "no network on pre-cancel");
+}
+
+#[tokio::test]
+async fn perplexity_list_models_leaves_capabilities_unknown() {
+    let body = r#"{"object":"list","data":[{"id":"openai/gpt-6-luna","owned_by":"openai"}]}"#.to_string();
+    let m = spawn_wire(200, body, 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let models = a.list_models(CancellationToken::new()).await.unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].remote_id, "openai/gpt-6-luna");
+    assert_eq!(models[0].id, "pplx:openai/gpt-6-luna");
+    // Never guessed from the catalogue id; never the internal id sent upstream.
+    assert!(models[0].capabilities.is_empty());
+    assert!(models[0].capability_source.is_none());
+    let raw = m.captured.lock().unwrap().join("\n");
+    assert!(raw.starts_with("GET /v1/models"), "got: {}", raw.lines().next().unwrap_or(""));
+}
+
+#[tokio::test]
+async fn perplexity_health_proves_reachability_but_not_auth() {
+    let m = spawn_wire(200, r#"{"object":"list","data":[]}"#.to_string(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let h = a.health(CancellationToken::new()).await.unwrap();
+    assert!(h.reachable);
+    // `/v1/models` needs no auth, so it cannot prove the key is valid.
+    assert_eq!(h.authenticated, None);
+    assert_eq!(h.capabilities, vec![Capability::Chat]);
+}
+
+#[tokio::test]
+async fn perplexity_secret_absent_from_errors_and_debug() {
+    let m = spawn_wire(500, "boom".to_string(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let err = a
+        .chat_full(&pplx_model("low"), chat_req(), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(!format!("{:?}", err).contains("test-key-123"));
+    assert!(!format!("{:?}", a).contains("test-key-123"));
+    assert!(!format!("{:?}", a).contains("keychain://"));
+}

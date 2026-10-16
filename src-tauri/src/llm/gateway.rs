@@ -122,6 +122,16 @@ pub fn build_chat_http_request(
             h.insert("anthropic-version".to_string(), "2023-06-01".to_string());
             (u, h)
         }
+        // Perplexity has no OpenAI-chat-completions shape; it is served by the
+        // dedicated Agent API adapter. Never build a fallback request here —
+        // a silent `/v1/chat/completions` call would lose sources and is wrong.
+        ProviderKind::Perplexity => {
+            return Err(
+                "perplexity uses the Agent API dispatch (gateway_perplexity_via_registry), \
+                 not the OpenAI-compatible gateway builder"
+                    .to_string(),
+            );
+        }
     };
     let body = match kind {
         ProviderKind::Gemini => {
@@ -269,6 +279,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(or.url, "https://openrouter.ai/api/v1/chat/completions");
+    }
+
+    #[test]
+    fn perplexity_has_no_openai_gateway_builder_fallback() {
+        // The Agent API is not OpenAI chat-completions compatible; the builder
+        // must refuse rather than silently emit a `/v1/chat/completions` request.
+        let err = build_chat_http_request(
+            &ProviderKind::Perplexity,
+            "",
+            "low",
+            8010,
+            "",
+            &msgs(),
+            &gen(),
+            "pplx-x",
+        )
+        .unwrap_err();
+        assert!(err.contains("Perplexity") || err.contains("perplexity"), "{}", err);
     }
 
     #[test]

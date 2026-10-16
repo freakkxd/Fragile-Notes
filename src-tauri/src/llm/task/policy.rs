@@ -29,7 +29,8 @@ pub fn scope_of(kind: &ProviderKind, endpoint: &str) -> ProviderScope {
         | ProviderKind::Gemini
         | ProviderKind::Claude
         | ProviderKind::DeepSeek
-        | ProviderKind::OpenRouter => ProviderScope::Cloud,
+        | ProviderKind::OpenRouter
+        | ProviderKind::Perplexity => ProviderScope::Cloud,
     }
 }
 

@@ -90,6 +90,10 @@ pub enum ProviderKind {
     CustomOpenAI,
     DeepSeek,
     OpenRouter,
+    // Perplexity Agent API (POST /v1/agent). Not OpenAI chat-completions
+    // compatible: a dedicated adapter parses `output` items and preserves
+    // sources/citations. Never routed through the legacy gateway builder.
+    Perplexity,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -588,6 +592,7 @@ fn migrate_to_v2(old: serde_json::Value, ks: &dyn KeyStore) -> Result<serde_json
                 "claude" => ProviderKind::Claude,
                 "deep_seek" => ProviderKind::DeepSeek,
                 "open_router" => ProviderKind::OpenRouter,
+                "perplexity" => ProviderKind::Perplexity,
                 _ => ProviderKind::CustomOpenAI,
             };
             let enabled = pv.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1929,6 +1934,118 @@ pub async fn gateway_gemini_via_registry(
     Ok(resp.content)
 }
 
+// ---------- Perplexity Agent API dispatch (Package 14) ----------
+// Dedicated, non-OpenAI-compatible path: the Agent API returns typed `output`
+// items (message text + search results + url_citation annotations). We keep
+// those sources instead of discarding them, so this returns a full response,
+// not just text. Never falls back to the legacy gateway.
+pub async fn gateway_perplexity_via_registry(
+    req: ChatRequest,
+    cancel: tokio_util::sync::CancellationToken,
+    secrets: std::sync::Arc<dyn provider::SecretStore>,
+    timeout: Duration,
+) -> Result<provider::ChatFullResponse, String> {
+    let cfg = load_config_inner();
+    // Route-independent preflight (privacy, cloud policy, enabled, generation).
+    let (prov, gen) = chat_preflight(&cfg, &req.provider_id, &req.task_profile_id)?;
+    if prov.kind != ProviderKind::Perplexity {
+        return Err(format!("dispatch unsupported for {:?}: use gateway_chat", prov.kind));
+    }
+    // Model identity: `model_ref` is a preset name (fast/low/medium/high/xhigh)
+    // or a provider model id (contains '/'); a catalog hit may resolve an
+    // internal id to its remote_id. Only the remote/preset selector is sent.
+    let mut remote = if !req.model_ref.is_empty() { req.model_ref.clone() } else { prov.default_model.clone() };
+    if remote.trim().is_empty() {
+        return Err("dispatch: no model/preset selected (model_ref and provider default_model are empty)".to_string());
+    }
+    if let Some(known) = cfg.models.iter().find(|m| m.id==req.model_ref || (!m.remote_id.is_empty() && m.remote_id==remote)) {
+        if known.provider_id != prov.id {
+            return Err(format!("model {} belongs to {}, not {}", known.id, known.provider_id, prov.id));
+        }
+        if !known.remote_id.is_empty() {
+            remote = known.remote_id.clone();
+        }
+    }
+    let model = provider::ProviderModel {
+        id: format!("{}:{}", prov.id, remote),
+        provider_id: prov.id.clone(),
+        remote_id: remote.clone(),
+        display_name: remote.clone(),
+        capabilities: vec![Capability::Chat],
+        capability_source: None,
+        context_length: None,
+        dimensions: None,
+        pricing: None,
+        source: crate::llm::models::types::ModelSource::Manual,
+    };
+    let auth = match &prov.auth {
+        Some(a) if a.method == AuthMethod::ApiKey => match &a.secret_ref {
+            Some(r) => Some(provider::AuthReference::new(r.clone()).map_err(|e| format!("dispatch: {}", e))?),
+            None => None,
+        },
+        _ => None,
+    };
+    let connection = provider::ProviderConnection {
+        id: prov.id.clone(),
+        kind: ProviderKind::Perplexity,
+        name: prov.name.clone(),
+        enabled: true,
+        scope: crate::llm::task::policy::ProviderScope::Cloud,
+        endpoint: if prov.endpoint.is_empty() { None } else { Some(prov.endpoint.clone()) },
+        auth,
+    };
+    let adapter = provider::PerplexityAdapter::new(
+        connection,
+        secrets,
+        timeout,
+        vec![Capability::Chat],
+        CapabilitySource::Manual,
+    )
+    .map_err(|e| dispatch_err(&e))?;
+    // Legacy role strings -> adapter roles. System/assistant are preserved so
+    // multi-turn history replays faithfully in the `input` array.
+    let messages = req.messages.iter().map(|m| {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+        let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let role = match role {
+            "system" => provider::ChatRole::System,
+            "assistant" => provider::ChatRole::Assistant,
+            _ => provider::ChatRole::User,
+        };
+        provider::ChatMessage { role, content }
+    }).collect::<Vec<_>>();
+    let preq = provider::ChatRequest {
+        messages,
+        // Forwarded for shape parity; the Agent API builder deliberately
+        // ignores these so a preset keeps its tuned generation defaults.
+        temperature: Some(gen.temperature),
+        top_p: Some(gen.top_p),
+        max_tokens: Some(gen.max_tokens),
+        response_format: None,
+    };
+    adapter
+        .chat_full(&model, preq, cancel)
+        .await
+        .map_err(|e| dispatch_err(&e))
+}
+
+/// Result of a routed chat call: assistant text plus optional web sources.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChatDispatchResult {
+    pub content: String,
+    pub sources: Vec<provider::ChatSource>,
+}
+
+/// IPC envelope carrying the assistant text and clickable sources. Serialized
+/// to `llm_chat_universal`'s string result. Kept additive: `content` is the
+/// exact legacy value (normalized text for cloud/native paths, raw provider
+/// body for the legacy gateway), so existing frontend extraction still works.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ChatIpcResult {
+    content: String,
+    sources: Vec<provider::ChatSource>,
+}
+
 fn dispatch_err(e: &provider::ProviderError) -> String {
     let capped: String = e.safe_message().chars().take(600).collect();
     format!("LLM {}: {}", e.code(), capped)
@@ -1944,13 +2061,14 @@ fn safe_url_for_error(url: &str) -> String {
 }
 
 // ---------- Production caller router (non-breaking) ----------
-// Peek provider kind from config (no network I/O): Claude goes through the
-// native dispatch foundation, every other kind keeps the legacy gateway
-// byte-for-byte. Unknown/disabled providers keep existing errors.
-pub async fn gateway_chat_routed(
+// Peek provider kind from config (no network I/O): Claude/Gemini go through
+// the native dispatch foundation, Perplexity through the Agent API dispatch,
+// every other kind keeps the legacy gateway byte-for-byte. Unknown/disabled
+// providers keep existing errors.
+pub async fn gateway_chat_routed_ex(
     req: ChatRequest,
     cancel: tokio_util::sync::CancellationToken,
-) -> Result<String, String> {
+) -> Result<ChatDispatchResult, String> {
     let kind = {
         let cfg = load_config_inner();
         cfg.providers.iter().find(|p| p.id == req.provider_id).map(|p| p.kind.clone())
@@ -1964,6 +2082,7 @@ pub async fn gateway_chat_routed(
                 Duration::from_secs(90),
             )
             .await
+            .map(|content| ChatDispatchResult { content, sources: Vec::new() })
         }
         Some(ProviderKind::Gemini) => {
             gateway_gemini_via_registry(
@@ -1973,9 +2092,31 @@ pub async fn gateway_chat_routed(
                 Duration::from_secs(90),
             )
             .await
+            .map(|content| ChatDispatchResult { content, sources: Vec::new() })
         }
-        _ => gateway_chat(req, cancel).await,
+        Some(ProviderKind::Perplexity) => {
+            gateway_perplexity_via_registry(
+                req,
+                cancel,
+                std::sync::Arc::new(provider::KeyringSecretStore),
+                Duration::from_secs(90),
+            )
+            .await
+            .map(|full| ChatDispatchResult { content: full.content, sources: full.sources })
+        }
+        _ => gateway_chat(req, cancel)
+            .await
+            .map(|content| ChatDispatchResult { content, sources: Vec::new() }),
     }
+}
+
+/// Text-only view of [`gateway_chat_routed_ex`] (legacy callers: pipelines and
+/// the existing router tests).
+pub async fn gateway_chat_routed(
+    req: ChatRequest,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<String, String> {
+    gateway_chat_routed_ex(req, cancel).await.map(|r| r.content)
 }
 
 // ---------- request-scoped chat cancellation (IPC) ----------
@@ -2090,12 +2231,19 @@ pub async fn llm_chat_universal(
         None => None,
     };
     let cancel = registration.as_ref().map(|r| r.token.clone()).unwrap_or_default();
-    let result = gateway_chat_routed(req, cancel).await;
+    let outcome = gateway_chat_routed_ex(req, cancel).await;
     if let Some(reg) = &registration {
         let mut map = CHAT_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
         map.complete_registration(reg);
     }
-    result
+    // Serialize a typed envelope so clickable sources can reach the UI. The
+    // `content` field preserves the exact legacy value, so non-Perplexity
+    // providers keep rendering through the existing extraction path.
+    match outcome {
+        Ok(r) => serde_json::to_string(&ChatIpcResult { content: r.content, sources: r.sources })
+            .map_err(|e| e.to_string()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Cancel an in-flight chat request started by `llm_chat_universal`.
@@ -2453,6 +2601,7 @@ pub(crate) mod tests {
         assert_eq!(s(&ProviderKind::Claude), "\"claude\"");
         assert_eq!(s(&ProviderKind::DeepSeek), "\"deep_seek\"");
         assert_eq!(s(&ProviderKind::OpenRouter), "\"open_router\"");
+        assert_eq!(s(&ProviderKind::Perplexity), "\"perplexity\"");
     }
 
     #[test]
@@ -2462,6 +2611,7 @@ pub(crate) mod tests {
         assert_eq!(de("\"open_a_i\"").unwrap(), ProviderKind::OpenAI);
         assert_eq!(de("\"custom_open_ai\"").unwrap(), ProviderKind::CustomOpenAI);
         assert_eq!(de("\"custom_open_a_i\"").unwrap(), ProviderKind::CustomOpenAI);
+        assert_eq!(de("\"perplexity\"").unwrap(), ProviderKind::Perplexity);
         assert!(de("\"not_a_kind\"").is_err());
     }
 

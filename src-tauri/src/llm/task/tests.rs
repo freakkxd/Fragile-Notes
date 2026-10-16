@@ -69,6 +69,21 @@ mod task_tests {
     }
 
     #[test]
+    fn test_perplexity_is_cloud_regardless_of_endpoint() {
+        // Package 14: Perplexity is a cloud provider by kind, so local_only
+        // tasks can never silently reach it (even via a loopback test endpoint).
+        assert_eq!(
+            scope_of(&ProviderKind::Perplexity, "https://api.perplexity.ai"),
+            ProviderScope::Cloud
+        );
+        assert_eq!(
+            scope_of(&ProviderKind::Perplexity, "http://127.0.0.1:9999"),
+            ProviderScope::Cloud
+        );
+        assert!(validate_privacy(&Some(Privacy::LocalOnly), &ProviderScope::Cloud).is_err());
+    }
+
+    #[test]
     fn test_missing_model_fails_before_spawn() {
         let cfg = LlmConfig::default();
         // default task-chat has empty model_ref -> should fail before spawn

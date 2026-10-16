@@ -141,6 +141,8 @@ pub fn default_endpoint(kind: &ProviderKind) -> Option<String> {
         ProviderKind::OpenRouter => Some("https://openrouter.ai/api/v1".to_string()),
         ProviderKind::Gemini => Some("https://generativelanguage.googleapis.com".to_string()),
         ProviderKind::Claude => Some("https://api.anthropic.com".to_string()),
+        // Perplexity Agent API base. Operations join `/v1/agent`, `/v1/models`.
+        ProviderKind::Perplexity => Some("https://api.perplexity.ai".to_string()),
     }
 }
 

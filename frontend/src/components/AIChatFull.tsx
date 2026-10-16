@@ -3,7 +3,7 @@ import * as llm from '../lib/llm'
 import { isLocalKind, providerIsCloud, ollamaDiscoverErrorText } from './settings/types'
 import ComposerMenu from './chat/ComposerMenu'
 
-type Msg = { role: 'user' | 'assistant'; content: string }
+type Msg = { role: 'user' | 'assistant'; content: string; sources?: llm.ChatSource[] }
 
 /** Pure helpers below are exported for unit tests; component behavior is unchanged. */
 
@@ -84,6 +84,21 @@ export function extractChatText(raw: unknown): string {
   let txt = String(raw)
   try { const j = JSON.parse(txt); txt = j.choices?.[0]?.message?.content || txt } catch {}
   return txt
+}
+
+/** Defense in depth: only http(s) URLs may become clickable. The backend also
+ *  filters to http(s), but the UI never trusts that alone (a hostile/legacy
+ *  payload must not yield a `javascript:` link). */
+export function safeSourceLinks(sources: llm.ChatSource[] | undefined): llm.ChatSource[] {
+  if (!sources || sources.length === 0) return []
+  return sources.filter((s) => {
+    try {
+      const u = new URL(s.url)
+      return u.protocol === 'http:' || u.protocol === 'https:'
+    } catch {
+      return false
+    }
+  })
 }
 
 export default function AIChatFull() {
@@ -307,7 +322,8 @@ export default function AIChatFull() {
       const res = await llm.llmChatUniversal(pid, mdl, history.map(m=>({role:m.role, content:m.content})), requestId)
       if (!isCurrent()) return
       // Local legacy providers return raw JSON; cloud returns normalized text.
-      setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res) }])
+      // Web sources (Perplexity) ride alongside the text in the envelope.
+      setMsgs((m) => [...m, { role: 'assistant', content: extractChatText(res.content), sources: res.sources }])
     } catch (e) {
       if (!isCurrent()) return
       setMsgs((m)=>[...m, {role:'assistant', content: classifyError(e)}])
@@ -479,9 +495,26 @@ export default function AIChatFull() {
         </div>
       )}
       <div style={{ flex:1, minHeight:0, overflow:'auto', padding:12, display:'flex', flexDirection:'column', gap:8 }}>
-        {msgs.map((m,i)=> (
-          <div key={i} style={{ alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'80%', padding:'8px 12px', borderRadius:12, background: m.role==='user'?'rgba(130,168,255,.14)':'var(--panel-2)', border:'1px solid var(--border)', fontSize:13 }}>{m.content}</div>
-        ))}
+        {msgs.map((m,i)=> {
+          const links = m.role==='assistant' ? safeSourceLinks(m.sources) : []
+          return (
+            <div key={i} style={{ alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'80%', padding:'8px 12px', borderRadius:12, background: m.role==='user'?'rgba(130,168,255,.14)':'var(--panel-2)', border:'1px solid var(--border)', fontSize:13 }}>
+              <div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div>
+              {links.length > 0 && (
+                <div style={{ marginTop:8, paddingTop:6, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:4 }}>
+                  <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600 }}>Источники</div>
+                  {links.map((s, k) => (
+                    <a key={k} href={s.url} target="_blank" rel="noopener noreferrer"
+                       title={s.snippet || s.url}
+                       style={{ fontSize:12, color:'var(--accent)', overflowWrap:'anywhere', textDecoration:'underline' }}>
+                      {s.title || s.url}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
       <div className={`ai-composer${expanded ? ' is-expanded' : ' is-collapsed'}`}>
         <div className="ai-card">

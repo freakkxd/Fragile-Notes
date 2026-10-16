@@ -7,6 +7,7 @@ pub mod openai;
 pub mod openai_native;
 pub mod gemini;
 pub mod claude;
+pub mod perplexity;
 pub mod types;
 
 pub use types::{
@@ -21,6 +22,10 @@ pub use openai::{
 pub use openai_native::{OpenAiNativeAdapter, build_native_chat_body};
 pub use gemini::{GeminiEmbedBridge, GeminiEmbedParams, GeminiNativeAdapter, GeminiTaskType, OwnedGeminiEmbeddingProvider, build_gemini_body, capabilities_from_methods};
 pub use claude::{ClaudeChatBridge, ClaudeNativeAdapter, ANTHROPIC_VERSION, DEFAULT_MAX_TOKENS, build_claude_body};
+pub use perplexity::{
+    ChatFullResponse, ChatSource, PerplexityAdapter, PERPLEXITY_PRESETS, build_agent_body,
+    parse_agent_response,
+};
 
 #[cfg(test)]
 mod tests;
