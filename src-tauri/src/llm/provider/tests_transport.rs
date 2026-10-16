@@ -657,3 +657,33 @@ async fn perplexity_secret_absent_from_errors_and_debug() {
     assert!(!format!("{:?}", a).contains("test-key-123"));
     assert!(!format!("{:?}", a).contains("keychain://"));
 }
+
+
+#[tokio::test]
+async fn perplexity_anthropic_direct_model_requires_max_output_tokens() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let mut req = chat_req();
+    req.max_tokens = None;
+    let err = a
+        .chat_full(&pplx_model("anthropic/claude-opus-4-5"), req, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "invalid_request");
+    assert_eq!(m.hits.load(Ordering::SeqCst), 0, "no network when invalid");
+}
+
+#[tokio::test]
+async fn perplexity_anthropic_direct_model_sends_max_output_tokens() {
+    let m = spawn_wire(200, agent_ok_body(), 0).await;
+    let a = pplx_adapter(m.port, Duration::from_secs(5));
+    let mut req = chat_req();
+    req.max_tokens = Some(512);
+    a.chat_full(&pplx_model("anthropic/claude-opus-4-5"), req, CancellationToken::new())
+        .await
+        .unwrap();
+    let raw = m.captured.lock().unwrap().join("\n");
+    assert!(raw.contains("\"model\":\"anthropic/claude-opus-4-5\""));
+    assert!(raw.contains("\"max_output_tokens\":512"));
+    assert!(!raw.contains("\"preset\""));
+}

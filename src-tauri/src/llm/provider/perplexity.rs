@@ -119,8 +119,30 @@ pub fn build_agent_body(
         .collect();
     let mut body = serde_json::json!({ "input": input });
     if selector.contains('/') {
+        // Direct model mode (provider model id). Do NOT send preset.
         body["model"] = serde_json::json!(selector);
+        // For Anthropic models, Agent API requires `max_output_tokens`.
+        // Only forward when explicitly provided and > 0; never invent a budget.
+        if selector.starts_with("anthropic/") {
+            let v = request.max_tokens;
+            if v == Some(0) || v.is_none() {
+                return Err(ProviderError::InvalidRequest(
+                    "anthropic/* models require max_output_tokens > 0 (from generation settings)"
+                        .to_string(),
+                ));
+            }
+            if let Some(mt) = v {
+                if mt > 0 {
+                    body["max_output_tokens"] = serde_json::json!(mt);
+                } else {
+                    return Err(ProviderError::InvalidRequest(
+                        "anthropic/* models require max_output_tokens > 0".to_string(),
+                    ));
+                }
+            }
+        }
     } else {
+        // Preset mode: do not override preset tuning with generation params.
         body["preset"] = serde_json::json!(selector);
     }
     Ok(body)
@@ -134,17 +156,40 @@ pub fn parse_agent_response(
     let json: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|e| ProviderError::MalformedResponse(redact_secrets(&e.to_string())))?;
 
-    // A terminal `failed` response carries an error object; surface it.
-    if json.get("status").and_then(|v| v.as_str()) == Some("failed") {
-        let msg = json
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("agent run failed");
-        return Err(ProviderError::Server {
-            status: 200,
-            message: redact_secrets(msg),
-        });
+    // Strict status handling for synchronous response shape.
+    match json.get("status").and_then(|v| v.as_str()) {
+        Some("completed") => {}
+        Some("failed") => {
+            let msg = json
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("agent run failed");
+            return Err(ProviderError::Server {
+                status: 200,
+                message: redact_secrets(msg),
+            });
+        }
+        Some("cancelled") => {
+            return Err(ProviderError::Cancelled);
+        }
+        Some("incomplete") | Some("in_progress") | Some("queued") => {
+            return Err(ProviderError::MalformedResponse(format!(
+                "non-terminal status '{}' from agent response",
+                json.get("status").and_then(|v| v.as_str()).unwrap_or("")
+            )));
+        }
+        Some(s) => {
+            return Err(ProviderError::MalformedResponse(format!(
+                "unknown status '{}' from agent response",
+                s
+            )));
+        }
+        None => {
+            return Err(ProviderError::MalformedResponse(
+                "missing status in agent response".to_string(),
+            ));
+        }
     }
 
     let output = json
