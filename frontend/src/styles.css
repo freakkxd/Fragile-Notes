@@ -186,3 +186,6 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--fg);overf
 }
 
 /* ── end AI composer ── */
+
+select { color: var(--fg); background: var(--panel-2); }
+select option { color: var(--fg); background: var(--panel-2); }

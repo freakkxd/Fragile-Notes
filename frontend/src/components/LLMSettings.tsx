@@ -785,7 +785,7 @@ export default function LLMSettings() {
                   <strong style={{fontSize:12}}>{t.name}</strong>
                   <span style={{fontSize:11, color:'var(--muted)'}}>model: {t.model_ref || '—'}</span>
                   <label style={{fontSize:11, display:'flex', gap:4, alignItems:'center'}}>privacy
-                    <select value={t.privacy ?? ''} onChange={e=>setCfg({...cfg, task_profiles: cfg.task_profiles.map(x => x.id===t.id ? {...x, privacy: e.target.value as llm.TaskProfile['privacy']} : x)})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11}}>
+                    <select value={t.privacy ?? ''} onChange={e=>setCfg({...cfg, task_profiles: cfg.task_profiles.map(x => x.id===t.id ? {...x, privacy: e.target.value as llm.TaskProfile['privacy']} : x)})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, color:'var(--fg)'}}>
                       <option value="">—</option><option value="local_only">local_only</option><option value="cloud_allowed">cloud_allowed</option>
                     </select>
                   </label>
@@ -952,7 +952,7 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
         <input value={editing.name} onChange={e=>setEditing({...editing, name:e.target.value})} placeholder="Название" style={{padding:'6px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8, color:'var(--fg)'}} />
         <input value={editing.description} onChange={e=>setEditing({...editing, description:e.target.value})} placeholder="Описание — чем пользуется юзер" style={{padding:'6px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8, color:'var(--fg)', fontSize:12}} />
         <div style={{display:'flex', gap:8, alignItems:'center'}}>
-          <label style={{fontSize:12}}>Триггер <select value={editing.trigger} onChange={e=>setEditing({...editing, trigger:e.target.value})} style={{marginLeft:6, padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6}}><option value="manual">manual</option><option value="on_save">on_save</option><option value="scheduled">scheduled</option></select></label>
+          <label style={{fontSize:12}}>Триггер <select value={editing.trigger} onChange={e=>setEditing({...editing, trigger:e.target.value})} style={{marginLeft:6, padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)'}}><option value="manual">manual</option><option value="on_save">on_save</option><option value="scheduled">scheduled</option></select></label>
           <label style={{fontSize:12, display:'flex', gap:6, alignItems:'center'}}><input type="checkbox" checked={editing.enabled} onChange={e=>setEditing({...editing, enabled:e.target.checked})} /> вкл</label>
         </div>
 
@@ -965,7 +965,7 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
               }} style={{padding:'4px 6px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, minWidth:120}} />
               <select value={s.provider_id} onChange={e=>{
                 const ns=[...editing.steps]; ns[idx]={...s, provider_id:e.target.value}; setEditing({...editing, steps:ns})
-              }} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12}}>
+              }} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, color:'var(--fg)'}}>
                 {providers.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <input value={s.model} onChange={e=>{
@@ -981,7 +981,7 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
           ))}
           <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
             <input value={newStep.name as string ?? ''} onChange={e=>setNewStep({...newStep, name:e.target.value})} placeholder="имя шага" style={{padding:'4px 6px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12}} />
-            <select value={newStep.provider_id as string} onChange={e=>setNewStep({...newStep, provider_id:e.target.value})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12}}>
+            <select value={newStep.provider_id as string} onChange={e=>setNewStep({...newStep, provider_id:e.target.value})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, color:'var(--fg)'}}>
               {providers.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <button onClick={()=>{
