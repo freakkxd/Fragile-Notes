@@ -46,6 +46,93 @@ export function StatusBadge({ state }: { state: 'ready' | 'unknown' | 'error' | 
 }
 
 /** Keyring reference field: never shows or persists a raw key. */
+
+export function Button({
+  children,
+  variant = 'secondary',
+  disabled = false,
+  onClick,
+  type = 'button',
+  ariaLabel,
+  style,
+}: {
+  children: React.ReactNode
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+  disabled?: boolean
+  onClick?: (e: React.MouseEvent) => void
+  type?: 'button' | 'submit' | 'reset'
+  ariaLabel?: string
+  style?: React.CSSProperties
+}) {
+  const base: React.CSSProperties = {
+    height: 'var(--s-control-h, 36px)',
+    padding: '0 12px',
+    borderRadius: 'var(--s-radius, 8px)',
+    fontSize: 12,
+    fontWeight: variant === 'primary' ? 700 : 400,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    border: '1px solid var(--s-border, var(--border))',
+    transition: 'all 0.15s ease',
+  }
+  const variants: Record<string, React.CSSProperties> = {
+    primary: { background: 'var(--s-accent, var(--accent))', color: '#fff', borderColor: 'transparent' },
+    secondary: { background: 'var(--s-surface-2, var(--panel-2))', color: 'var(--s-fg-primary, var(--fg))' },
+    ghost: { background: 'transparent', color: 'var(--s-fg-secondary, var(--muted))', borderColor: 'transparent' },
+    danger: { background: 'rgba(255, 80, 80, 0.12)', color: 'var(--s-danger, #ff6b6b)', borderColor: 'rgba(255, 80, 80, 0.3)' },
+  }
+  const disabledStyle: React.CSSProperties = disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}
+  return (
+    <button
+      type={type}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+      style={{ ...base, ...variants[variant], ...disabledStyle, ...style }}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function Select({
+  value,
+  onChange,
+  children,
+  disabled = false,
+  style,
+  ariaLabel,
+}: {
+  value?: string
+  onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  children: React.ReactNode
+  disabled?: boolean
+  style?: React.CSSProperties
+  ariaLabel?: string
+}) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      style={{
+        ...inputStyle,
+        height: 'var(--s-control-h, 36px)',
+        appearance: 'none',
+        WebkitAppearance: 'none',
+        MozAppearance: 'none',
+        marginTop: 0,
+        ...style,
+      }}
+    >
+      {children}
+    </select>
+  )
+}
+
 export function SecretReferenceField({
   hasSecret,
   onReplace,

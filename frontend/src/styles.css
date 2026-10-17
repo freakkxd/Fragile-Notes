@@ -189,3 +189,28 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--fg);overf
 
 select { color: var(--fg); background: var(--panel-2); }
 select option { color: var(--fg); background: var(--panel-2); }
+
+/* Settings design system */
+:root {
+  --s-surface: var(--panel);
+  --s-surface-2: var(--panel-2);
+  --s-surface-soft: var(--panel-soft);
+  --s-border: var(--border);
+  --s-border-strong: var(--border-strong);
+  --s-fg-primary: var(--fg);
+  --s-fg-secondary: var(--muted);
+  --s-fg-disabled: rgba(230, 234, 246, 0.35);
+  --s-accent: var(--accent);
+  --s-accent-warn: var(--accent-warn);
+  --s-danger: #ff6b6b;
+  --s-success: #8bd5ca;
+  --s-radius-sm: 6px;
+  --s-radius: 8px;
+  --s-radius-lg: 12px;
+  --s-space-1: 4px;
+  --s-space-2: 8px;
+  --s-space-3: 12px;
+  --s-space-4: 16px;
+  --s-space-5: 24px;
+  --s-control-h: 36px;
+}
