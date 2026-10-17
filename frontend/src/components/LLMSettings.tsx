@@ -5,7 +5,10 @@ import {
   loadMode, saveMode, snapshotConfig, isDirty, isLocalKind, redactedDiagnostics,
   ollamaDiscoverErrorText,
 } from './settings/types'
-import { SectionCard, SettingRow, StatusBadge, SecretReferenceField, inputStyle } from './settings/controls'
+import {
+  SectionCard, Field, SettingRow, StatusBadge, SecretReferenceField, inputStyle,
+  Button, MenuSelect, Input, HelpText, Notice,
+} from './settings/controls'
 import { KNOWN_PROVIDER_KINDS, PERPLEXITY_PRESETS } from '../lib/llm'
 
 // Helper to open external URL (OAuth login)
@@ -510,55 +513,76 @@ export default function LLMSettings() {
           {section==='general' && (
             <SectionCard title="Быстрая настройка">
               <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                <SettingRow label="Провайдер">
-                  <select value={simpleProvider} onChange={e=>{
-                    const id = e.target.value
-                    setSimpleProvider(id)
-                    const p = cfg.providers.find(x => x.id===id)
-                    if (p) setSimpleModel(p.default_model || p.model || '')
-                  }} style={inputStyle}>
-                    {visibleProviders.map(p => <option key={p.id} value={p.id}>{p.name} ({p.kind})</option>)}
-                  </select>
-                </SettingRow>
-                <SettingRow label="Модель">
-                  <input value={simpleModel} onChange={e=>setSimpleModel(e.target.value)} placeholder="имя модели" style={inputStyle} />
-                </SettingRow>
+                <Field label="Провайдер">
+                  <MenuSelect
+                    ariaLabel="Провайдер"
+                    value={simpleProvider || null}
+                    onSelect={(id)=>{
+                      setSimpleProvider(id)
+                      const p = cfg.providers.find(x => x.id===id)
+                      if (p) setSimpleModel(p.default_model || p.model || '')
+                    }}
+                    placeholder="Провайдер не выбран"
+                    emptyText="Нет провайдеров в этой области"
+                    options={visibleProviders.map(p => ({ id: p.id, label: `${p.name} (${p.kind})` }))}
+                  />
+                </Field>
+                <Field label="Модель">
+                  <Input value={simpleModel} onChange={e=>setSimpleModel(e.target.value)} placeholder="имя модели" />
+                </Field>
               </div>
-              <div style={{display:'flex', gap:8, flexWrap:'wrap', alignItems:'center'}}>
-                <SettingRow label="Область">
-                  <select value={scopeFilter} onChange={e=>setScopeFilter(e.target.value as typeof scopeFilter)} style={inputStyle} aria-label="Фильтр провайдеров по области">
-                    <option value="all">Все</option>
-                    <option value="local">Локальные</option>
-                    <option value="cloud">Облачные</option>
-                  </select>
-                </SettingRow>
-                <div style={{fontSize:12, color:'var(--muted)'}}>
+              <div style={{display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-start'}}>
+                <Field label="Область" style={{ flex:'0 0 auto', minWidth:160 }}>
+                  <MenuSelect
+                    ariaLabel="Фильтр провайдеров по области"
+                    value={scopeFilter}
+                    onSelect={(id)=>setScopeFilter(id as typeof scopeFilter)}
+                    options={[
+                      { id: 'all', label: 'Все' },
+                      { id: 'local', label: 'Локальные' },
+                      { id: 'cloud', label: 'Облачные' },
+                    ]}
+                  />
+                </Field>
+                <HelpText style={{ alignSelf:'center' }}>
                   {simpleProv ? <>Область: <b>{isLocalKind(simpleProv.kind) ? 'Локально' : 'Облако'}</b> · {simpleProv.enabled ? 'включён' : 'выключен'}</> : 'Провайдер не выбран'}
-                </div>
+                </HelpText>
               </div>
               {simpleProv && <StatusBadge state={simpleProv.enabled ? 'unknown' : 'off'} />}
-              <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                <button onClick={()=>{
+              <div style={{display:'flex', gap:8, flexWrap:'wrap', alignItems:'center'}}>
+                <Button onClick={()=>{
                   if(simpleProv){ setSimpleModel(simpleProv.default_model || simpleProv.model || ''); testProvider(simpleProv.id) }
-                }} style={{padding:'6px 12px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>Проверить подключение</button>
-                <span style={{fontSize:11, color:'var(--muted)', alignSelf:'center'}}>{simpleProv ? (cloudStatus[simpleProv.id] ?? '') : ''}</span>
+                }}>Проверить подключение</Button>
+                <HelpText>{simpleProv ? (cloudStatus[simpleProv.id] ?? '') : ''}</HelpText>
               </div>
-              <div style={{fontSize:11, color:'var(--muted)'}}>Локальные данные не покидают машину. Облачные провайдеры требуют ключа в keyring и явного согласия.</div>
+              <HelpText>Локальные данные не покидают машину. Облачные провайдеры требуют ключа в keyring и явного согласия.</HelpText>
             </SectionCard>
           )}
 
           {section==='providers' && (
             <>
-              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                 <strong style={{fontSize:13}}>Провайдеры ({visibleProviders.length})</strong>
-                <select value={scopeFilter} onChange={e=>setScopeFilter(e.target.value as typeof scopeFilter)} style={{...inputStyle, width:'auto', marginTop:0}} aria-label="Фильтр">
-                  <option value="all">Все</option><option value="local">Локальные</option><option value="cloud">Облачные</option>
-                </select>
+                <MenuSelect
+                  ariaLabel="Фильтр"
+                  value={scopeFilter}
+                  onSelect={(id)=>setScopeFilter(id as typeof scopeFilter)}
+                  options={[
+                    { id:'all', label:'Все' },
+                    { id:'local', label:'Локальные' },
+                    { id:'cloud', label:'Облачные' },
+                  ]}
+                  style={{ width:'auto' }}
+                />
                 {mode !== 'simple' && (
-                  <select defaultValue="" onChange={e=>{ if(e.target.value) addProvider(e.target.value); e.target.value='' }} style={{...inputStyle, width:'auto', marginTop:0}} aria-label="Добавить провайдера">
-                    <option value="" disabled>+ Добавить</option>
-                    {KNOWN_PROVIDER_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
-                  </select>
+                  <MenuSelect
+                    ariaLabel="Добавить провайдера"
+                    value=""
+                    onSelect={(id)=>{ if(id) { addProvider(id) } }}
+                    placeholder="+ Добавить"
+                    options={KNOWN_PROVIDER_KINDS.map(k => ({ id: k, label: k }))}
+                    style={{ width:'auto' }}
+                  />
                 )}
               </div>
               {visibleProviders.length === 0 && <div style={{fontSize:12, color:'var(--muted)'}}>Нет провайдеров в этой области.</div>}
@@ -575,7 +599,7 @@ export default function LLMSettings() {
                   {selectedProvider===p.id && (
                     <div style={{display:'flex', flexDirection:'column', gap:8, marginTop:8}}>
                       <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                        <SettingRow label="Название"><input value={p.name} onChange={e=>patchProvider(p.id,{name:e.target.value})} style={inputStyle} /></SettingRow>
+                        <SettingRow label="Название"><Input value={p.name} onChange={e=>patchProvider(p.id,{name:e.target.value})} /></SettingRow>
                         <SettingRow label="Включён">
                           <label style={{display:'flex', gap:6, alignItems:'center', fontSize:12, marginTop:4}}>
                             <input type="checkbox" checked={p.enabled} onChange={e=>patchProvider(p.id,{enabled:e.target.checked})} /> вкл
@@ -583,9 +607,9 @@ export default function LLMSettings() {
                         </SettingRow>
                       </div>
                       {(mode==='default' || mode==='expert') && (
-                      <SettingRow label="Endpoint" hint="Политика: cloud — только https, local — только loopback">
-                        <input value={p.endpoint || p.api_url || ''} onChange={e=>{ patchProvider(p.id,{endpoint:e.target.value}); invalidateDiscovery(p.id) }} placeholder={apiUrlPlaceholder(p.kind)} style={inputStyle} />
-                      </SettingRow>
+                        <Field label="Endpoint" hint="Политика: cloud — только https, local — только loopback">
+                          <Input value={p.endpoint || p.api_url || ''} onChange={e=>{ patchProvider(p.id,{endpoint:e.target.value}); invalidateDiscovery(p.id) }} placeholder={apiUrlPlaceholder(p.kind)} />
+                        </Field>
                       )}
                       {mode==='expert' && (
                         <>
@@ -593,9 +617,9 @@ export default function LLMSettings() {
                           <SettingRow label="Scope & privacy">
                             <span style={{fontSize:11, color:'var(--muted)'}}>Область: <b>{isLocalKind(p.kind) ? 'local' : 'cloud'}</b> · local-only задачи блокируют cloud</span>
                           </SettingRow>
-                          <SettingRow label="Model mapping">
-                            <input value={p.default_model || p.model || ''} onChange={e=>patchProvider(p.id,{default_model:e.target.value})} placeholder="remote model id" style={inputStyle} />
-                          </SettingRow>
+                          <Field label="Model mapping">
+                            <Input value={p.default_model || p.model || ''} onChange={e=>patchProvider(p.id,{default_model:e.target.value})} placeholder="remote model id" />
+                          </Field>
                           <SettingRow label="Capabilities">
                             <span style={{fontSize:11, color:'var(--muted)'}}>Chat · capabilities берутся из каталога моделей, не угадываются</span>
                           </SettingRow>
@@ -753,9 +777,9 @@ export default function LLMSettings() {
           {section==='runtime' && (
             <SectionCard title="llama.cpp — бинарь и рантайм">
               <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                <SettingRow label="Бинарь"><input value={cfg.local.binary_path} onChange={e=>setCfg({...cfg, local:{...cfg.local, binary_path:e.target.value}})} placeholder="llama-server / /usr/bin/llama-server" style={inputStyle} /></SettingRow>
-                <SettingRow label="Модели папка"><input value={cfg.local.models_dir} onChange={e=>setCfg({...cfg, local:{...cfg.local, models_dir:e.target.value}})} style={inputStyle} /></SettingRow>
-                <SettingRow label="Порт"><input type="number" value={cfg.local.port} onChange={e=>setCfg({...cfg, local:{...cfg.local, port: Number(e.target.value)}})} style={inputStyle} /></SettingRow>
+                <Field label="Бинарь"><Input value={cfg.local.binary_path} onChange={e=>setCfg({...cfg, local:{...cfg.local, binary_path:e.target.value}})} placeholder="llama-server / /usr/bin/llama-server" /></Field>
+                <Field label="Модели папка"><Input value={cfg.local.models_dir} onChange={e=>setCfg({...cfg, local:{...cfg.local, models_dir:e.target.value}})} /></Field>
+                <Field label="Порт"><Input type="number" value={cfg.local.port} onChange={e=>setCfg({...cfg, local:{...cfg.local, port: Number(e.target.value)}})} /></Field>
               </div>
               <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
                 <button onClick={scan} style={{padding:'6px 10px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12}}>🔍 Сканировать</button>
@@ -785,9 +809,20 @@ export default function LLMSettings() {
                   <strong style={{fontSize:12}}>{t.name}</strong>
                   <span style={{fontSize:11, color:'var(--muted)'}}>model: {t.model_ref || '—'}</span>
                   <label style={{fontSize:11, display:'flex', gap:4, alignItems:'center'}}>privacy
-                    <select value={t.privacy ?? ''} onChange={e=>setCfg({...cfg, task_profiles: cfg.task_profiles.map(x => x.id===t.id ? {...x, privacy: e.target.value as llm.TaskProfile['privacy']} : x)})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, color:'var(--fg)'}}>
-                      <option value="">—</option><option value="local_only">local_only</option><option value="cloud_allowed">cloud_allowed</option>
-                    </select>
+                    <MenuSelect
+                      ariaLabel="privacy"
+                      value={t.privacy ?? ''}
+                      onSelect={(id)=>{
+                        setCfg({...cfg, task_profiles: cfg.task_profiles.map(x => x.id===t.id ? {...x, privacy: id as llm.TaskProfile['privacy']} : x)})
+                      }}
+                      options={[
+                        { id:'', label:'—' },
+                        { id:'local_only', label:'local_only' },
+                        { id:'cloud_allowed', label:'cloud_allowed' },
+                      ]}
+                      small
+                      style={{ minWidth:140 }}
+                    />
                   </label>
                   {mode==='expert' && (
                     <>
@@ -952,7 +987,20 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
         <input value={editing.name} onChange={e=>setEditing({...editing, name:e.target.value})} placeholder="Название" style={{padding:'6px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8, color:'var(--fg)'}} />
         <input value={editing.description} onChange={e=>setEditing({...editing, description:e.target.value})} placeholder="Описание — чем пользуется юзер" style={{padding:'6px 8px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:8, color:'var(--fg)', fontSize:12}} />
         <div style={{display:'flex', gap:8, alignItems:'center'}}>
-          <label style={{fontSize:12}}>Триггер <select value={editing.trigger} onChange={e=>setEditing({...editing, trigger:e.target.value})} style={{marginLeft:6, padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)'}}><option value="manual">manual</option><option value="on_save">on_save</option><option value="scheduled">scheduled</option></select></label>
+          <label style={{fontSize:12}}>Триггер
+            <MenuSelect
+              ariaLabel="Триггер"
+              value={editing.trigger}
+              onSelect={(id)=>setEditing({...editing, trigger:id})}
+              options={[
+                { id:'manual', label:'manual' },
+                { id:'on_save', label:'on_save' },
+                { id:'scheduled', label:'scheduled' },
+              ]}
+              small
+              style={{ minWidth:140, marginLeft:6 }}
+            />
+          </label>
           <label style={{fontSize:12, display:'flex', gap:6, alignItems:'center'}}><input type="checkbox" checked={editing.enabled} onChange={e=>setEditing({...editing, enabled:e.target.checked})} /> вкл</label>
         </div>
 
@@ -963,11 +1011,16 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
               <input value={s.name} onChange={e=>{
                 const ns=[...editing.steps]; ns[idx]={...s, name:e.target.value}; setEditing({...editing, steps:ns})
               }} style={{padding:'4px 6px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, minWidth:120}} />
-              <select value={s.provider_id} onChange={e=>{
-                const ns=[...editing.steps]; ns[idx]={...s, provider_id:e.target.value}; setEditing({...editing, steps:ns})
-              }} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, color:'var(--fg)'}}>
-                {providers.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <MenuSelect
+                ariaLabel="Провайдер шага"
+                value={s.provider_id}
+                onSelect={(id)=>{
+                  const ns=[...editing.steps]; ns[idx]={...s, provider_id:id}; setEditing({...editing, steps:ns})
+                }}
+                options={providers.map(p=> ({ id:p.id, label:p.name }))}
+                small
+                style={{ minWidth:160 }}
+              />
               <input value={s.model} onChange={e=>{
                 const ns=[...editing.steps]; ns[idx]={...s, model:e.target.value}; setEditing({...editing, steps:ns})
               }} placeholder="модель (пусто=default)" style={{padding:'4px 6px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12, width:140}} />
@@ -981,9 +1034,14 @@ function PipelineTab({pipelines, providers, pipelineInput, setPipelineInput, pip
           ))}
           <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
             <input value={newStep.name as string ?? ''} onChange={e=>setNewStep({...newStep, name:e.target.value})} placeholder="имя шага" style={{padding:'4px 6px', background:'rgba(0,0,0,.25)', border:'1px solid var(--border)', borderRadius:6, color:'var(--fg)', fontSize:12}} />
-            <select value={newStep.provider_id as string} onChange={e=>setNewStep({...newStep, provider_id:e.target.value})} style={{padding:'4px 6px', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:12, color:'var(--fg)'}}>
-              {providers.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <MenuSelect
+              ariaLabel="Провайдер нового шага"
+              value={newStep.provider_id as string}
+              onSelect={(id)=>setNewStep({...newStep, provider_id:id})}
+              options={providers.map(p=> ({ id:p.id, label:p.name }))}
+              small
+              style={{ minWidth:160 }}
+            />
             <button onClick={()=>{
               if(!newStep.name) return
               const id='s'+Math.random().toString(36).slice(2,5)
