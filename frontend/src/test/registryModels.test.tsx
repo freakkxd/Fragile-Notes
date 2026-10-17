@@ -138,6 +138,8 @@ describe('registry_empty_shows_scan_hint', () => {
     render(<AIChatFull />)
     await screen.findByLabelText('Провайдер')
     expect(await screen.findByText(/Сканировать реестр/)).toBeTruthy()
+    // Chip stays compact; the full instruction lives in a separate readable line.
+    expect(screen.getByText('Нет моделей')).toBeTruthy()
     await user.type(screen.getByPlaceholderText('Сообщение провайдеру…'), 'hi')
     await user.click(screen.getByRole('button', { name: 'Отправить' }))
     // Banner uses a colon; the header hint uses an em dash.

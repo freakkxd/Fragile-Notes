@@ -27,6 +27,9 @@ export const inputStyle: React.CSSProperties = {
   borderRadius: 8,
   color: 'var(--fg)',
   fontSize: 12,
+  appearance: 'none',
+  WebkitAppearance: 'none',
+  MozAppearance: 'none',
 }
 
 export function StatusBadge({ state }: { state: 'ready' | 'unknown' | 'error' | 'testing' | 'off' }) {

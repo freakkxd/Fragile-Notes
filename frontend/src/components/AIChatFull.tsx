@@ -465,7 +465,7 @@ export default function AIChatFull() {
     if (isLocal) {
       if (!registryLoaded) return <span className="ai-chip">Загрузка моделей…</span>
       if (eligible.length === 0) {
-        return <span className="ai-chip">Нет установленных моделей — откройте настройки → Модели и нажмите «Сканировать реестр».</span>
+        return <span className="ai-chip">Нет моделей</span>
       }
       return (
         <ComposerMenu ariaLabel="Модель" options={eligible.map((r) => ({ id: r.id, label: r.filename }))} value={model} onSelect={setModel}>
@@ -478,6 +478,8 @@ export default function AIChatFull() {
       <input className="ai-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="модель (пусто = default провайдера)" aria-label="Модель" />
     )
   })()
+
+  const showRegistryHint = configState === 'ready' && isLocal && !isOllama && registryLoaded && eligible.length === 0
 
   return (
     <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
@@ -562,6 +564,11 @@ export default function AIChatFull() {
           </div>
         </div>
       </div>
+      {showRegistryHint && (
+        <div style={{ margin: '0 12px 8px', padding: '6px 8px', background: 'rgba(255,180,80,.06)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', overflowWrap: 'anywhere' }}>
+          Откройте настройки → Модели и нажмите «Сканировать реестр», чтобы установить локальные модели.
+        </div>
+      )}
       {pendingConsent && (
         <div role="dialog" aria-modal="true" aria-label="Согласие на отправку в облако" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
           <div style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:12, padding:16, maxWidth:460, width:'90%', fontSize:13, display:'flex', flexDirection:'column', gap:10 }}>
