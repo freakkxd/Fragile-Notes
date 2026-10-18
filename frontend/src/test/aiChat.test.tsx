@@ -234,4 +234,3 @@ test('local provider with no registry models shows compact empty state', async (
   // basic smoke
   expect(queryByText('AI Чат')).toBeTruthy()
 })
-
