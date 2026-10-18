@@ -1,86 +1,319 @@
-# Fragile Notes — v0.5.8 (Local AI Embeddings and RAG Foundation)
+<div align="center">
 
-> **Подпись v0.5.6 — почему отделили эту версию:**
-> - **Сделано в 0.5.5:** `LLM Hub` прототип с `base64` ключами, `extra_args String`, `blocking reqwest`, `single active_model`, `fake download`.
-> - **Почему 0.5.6 отдельно:** **Foundation Fix P0** — контракт и миграции: `schema v2` `Provider/Model/RuntimeProfile/TaskProfile`, `atomic save + backup`, `keyring Standard` без `base64`, `typed LlamaSettings`, `async Gateway + RuntimeManager (N=1 task-exclusive)`, `real connection test`, `privacy guard`, `fake download → NotImplemented`. Без новых фич — стабилизация.
-> - **Цель 0.5.6:** не потерять настройки и ключи при миграции, единый транспорт, фундамент для `P1`.
+# Fragile Notes
 
-> **Подпись v0.5.7 — почему отделили эту версию от v0.5.6:**
-> - **Сделано в P1.1–P1.6:** `Runtime Core`, `Health+Logs`, `Executable Resolver`, `TaskExecutor`, `Model Registry`, `Downloader` (bytes/installer/registry). P0 дал контракт, P1 дал локальный lifecycle, но без реального E2E не было гарантии, что `ResolvedModel.path` попадёт в `spawn`.
-> - **Почему 0.5.7 отдельно:** ручной E2E с реальной GGUF `Qwen2-0.5B` (397M) выявил 3 бага: `spawn --model` как forbidden, `single-flight Ready` hang, `executor` возвращал `profile_id` вместо `runtime_id` и `Missing`/`Changed` для >50MB. Исправлено и покрыто 60 тестами.
-> - **Цель 0.5.7:** зафиксировать проверенный локальный цикл `scan → registry → ResolvedModel → RuntimeManager --model → Ready → Gateway → Stop` как релиз, без embeddings.
+### Твои заметки. Твои модели. Твои данные.
 
-**Obsidian-like vault.** `Task Manager v2` + `Tauri` `C++` + `LLM Hub v2` + `local AI search и RAG foundation (v0.5.8)`.
+Локальное рабочее пространство для заметок, задач и AI.<br />
+Создаём второй мозг, который не просто хранит информацию — помогает с ней работать.
 
-## Быстрый старт
-```bash
-git clone https://github.com/freakkxd/Fragile-Notes.git
-cargo tauri dev
-# 🧠 Нейросети — теперь с keyring и typed llama.cpp
-# P1.6: scan → registry → TaskProfile → ResolvedModel → RuntimeManager → Gateway
-```
+[Скачать приложение](https://github.com/freakkxd/Fragile-Notes/releases/latest) · [Что нового](CHANGELOG.md) · [Обратная связь](https://github.com/freakkxd/Fragile-Notes/issues)
 
-## P1.6 E2E gate (ручной, обязателен перед embeddings)
+![Status](https://img.shields.io/badge/status-active_development-blue)
+![Version](https://img.shields.io/badge/release-v0.5.8-informational)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Используй GGUF 1–4 GB, проверь полный цикл (`docs/E2E-P1.6-report.md`):
-`scan → registry → TaskProfile.model_id → ResolvedModel.path → RuntimeProfile → RuntimeManager --model <path> → health Starting→Loading→Ready → Gateway chat → Stop`
-- `.part` **не** Present; `part → checksum → GGUF parse → atomic rename → Present`
-- `Changed` → `ModelUnavailable` без spawn; `tr '\0' ' ' </proc/<pid>/cmdline` должен содержать `--model <ResolvedModel.path>`
-- Pausing оставляет `.part`, resume работает; `Downloading/Installing → Paused` после рестарта
+</div>
 
-См. `docs/E2E-P1.6-report.md`.
+---
 
-## Версионирование
-- `v0.5.3` — фикс `tauri.conf` bundle
-- `v0.5.4` — оптимизация RAM `lazy + reuse`
-- `v0.5.5` — LLM Hub прототип
-- `v0.5.6` — **Foundation P0: schema v2 + keyring + Gateway + RuntimeManager**
-- `v0.5.7` — **P1 local model lifecycle: scan → registry → ResolvedModel → RuntimeManager → Ready → Gateway** (E2E пройден)
-- `v0.5.8` — **Local AI Embeddings and RAG Foundation** (текущий релиз)
+## Что такое Fragile Notes?
 
-## Latest release
+Fragile Notes объединяет Markdown-заметки, управление задачами и инструменты работы с нейросетями в одном локальном приложении.
 
-[Fragile Notes v0.5.8](https://github.com/freakkxd/Fragile-Notes/releases/tag/v0.5.8)
+Сегодня это приложение в активной разработке: локальное хранилище, Task Manager и LLM Hub с инфраструктурой embeddings, AI-поиска и RAG.
 
-v0.5.8 — Local AI Embeddings and RAG Foundation: управляемый lifecycle локальных моделей, embeddings pipeline, lexical/semantic/hybrid search и безопасный bounded RAG context. RAG foundation с lexical E2E, mock-покрытием semantic path и поддержкой OpenAI-compatible embedding provider.
+Наша цель — персональный второй мозг, который помогает разбирать входящие, находить важное, связывать новые знания с уже сохранёнными и превращать информацию в действия.
 
-### Установка
+Без обязательной отправки всего хранилища в облако. С возможностью выбирать локальные модели или подключать внешних AI-провайдеров.
 
-Linux (AppImage):
+> **Текущий релиз: v0.5.8 — Local AI Embeddings and RAG Foundation.**
+>
+> Это foundation-релиз, а не завершённая система автономных агентов. Некоторые AI-компоненты уже реализованы в backend, но пока не доступны через полноценный пользовательский интерфейс.
+
+## Что доступно сейчас
+
+### Заметки и задачи
+
+- Локальное Markdown-хранилище.
+- Работа с заметками и папками.
+- Task Manager v2 для организации задач.
+- Desktop-приложение для Linux и Windows.
+
+### LLM Hub
+
+- Настройка провайдеров, моделей, runtime-профилей и профилей AI-задач.
+- Запуск локальных GGUF-моделей через совместимый `llama-server`.
+- Сканирование моделей и реестр их состояния.
+- Управляемый lifecycle: запуск, проверка готовности, запросы и остановка.
+- Загрузка моделей с паузой, продолжением и проверкой контрольной суммы.
+- Восстановление состояния незавершённых загрузок после перезапуска.
+- Системный keyring для хранения API-ключей.
+- Политики приватности для профилей задач.
+
+### AI Search & RAG Foundation
+
+В backend реализована основа для:
+
+- Разбиения Markdown-документов на фрагменты.
+- Построения и локального хранения embeddings.
+- Lexical, semantic и hybrid search.
+- Формирования ограниченного по объёму RAG-контекста.
+- Работы с OpenAI-compatible embedding endpoints.
+
+Локальный semantic E2E проверен с `nomic-embed-text-v1.5` и `llama-server --embedding`.
+
+> Наличие компонента в backend не означает, что для него уже готов отдельный экран или пользовательский сценарий. Подключение AI-поиска и RAG к повседневной работе — одно из направлений следующих обновлений.
+
+## Установка
+
+### Linux x86_64
+
+| Формат | Скачать |
+|---|---|
+| AppImage | [fragile-notes_0.5.8_amd64.AppImage](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.AppImage) |
+| DEB | [fragile-notes_0.5.8_amd64.deb](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.deb) |
+
+Запуск AppImage:
 
 ```bash
 chmod +x fragile-notes_0.5.8_amd64.AppImage
 ./fragile-notes_0.5.8_amd64.AppImage
 ```
 
-- [Download AppImage](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.AppImage)
-- [Download .deb](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/fragile-notes_0.5.8_amd64.deb) (`sudo apt install ./fragile-notes_0.5.8_amd64.deb`)
+Установка DEB:
 
-Windows:
+```bash
+sudo apt install ./fragile-notes_0.5.8_amd64.deb
+```
 
-- [Fragile.Notes_0.5.8_x64-setup.exe](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64-setup.exe)
-- [Fragile.Notes_0.5.8_x64_en-US.msi](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_en-US.msi)
-- [Fragile.Notes_0.5.8_x64_ru-RU.msi](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_ru-RU.msi)
+### Windows x64
 
-Платформы: Linux x86_64, Windows x64. macOS и ARM builds отсутствуют. `updater.json` в assets — только update metadata, не installer.
+| Формат | Скачать |
+|---|---|
+| EXE | [Установщик Windows](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64-setup.exe) |
+| MSI — English | [Windows MSI — en-US](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_en-US.msi) |
+| MSI — Русский | [Windows MSI — ru-RU](https://github.com/freakkxd/Fragile-Notes/releases/download/v0.5.8/Fragile.Notes_0.5.8_x64_ru-RU.msi) |
 
-### Локальный AI setup
+Сборки для macOS и ARM пока не выпускаются.
 
-1. Установить или собрать совместимый `llama-server`.
-2. Открыть LLM settings в Fragile Notes и указать runtime executable.
-3. Просканировать GGUF models, выбрать model/task profile.
-4. Для embeddings использовать отдельную embedding-capable модель с поддерживаемым `/v1/embeddings` endpoint (проверено: `nomic-embed-text-v1.5` GGUF + `llama-server --embedding`, 768 dims).
-5. Credentials для cloud providers хранить только через системный keyring.
+`updater.json` в файлах релиза содержит метаданные обновления и не является установщиком.
 
-> Chat model не обязательно является embedding model. Для semantic search нужна embedding-capable модель и поддерживаемый `/v1/embeddings` endpoint.
+## Настройка локального AI
 
-> 🔒 Privacy: API keys хранятся только в системном keyring и никогда не попадают в config, logs, frontend state или export. Проверяйте `TaskProfile` privacy перед облачными вызовами.
+1. Установи или собери совместимый `llama-server`.
+2. Открой LLM Settings в Fragile Notes.
+3. Укажи путь к runtime executable.
+4. Просканируй папку с GGUF-моделями.
+5. Выбери модель и настрой runtime / task profile.
+6. Запусти модель и проверь подключение.
 
-### Ограничения
+### Модели для embeddings
 
-> ⚠️ v0.5.8 — foundation-релиз. Semantic E2E подтверждён локально (Stage 1: `nomic-embed-text-v1.5` Q4_K_M, 768 dims, `llama-server --embedding` — см. `docs/E2E-Stage1-embeddings-report.md`); production cloud E2E не подтверждён. Отсутствуют: streaming UI, OAuth, tools/agents, reranker, sqlite-vec, query rewriting, background indexing, on-save/scheduled pipelines, parallel runtimes, удаление моделей через UI, vision/audio workflows.
+Chat-модель не обязательно поддерживает embeddings. Для semantic search потребуется embedding-capable модель и совместимый `/v1/embeddings` endpoint.
 
-Детали — [CHANGELOG.md](CHANGELOG.md) (раздел `[0.5.8]`) и [GitHub Release](https://github.com/freakkxd/Fragile-Notes/releases/tag/v0.5.8).
+Проверенная конфигурация:
+
+```text
+Runtime: llama-server --embedding
+Model: nomic-embed-text-v1.5 GGUF
+Quantization: Q4_K_M
+Embedding dimensions: 768
+```
+
+Отчёты о проверках:
+
+- [Local model lifecycle E2E](docs/E2E-P1.6-report.md)
+- [Local embeddings E2E](docs/E2E-Stage1-embeddings-report.md)
+
+## Приватность и контроль
+
+Fragile Notes строится вокруг локального хранения и явного выбора AI-провайдера.
+
+- Заметки хранятся локально в Markdown-файлах.
+- API-ключи сохраняются через системный keyring, а не открытым текстом в конфигурации.
+- Профили задач определяют допустимость облачных AI-вызовов.
+- Для RAG используются ограничения объёма контекста и отделение извлечённых материалов от системных инструкций.
+
+При использовании облачной модели переданный ей текст обрабатывается внешним провайдером. Перед запросом проверь выбранную модель, профиль задачи и privacy-настройки.
+
+Локальное хранение само по себе не означает шифрование файлов на диске.
+
+## Что дальше
+
+Следующие разделы описывают планы, а не функции опубликованной v0.5.8. Порядок и состав обновлений могут меняться по результатам тестирования и обратной связи.
+
+### Ближайший этап — v0.6.0
+
+Следующий релиз посвящён локальному рабочему пространству:
+
+- Доработке интерфейса и навигации.
+- Расширению возможностей редактора и управления заметками.
+- Работе с вкладками, панелями и сохранением рабочего пространства.
+- Развитию локальных инструментов организации знаний.
+- Исправлению ошибок и проверке существующих AI-сценариев.
+- Стабилизации сборки перед публикацией.
+
+Точный состав v0.6.0 будет зафиксирован после проверки текущей development-ветки.
+
+### AI, который работает с твоими знаниями
+
+Планируем сделать существующую AI-инфраструктуру доступнее:
+
+- Управление индексацией хранилища из интерфейса.
+- Semantic и hybrid search в повседневном поиске.
+- Ответы по заметкам с указанием источников.
+- Более удобный AI-чат и потоковый вывод ответов.
+- Выбор файлов и папок, доступных конкретной AI-задаче.
+
+### Единый Inbox
+
+Планируем подключение основных потоков информации:
+
+- YouTube.
+- Электронная почта.
+- Telegram.
+
+Цель — собирать входящие в одном месте и помогать пользователю:
+
+- Выделять важные сообщения и материалы.
+- Получать короткие дайджесты.
+- Раскладывать информацию по папкам.
+- Создавать задачи из входящих.
+- Готовить черновики ответов.
+- Находить новое относительно уже сохранённых знаний.
+
+Доступность конкретных сценариев будет зависеть от разрешений источника, возможностей интеграции и выбранной модели.
+
+### Пользовательские AI-пайплайны
+
+У разных людей разные задачи. Поэтому Fragile Notes должен позволять создавать собственные сценарии, а не ограничиваться набором готовых кнопок.
+
+В планах:
+
+- Удобный редактор пайплайнов.
+- Помощь AI при составлении сценария.
+- Ручной запуск, расписания и событийные триггеры.
+- История выполнения, диагностика и повторные запуски.
+- Готовые шаблоны для типовых задач.
+
+Примеры сценариев:
+
+| Сценарий | Ожидаемый результат |
+|---|---|
+| Входящие от клиентов | Приоритетный список потенциально заинтересованных покупателей и черновики ответов |
+| Мониторинг вакансий | Подборка предложений под навыки и предпочтения пользователя |
+| Исследование ниши | Дайджест новых материалов, тем и наблюдений со ссылками на источники |
+| Личный утренний брифинг | Важные входящие, актуальные задачи и предложенные следующие действия |
+| Обработка видео и подкастов | Транскрипт, краткое содержание и заметки по теме |
+
+AI-оценки будут оставаться рекомендациями, а не гарантией достоверности, коммерческого результата или полноты мониторинга. Отправка сообщений и другие чувствительные действия должны оставаться под контролем пользователя.
+
+### Аккаунты, синхронизация и удалённый доступ
+
+В дальнейших планах:
+
+- Пользовательские аккаунты.
+- Синхронизация заметок и настроек между устройствами.
+- Опциональное облачное хранение vault.
+- Единый Telegram-бот для создания заметок, отправки ссылок и управления пайплайнами.
+- Управление доступом к данным и понятные настройки приватности.
+
+Локальное использование остаётся основой продукта; облачные возможности планируются как дополнительный слой.
+
+### Личная организация и мультимедиа
+
+Также планируем:
+
+- Развитие Task Manager и Kanban.
+- Трекер привычек.
+- Учёт расходов.
+- Оценку калорийности еды по фотографии.
+- Расширение поддержки изображений, аудио, видео и документов.
+- Транскрипцию, OCR и голосовой ввод.
+
+Поддержка медиа будет расширяться по конкретным форматам. Оценка калорий по фото будет приблизительной и потребует возможности ручной корректировки.
+
+### Платформы и развитие продукта
+
+На пути к v1.0:
+
+- Улучшение Windows-версии.
+- Приложения для Android и iOS.
+- Сайт с описанием возможностей, регистрацией и управлением подпиской.
+- Подписки и оплата облачных AI-возможностей через приложение.
+
+Состав тарифов, лимиты и способы оплаты пока не определены.
+
+## Ограничения v0.5.8
+
+В опубликованном релизе пока отсутствуют:
+
+- Streaming UI и OAuth.
+- Полноценные AI-агенты и tools.
+- Фоновая индексация.
+- Запуск pipelines по расписанию и при сохранении.
+- Reranker, query rewriting и sqlite-vec.
+- Параллельные локальные runtime.
+- Удаление моделей через интерфейс.
+- Vision- и audio-workflows.
+
+Production cloud E2E не подтверждён. Возможности development-веток могут отличаться от опубликованной версии.
+
+Перед использованием экспериментальных функций с важными данными сделай резервную копию хранилища.
+
+## Разработка
+
+Основные технологии: Rust, Tauri, React, TypeScript, CodeMirror и SQLite.
+
+Для запуска нужны Rust toolchain, Node.js, Tauri CLI и системные зависимости Tauri для твоей ОС.
+
+```bash
+git clone [https://github.com/freakkxd/Fragile-Notes.git](https://github.com/freakkxd/Fragile-Notes.git)
+cd Fragile-Notes
+
+npm --prefix frontend ci
+cargo tauri dev
+```
+
+### Проверки
+
+```bash
+# Frontend
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+
+# Backend
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+## История проекта
+
+| Версия | Основное изменение |
+|---|---|
+| 0.5.5 | Прототип LLM Hub |
+| 0.5.6 | Foundation P0: schema v2, миграции, keyring, async Gateway и RuntimeManager |
+| 0.5.7 | Проверенный на реальной GGUF-модели локальный lifecycle и E2E-исправления |
+| 0.5.8 | Embeddings, поисковая инфраструктура и RAG Foundation |
+
+Подробности — в [CHANGELOG.md](CHANGELOG.md).
+
+## Обратная связь
+
+Fragile Notes развивается как независимый open-source проект. Баг-репорты, понятные сценарии использования и обратная связь помогают выбирать следующие приоритеты.
+
+[Сообщить об ошибке или предложить функцию](https://github.com/freakkxd/Fragile-Notes/issues)
+
+В баг-репорте укажи:
+
+- Версию приложения и ОС.
+- Шаги воспроизведения.
+- Ожидаемое и фактическое поведение.
+- Логи или скриншоты, если они помогают разобраться.
+
+Не публикуй API-ключи, токены, личную переписку и содержимое приватных заметок.
 
 ## Лицензия
-MIT — `LICENSE`
+
+Проект распространяется по лицензии [MIT](LICENSE).
